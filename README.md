@@ -214,6 +214,35 @@ A `Discount` is built by server-side code that looked something up, never from i
 clamps it anyway: it cannot exceed the total and cannot be negative, because a bug upstream should
 cost a wrong price, not a payment the provider rejects.
 
+## What an invoice will need
+
+Two facts are recorded at checkout because they cannot be recovered afterwards.
+
+**The buyer's country**, frozen on the payment — not a reference to a customer record that changes
+later. Pass it in the buyer array; it is normalised to ISO 3166-1 alpha-2 and anything else is
+dropped rather than stored, because a wrong VAT rate looks like an answer:
+
+```php
+app(Checkout::class)->start(['kurs'], [
+    'email' => 'wer@example.com',
+    'country' => 'AT',
+]);
+```
+
+If the checkout has no country, the provider fills the gap at fulfilment wherever it recorded one —
+`country_source` then names the provider instead of `checkout`. That distinction matters: the EU
+asks for two non-contradictory pieces of evidence for a consumer's location, and "the card issuer
+said so" is worth more than "somebody typed it".
+
+**The discount, per line.** A payment records one discount amount; an invoice has to place it across
+lines that may sit at different VAT rates. Sheet music at 7%, a course at 19%, one voucher across
+both — from the total alone that split is unrecoverable. `payment_items.discount_cent` carries it,
+distributed proportionally to line value, with leftover cents going to the largest lines first so
+the parts always add up to the whole.
+
+Existing rows keep `null` for the country and `0` for the line discounts. That is the honest state,
+and everything downstream has to tolerate it rather than guess.
+
 ## A subscription and the access it pays for
 
 With `statamic-entitlements` installed and `entitlements.enabled` on, a subscription keeps its grant

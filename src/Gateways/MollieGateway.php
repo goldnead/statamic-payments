@@ -140,6 +140,7 @@ class MollieGateway implements SubscriptionGateway
             status: $this->normalise((string) $payment->status),
             metadata: json_decode(json_encode($payment->metadata) ?: '{}', true) ?: [],
             email: $this->email($payment),
+            country: $this->country($payment),
         );
     }
 
@@ -169,6 +170,7 @@ class MollieGateway implements SubscriptionGateway
             status: $this->normalise((string) $payment->status),
             metadata: json_decode(json_encode($payment->metadata) ?: '{}', true) ?: [],
             email: $this->email($payment),
+            country: $this->country($payment),
             // Present only on a payment Mollie made on its own, on a rhythm.
             subscriptionId: isset($payment->subscriptionId) && $payment->subscriptionId
                 ? (string) $payment->subscriptionId
@@ -215,6 +217,30 @@ class MollieGateway implements SubscriptionGateway
         ] as $candidate) {
             if (is_string($candidate) && $candidate !== '') {
                 return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The buyer's country, wherever Mollie happens to record it.
+     *
+     * Different payment methods put it in different places: a card carries the
+     * issuer's country, a bank transfer the account's, iDEAL implies NL. This
+     * reads the ones that exist and returns nothing rather than guessing —
+     * a wrong country produces a wrong VAT rate, which looks like an answer.
+     */
+    protected function country(mixed $payment): ?string
+    {
+        foreach ([
+            $payment->details->cardCountryCode ?? null,
+            $payment->details->consumerCountryCode ?? null,
+            $payment->details->countryCode ?? null,
+            $payment->billingAddress->country ?? null,
+        ] as $kandidat) {
+            if (is_string($kandidat) && preg_match('/^[A-Za-z]{2}$/', $kandidat) === 1) {
+                return strtoupper($kandidat);
             }
         }
 

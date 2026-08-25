@@ -19,6 +19,8 @@ use Illuminate\Support\Carbon;
  * @property string $status
  * @property string|null $email
  * @property string|null $name
+ * @property string|null $country
+ * @property string|null $country_source
  * @property array<string, mixed>|null $meta
  * @property Carbon|null $fulfilled_at
  * @property Carbon|null $failed_notified_at

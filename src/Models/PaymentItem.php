@@ -15,6 +15,7 @@ use Illuminate\Support\Carbon;
  * @property string $name
  * @property int $amount_cent
  * @property int $quantity
+ * @property int $discount_cent
  * @property string $kind
  * @property array<string, mixed>|null $meta
  * @property Carbon|null $created_at

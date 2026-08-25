@@ -78,7 +78,19 @@ class Checkout
                 'status' => Payment::STATUS_INITIATED,
                 'email' => $buyer['email'] ?? null,
                 'name' => $buyer['name'] ?? null,
+                // Eingefroren, nicht verwiesen. Der Steuersatz haengt am Land
+                // des Kaeufers zum Zeitpunkt der Leistung, und eine Adresse,
+                // die sich spaeter aendert, macht eine alte Rechnung falsch.
+                // Fehlt es hier, traegt der Anbieter es spaeter nach.
+                'country' => self::country($buyer['country'] ?? null),
+                'country_source' => isset($buyer['country']) ? 'checkout' : null,
             ]);
+
+            // Der Rabatt, aufgeteilt. Ein Betrag auf der Zahlung reicht nicht:
+            // liegen die Zeilen auf verschiedenen Steuersaetzen, ist aus einer
+            // Zahl nicht ableitbar, welcher Teil auf welchen Satz faellt, und
+            // die Rechnung wird unbestimmt statt erkennbar falsch.
+            $anteile = DiscountSplit::across($lines, $off);
 
             foreach ($lines as $index => $line) {
                 PaymentItem::create([
@@ -89,6 +101,7 @@ class Checkout
                     'name' => $line['name'],
                     'amount_cent' => $line['amount_cent'],
                     'quantity' => $line['quantity'],
+                    'discount_cent' => $anteile[$index] ?? 0,
                     'kind' => $index === 0 ? PaymentItem::KIND_PRIMARY : PaymentItem::KIND_BUMP,
                 ]);
             }
@@ -157,6 +170,27 @@ class Checkout
      * — which is fine for a demo and wrong for production, so the config comment
      * says so.
      */
+
+    /**
+     * A country code, or nothing.
+     *
+     * Two letters, upper case, ISO 3166-1 alpha-2 — the shape every tax rule
+     * and every provider speaks. Anything else is dropped rather than stored:
+     * a column that sometimes holds "Deutschland", sometimes "DE" and sometimes
+     * "de" is a column nobody can compute a rate from, and the wrong rate is
+     * worse than a missing one because it looks like an answer.
+     */
+    private static function country(mixed $wert): ?string
+    {
+        if (! is_string($wert)) {
+            return null;
+        }
+
+        $wert = strtoupper(trim($wert));
+
+        return preg_match('/^[A-Z]{2}$/', $wert) === 1 ? $wert : null;
+    }
+
     protected function webhookUrl(): ?string
     {
         $konfiguriert = config('statamic-payments.webhook_url');

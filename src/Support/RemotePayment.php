@@ -30,6 +30,16 @@ final readonly class RemotePayment
          * nobody is paying for.
          */
         public ?string $subscriptionId = null,
+        /**
+         * The buyer's country, as the provider recorded it.
+         *
+         * Worth more than what somebody typed in a form: it comes from the
+         * card issuer or the bank, which is one of the two non-contradictory
+         * pieces of evidence the EU asks for on a digital sale to a consumer.
+         * Only ever used to fill a gap — a country already frozen at checkout
+         * is not overwritten, because an invoice must not change after the fact.
+         */
+        public ?string $country = null,
     ) {}
 
     public function isPaid(): bool

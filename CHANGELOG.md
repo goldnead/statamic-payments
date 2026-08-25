@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.9.0
+
+### What's new
+
+- **The two facts an invoice needs, recorded while they still exist.** Neither can be reconstructed
+  later, which is why they land here rather than in an invoicing addon: every real sale that happens
+  before this is a row that can never be invoiced correctly.
+
+  **`payments.country`** and `country_source` — the buyer's country, frozen at checkout, normalised
+  to ISO 3166-1 alpha-2. Anything else is dropped rather than stored: a column that holds
+  "Deutschland", "DE" and "de" is one nobody can compute a rate from, and a wrong rate looks like an
+  answer. Where the checkout has none, fulfilment fills the gap from the provider — which is the
+  better evidence anyway, since it comes from the card issuer.
+
+  **`payment_items.discount_cent`** — the share of the discount that fell on each line, distributed
+  proportionally to line value. From a single total, a voucher across a 7% line and a 19% line
+  cannot be split, and the invoice is then not visibly wrong but indeterminate. Rounding is a named
+  rule, not a hope: integer division, leftover cents to the largest lines first, so the parts always
+  add up to the whole. A percentage voucher and the amount it produces split identically — which is
+  what makes the rule safe to apply after the fact.
+
+  Existing rows keep `null` and `0`. That is the honest state.
+
 ## 1.8.0
 
 ### What's new

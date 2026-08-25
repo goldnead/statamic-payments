@@ -282,6 +282,22 @@ class Fulfilment
             $payment = $payment->fresh() ?? $payment;
         }
 
+        // Das Land, aber nur wenn keines da ist.
+        //
+        // Was der Anbieter sagt, ist der bessere Beleg — es kommt vom
+        // Kartenherausgeber oder der Bank und ist damit einer der zwei
+        // Nachweise, die die EU bei einer digitalen Leistung an Verbraucher
+        // verlangt. Ein bereits eingefrorenes Land wird trotzdem nicht
+        // ueberschrieben: eine Rechnung, die sich nachtraeglich aendert, ist
+        // keine.
+        if ($remote->country && ! $payment->country) {
+            $payment->forceFill([
+                'country' => $remote->country,
+                'country_source' => $payment->provider,
+            ])->save();
+            $payment = $payment->fresh() ?? $payment;
+        }
+
         if (! $payment->email) {
             // Paid, and nowhere to deliver to. Not a reason to refuse the
             // money, but a listener that delivers by mail is about to have

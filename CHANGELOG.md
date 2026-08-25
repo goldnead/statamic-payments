@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.4.0 — 2026-08-25
+
+### What's new
+
+- **A product may cost zero.** The provider is never called; the payment is marked paid and fulfilled
+  on the spot, through the same one-time claim and the same `PaymentPaid` event, so a listener that
+  grants access cannot tell the difference.
+- **`Discount`** — an optional fourth argument to `Checkout::start()`, for a total lower than its
+  lines. This addon still knows nothing about coupons: what a code is worth belongs to pricing, and
+  pricing lives in `statamic-offers`. What lives here is `discount_code` and `discount_cent` on the
+  payment, so an old receipt keeps saying what came off after the coupon has expired or changed.
+- The discount is clamped: never more than the total, never negative. A bug upstream should cost a
+  wrong price, not a payment the provider rejects.
+
+### Changed
+
+- `Catalogue::find()` now accepts `amount_cent => 0`. A **missing or mistyped** price is still
+  refused — `null`, a negative number and `'19,00'` all still return nothing. `0` is a statement;
+  those are mistakes, and a mistake must not become a giveaway. The test that asserted zero was
+  unsellable has been changed to say so, not deleted.
+
 ## 1.3.0
 
 ### What's new

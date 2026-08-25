@@ -4,7 +4,9 @@ namespace Goldnead\StatamicPayments;
 
 use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Gateways\MollieGateway;
+use Goldnead\StatamicPayments\Http\Controllers\Cp\PaymentsController;
 use Mollie\Api\MollieApiClient;
+use Statamic\Facades\Utility;
 use Statamic\Providers\AddonServiceProvider;
 
 class ServiceProvider extends AddonServiceProvider
@@ -13,6 +15,19 @@ class ServiceProvider extends AddonServiceProvider
 
     protected $routes = [
         'web' => __DIR__.'/../routes/web.php',
+    ];
+
+    /**
+     * The Control Panel bundle. All three values must byte-match `laravel()` in
+     * vite.config.js, or the CP loads a manifest that does not describe what is
+     * on disk.
+     *
+     * @var array<string, mixed>
+     */
+    protected $vite = [
+        'hotFile' => __DIR__.'/../dist/hot',
+        'publicDirectory' => 'dist',
+        'input' => ['resources/js/cp.js', 'resources/css/cp.css'],
     ];
 
     /**
@@ -51,6 +66,8 @@ class ServiceProvider extends AddonServiceProvider
     public function bootAddon()
     {
         $this->loadTranslationsFrom(__DIR__.'/../lang', 'statamic-payments');
+
+        $this->bootUtility();
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
 
         $this->publishes([
@@ -60,5 +77,36 @@ class ServiceProvider extends AddonServiceProvider
         $this->publishes([
             __DIR__.'/../database/migrations' => database_path('migrations'),
         ], 'statamic-payments-migrations');
+    }
+
+    /**
+     * One screen, registered as a utility.
+     *
+     * Registering here earns the nav entry, the `access payments utility`
+     * permission and the matching `can:` middleware from core. Hand-rolling a
+     * nav entry means writing each of those out, and the permission is the part
+     * people forget — on a screen that lists who bought what.
+     */
+    protected function bootUtility(): self
+    {
+        // Registered inside `Utility::extend`, not straight in boot. `__()`
+        // during boot resolves before core's `Localize` middleware has set the
+        // user's language, so the title and description would freeze in the
+        // application locale: an English nav entry above an otherwise German
+        // screen.
+        Utility::extend(fn () => $this->registerUtility());
+
+        return $this;
+    }
+
+    protected function registerUtility(): void
+    {
+        Utility::register('payments')
+            ->action([PaymentsController::class, 'index'])
+            ->title(__('statamic-payments::messages.utility_title'))
+            ->navTitle(__('statamic-payments::messages.utility_nav'))
+            ->icon('money-cash-bill')
+            ->description(__('statamic-payments::messages.utility_description'))
+            ->docsUrl('https://github.com/goldnead/statamic-payments#readme');
     }
 }

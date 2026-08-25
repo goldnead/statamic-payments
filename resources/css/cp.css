@@ -1,0 +1,5 @@
+/* Statamic's token layer first. Bare Tailwind would give us colours that do
+   not follow the user's theme, which is how an addon screen starts looking
+   like a different product two releases later. */
+@import "@statamic/cms/tailwind.css";
+@source "../js";

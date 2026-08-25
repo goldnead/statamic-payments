@@ -115,3 +115,33 @@ jobs:
       - run: composer install --prefer-dist --no-interaction
 
       - run: ./vendor/bin/phpstan analyse --no-progress
+
+  dist:
+    runs-on: ubuntu-latest
+    name: Built assets are current
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      # `@statamic/cms` is installed from the vendor directory, so Composer has
+      # to run before npm.
+      - run: composer install --prefer-dist --no-interaction
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: npm ci
+
+      - run: npm run build
+
+      # The committed bundle is what every installed site loads. A source change
+      # that ships without a rebuild leaves the tests green while users run the
+      # old screen — a failure with no symptom anyone can trace.
+      - name: Fail if dist/ differs from the sources
+        run: git diff --exit-code dist

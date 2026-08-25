@@ -100,6 +100,22 @@ Off unless all three are true: the sibling installed, the flag on, and the produ
 `grants`. A failure in the sibling is logged and swallowed — the money was taken and the row says
 so; an entitlements outage must not send the whole webhook round again.
 
+## In the Control Panel
+
+Utilities → **Payments**. When, what, how much, paid or not, **fulfilled or not**, and who bought it.
+Built on core's `Listing`, so search, sorting and column choice behave like the rest of the CP.
+
+The column that earns the screen is `Fulfilled`. Mollie can tell you the money arrived; only the site
+knows whether the buyer got anything for it. The **Filters** menu has one entry for exactly that
+case: *Paid, not fulfilled*. It survives sorting, paging and a reload, and it can be kept as a saved
+view.
+
+Read-only. Refunds and disputes belong at Mollie, where they are complete and where the audit trail
+is.
+
+Access is the `access payments utility` permission, which appears in Statamic's own permission list
+once the addon is installed.
+
 ## Configuration
 
 | Key | Default | What happens when it is wrong |

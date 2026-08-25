@@ -8,5 +8,9 @@ parameters:
     paths:
         - src
 
+    # Corrects a wrong annotation in Statamic itself, see the stub for why.
+    stubFiles:
+        - phpstan/AddonServiceProvider.stub
+
     # A ratchet for new code. The baseline is empty because the findings from the
     # first run were fixed; keep it that way rather than appending to it.

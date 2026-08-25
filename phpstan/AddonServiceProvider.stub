@@ -1,0 +1,25 @@
+<?php
+
+namespace Statamic\Providers;
+
+class AddonServiceProvider
+{
+    /**
+     * Statamic annotates this as `list<string>`, but every use of it in core's
+     * own documentation and in Statamic's reference addons is an associative
+     * array of `hotFile` / `publicDirectory` / `input`. The annotation is
+     * simply wrong; correcting it here is honest, whereas silencing the error
+     * on our side would hide the same mistake if we ever made it for real.
+     *
+     * @var array<string, mixed>
+     */
+    protected $vite;
+
+    /**
+     * Same story as `$vite`: core annotates it loosely, addons pass a list of
+     * class strings, and the two do not line up.
+     *
+     * @var array<int, class-string>
+     */
+    protected $scopes;
+}

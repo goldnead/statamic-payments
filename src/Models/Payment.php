@@ -21,6 +21,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $fulfilled_at
  * @property Carbon|null $failed_notified_at
  * @property Carbon|null $paid_at
+ * @property Carbon|null $created_at
  */
 class Payment extends Model
 {
@@ -38,6 +39,25 @@ class Payment extends Model
     public const STATUS_CANCELED = 'canceled';
 
     protected $guarded = [];
+
+    /**
+     * Every status this package writes.
+     *
+     * One list, so the filter, the screen and the model cannot drift apart.
+     *
+     * @return list<string>
+     */
+    public static function statuses(): array
+    {
+        return [
+            self::STATUS_PAID,
+            self::STATUS_OPEN,
+            self::STATUS_INITIATED,
+            self::STATUS_FAILED,
+            self::STATUS_EXPIRED,
+            self::STATUS_CANCELED,
+        ];
+    }
 
     protected function casts(): array
     {

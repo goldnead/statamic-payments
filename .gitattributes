@@ -11,6 +11,15 @@
 /phpstan.neon       export-ignore
 /phpstan-baseline.neon export-ignore
 /addon-lint.json    export-ignore
+/vite.config.js     export-ignore
+/package.json       export-ignore
+/package-lock.json  export-ignore
+/resources/js       export-ignore
+/resources/css      export-ignore
+/phpstan            export-ignore
+/screenshots        export-ignore
 
-# Keep: /config, /database, /lang, /routes, /src, README.md, CHANGELOG.md,
-# LICENSE.md. This addon ships no built assets — there is no CP screen.
+# Keep: /config, /database, /dist, /lang, /routes, /src, README.md, CHANGELOG.md,
+# LICENSE.md. `/dist` is the built Control Panel bundle — the thing installed
+# sites actually load. The sources it is built from are ignored above: a site
+# installing this addon has no Node toolchain and no reason to download them.

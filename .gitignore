@@ -3,8 +3,11 @@ vendor
 .phpunit.result.cache
 .phpunit.cache
 node_modules
-package-lock.json
+# package-lock.json is NOT ignored: CI runs `npm ci`, which needs it, and the
+# committed bundle is only reproducible if the tree that built it is pinned.
 .php_cs.cache
 .php-cs-fixer.cache
 .idea
 composer.lock
+/node_modules
+/dist/hot

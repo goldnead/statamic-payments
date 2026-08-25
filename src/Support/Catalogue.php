@@ -16,6 +16,33 @@ use Illuminate\Support\Arr;
  */
 class Catalogue
 {
+    /**
+     * Extra sources of priced things, contributed by other addons.
+     *
+     * `statamic-offers` registers one so that an offer with its own price — an
+     * upsell at €12 for a product that normally costs €29 — resolves like any
+     * other product. It has to be a resolver rather than a value the caller
+     * passes, because the one rule this package is built on is that an amount
+     * never comes from a request.
+     *
+     * @var list<callable(string): (array<string, mixed>|null)>
+     */
+    protected static array $resolvers = [];
+
+    /**
+     * @param  callable(string): (array<string, mixed>|null)  $resolver
+     */
+    public static function extend(callable $resolver): void
+    {
+        static::$resolvers[] = $resolver;
+    }
+
+    /** For tests, and for a host that rebuilds its container between requests. */
+    public static function forgetResolvers(): void
+    {
+        static::$resolvers = [];
+    }
+
     /** @return array<string, array<string, mixed>> */
     public function all(): array
     {
@@ -30,6 +57,20 @@ class Catalogue
         // into a nested config array instead of simply missing.
         $all = $this->all();
         $product = $all[$handle] ?? null;
+
+        if (! is_array($product)) {
+            // Nothing in the configured catalogue. Ask whoever else claims to
+            // know about priced things before giving up — an offer's own price
+            // lives in another addon's table, and it is still server-side.
+            foreach (static::$resolvers as $resolver) {
+                $resolved = $resolver($handle);
+
+                if (is_array($resolved)) {
+                    $product = $resolved;
+                    break;
+                }
+            }
+        }
 
         if (! is_array($product)) {
             return null;

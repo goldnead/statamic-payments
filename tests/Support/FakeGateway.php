@@ -69,6 +69,9 @@ class FakeGateway implements FollowUpGateway
 
     public int $created = 0;
 
+    /** What the last `createPayment()` was handed, so a test can look at it. */
+    public array $lastPayload = [];
+
     /** @var array<string, array<string, mixed>> */
     public array $metadata = [];
 
@@ -81,6 +84,7 @@ class FakeGateway implements FollowUpGateway
 
     public function createPayment(array $payload): CheckoutSession
     {
+        $this->lastPayload = $payload;
         $this->created++;
         $id = 'tr_'.($this->created);
 

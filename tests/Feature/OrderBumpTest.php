@@ -157,4 +157,28 @@ class OrderBumpTest extends TestCase
         // Orphaned lines would count towards every revenue report ever run.
         $this->assertSame(0, PaymentItem::count());
     }
+
+    #[Test]
+    public function the_caller_may_say_where_the_buyer_comes_back_to(): void
+    {
+        // A funnel passes its own page here. Without it the provider sends the
+        // buyer to the site's configured thank-you page — outside the flow they
+        // were walking, halfway through a purchase.
+        app(Checkout::class)->start('noten-paket', [], 'https://example.test/f/kurs/danke');
+
+        $this->assertSame(
+            'https://example.test/f/kurs/danke',
+            $this->gateway->lastPayload['redirectUrl'] ?? null,
+        );
+    }
+
+    #[Test]
+    public function without_one_the_configured_page_is_used(): void
+    {
+        config(['statamic-payments.return_url' => '/danke']);
+
+        app(Checkout::class)->start('noten-paket');
+
+        $this->assertStringContainsString('/danke', $this->gateway->lastPayload['redirectUrl'] ?? '');
+    }
 }

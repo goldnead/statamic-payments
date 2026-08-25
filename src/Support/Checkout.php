@@ -31,8 +31,12 @@ class Checkout
      *                                                            list of handles (the first is what the buyer came for, the rest are
      *                                                            bumps), or a map of handle => quantity.
      * @param  array<string, mixed>  $buyer
+     * @param  string|null  $returnUrl  Where the provider sends the buyer back
+     *                                  to. Defaults to the configured page. A funnel passes its own, because a
+     *                                  buyer who lands outside the flow they were walking has been dropped
+     *                                  halfway through a purchase.
      */
-    public function start(string|array $products, array $buyer = []): ?CheckoutResult
+    public function start(string|array $products, array $buyer = [], ?string $returnUrl = null): ?CheckoutResult
     {
         $lines = $this->lines($products);
 
@@ -88,7 +92,7 @@ class Checkout
                 'value' => $payment->amount(),
             ],
             'description' => $this->description($lines),
-            'redirectUrl' => $this->url('return_url', ['payment' => $payment->id]),
+            'redirectUrl' => $returnUrl ?: $this->url('return_url', ['payment' => $payment->id]),
             'webhookUrl' => route('statamic-payments.webhook'),
             'metadata' => [
                 'payment_id' => $payment->id,

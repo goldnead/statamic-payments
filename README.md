@@ -137,6 +137,27 @@ default and has its own page: [docs/follow-up-offers.md](docs/follow-up-offers.m
 Read it before switching it on — the technical part is small, the part that
 decides whether you may ship it is not.
 
+## Extending the catalogue
+
+Another addon can contribute priced things:
+
+```php
+use Goldnead\StatamicPayments\Support\Catalogue;
+
+Catalogue::extend(function (string $handle): ?array {
+    return $handle === 'offer:fruehling'
+        ? ['name' => 'Frühlingsangebot', 'amount_cent' => 1200]
+        : null;
+});
+```
+
+**The configured catalogue wins.** A resolver may add handles, never reprice one the site has
+already decided about — config is the site owner's word, an addon is a helper. And the amount still
+never comes from a request: a resolver runs on the server, which is the whole reason this is a seam
+rather than a parameter.
+
+`goldnead/statamic-offers` is built on it.
+
 ## Configuration
 
 | Key | Default | What happens when it is wrong |

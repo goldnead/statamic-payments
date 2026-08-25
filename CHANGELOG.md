@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.0
+
+### What's new
+
+- **`Catalogue::extend()`** — a seam another addon can contribute priced things through.
+  `goldnead/statamic-offers` uses it so that an upsell with its own price resolves like any other
+  product, and every guard in here applies to it unchanged. **The configured catalogue always wins**:
+  an addon may add, never reprice what the site has already decided.
+- **`Checkout::start(..., $returnUrl)`** — where the provider sends the buyer back to. A funnel
+  passes its own page, because a buyer who returns outside the flow they were walking has been
+  dropped halfway through a purchase, and whatever was meant to follow the sale never happens.
+
+
 ## 1.2.0
 
 ### What's new

@@ -116,6 +116,29 @@ is.
 Access is the `access payments utility` permission, which appears in Statamic's own permission list
 once the addon is installed.
 
+### Subscriptions
+
+Utilities → **Subscriptions**, next to it: the agreements rather than the money. Product, whether it
+is a subscription or a payment plan, what one cycle costs, the rhythm, how many cycles have been
+charged (`2 / 3` while there is an end to count towards), the next charge, the status and the buyer.
+Sorted by what is charged next, so what is about to happen is at the top.
+
+Two filters: **Status**, and **Still running** — the second is `isLive()` asked of the query, which
+is the "who is still being charged" list.
+
+Clicking a product opens a read-only slide-over with the whole agreement and the cycles it has
+actually been paid: date, amount, status. The cycles are ordinary payments, so they also appear on
+the Payments screen.
+
+**Cancelling** is available from a row's menu and from the bulk toolbar, and both run the same
+`Support\Subscriptions::cancel()`: the provider is told first and its answer is what gets written. A
+provider that refuses, or that accepts the call and goes on reporting the agreement as running,
+produces a **red** toast and leaves the row untouched. Nothing here creates a subscription — one is
+what a confirmed first payment leaves behind, never something typed into a form.
+
+Access is the separate `access subscriptions utility` permission. "May read the till" is not the same
+authority as "may end an agreement".
+
 ## Order bumps and follow-up offers
 
 A payment carries **lines**, not a single product, so a checkbox at checkout

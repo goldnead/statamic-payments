@@ -26,6 +26,9 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $created_at
  * @property string|null $customer_reference
  * @property int|null $parent_payment_id
+ * @property int|null $subscription_id
+ * @property string|null $discount_code
+ * @property int|null $discount_cent
  */
 class Payment extends Model
 {

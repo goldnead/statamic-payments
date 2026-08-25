@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.5.0 — 2026-08-25
+
+### Being charged again, on a rhythm
+
+**One mechanism, three faces.** A subscription runs until somebody stops it, a payment plan stops
+counting, and a trial starts late. Not three features: a plan is a subscription with an end, and
+building them apart would have meant three cancellation paths and three ways to get the last
+instalment wrong.
+
+- `Subscriptions::start()` takes a first payment, and the agreement is created **only after the
+  webhook confirms it** — a mandate is what a provider needs, and a payment is what leaves one.
+- Every cycle after that is an ordinary `Payment`: same `PaymentPaid`, same one-time claim. A
+  subscription therefore grants access every month without any listener knowing subscriptions exist.
+- A cycle the provider charged on its own gets a row and a line, built from the **agreement** and
+  never from the webhook.
+- `SubscriptionStarted`, `SubscriptionRenewed`, `SubscriptionCancelled`, `SubscriptionEnded` and
+  `SubscriptionStartFailed`.
+- A **Subscriptions** utility screen: both faces in one listing, a read-only detail with the payments
+  made against each agreement, and cancelling as a row and bulk action.
+
+**A trial is honest about its trade.** Mollie cannot store a card without charging something — no
+SetupIntent, no zero authorisation. So `trial_amount_cent` says what the trial charges, and a site
+that sets it to nothing gets no card and a buyer who has to come back.
+
+### Found by a reviewer, and worth naming
+
+- **The provider call was inside a database transaction.** Anything failing after it rolled the local
+  row back while the provider kept a running subscription: somebody charged every month, forever,
+  with no row here and no alarm — a cycle for an unknown agreement is indistinguishable from a stray
+  webhook. Now the row is committed first and the event fires after, the pattern `Checkout` and
+  `FollowUp` already follow.
+- **`add('1 month')` on 31 January lands on 3 March.** February is skipped and the provider bills on
+  the 3rd for ever after. Measured. Months are now clamped to the end of one.
+- The provider is asked how an agreement is doing on every cycle, so a suspension after failed
+  charges reaches the row.
+- A straggler no longer ends a finished plan twice.
+- A cycle carries a `PaymentItem`, so reports built over lines stop leaving out all recurring revenue.
+
+### Found by looking at the screen
+
+- **The Control Panel toasts everything green.** A returned value is toasted as success, and a thrown
+  exception becomes `success: false`, which is *also* toasted green. A refused cancellation therefore
+  arrived with a tick. The action now pushes `Toast::error()` and returns `['message' => false]`.
+- Sorting by "next charge" pulled cancelled agreements (NULL) to the top.
+
 ## 1.4.0 — 2026-08-25
 
 ### What's new

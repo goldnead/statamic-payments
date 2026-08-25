@@ -21,6 +21,15 @@ final readonly class RemotePayment
         public string $status,
         public array $metadata = [],
         public ?string $email = null,
+        /**
+         * The agreement this payment is a cycle of, if it is one.
+         *
+         * Read from the provider, never from the caller: it is what decides
+         * whether a payment extends somebody's access or is a one-off, and a
+         * webhook that could assert it would be a way to extend a subscription
+         * nobody is paying for.
+         */
+        public ?string $subscriptionId = null,
     ) {}
 
     public function isPaid(): bool

@@ -6,6 +6,8 @@ use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Events\PaymentFailed;
 use Goldnead\StatamicPayments\Events\PaymentPaid;
 use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Models\PaymentItem;
+use Goldnead\StatamicPayments\Models\Subscription;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -46,6 +48,14 @@ class Fulfilment
         $remote = $this->fetch($providerId);
 
         $payment ??= $this->recover($providerId, $remote);
+
+        // The one payment a site legitimately never created: a cycle the
+        // provider charged on its own, on an agreement this site *did* create.
+        // The row is written here rather than refused, because the alternative
+        // is a customer paying every month into a system that has no record of
+        // it. The evidence is the agreement, not the caller: the subscription id
+        // comes from the provider's own answer.
+        $payment ??= $this->openCycle($providerId, $remote);
 
         if (! $payment) {
             // A payment this site never created. Nothing to fulfil, and nothing
@@ -125,6 +135,67 @@ class Fulfilment
         $payment->forceFill(['provider_id' => $providerId])->save();
 
         return $payment->fresh() ?? $payment;
+    }
+
+    /**
+     * A row for a cycle the provider charged without being asked.
+     *
+     * Everything about it is taken from the agreement, never from the webhook:
+     * the product, the amount, the currency and who it is for. A forged call
+     * naming a real subscription id therefore cannot invent an amount — the
+     * worst it can do is create a row for a payment the provider will not
+     * confirm, and `isPaid()` is checked afterwards.
+     */
+    protected function openCycle(string $providerId, ?RemotePayment $remote): ?Payment
+    {
+        if (! $remote?->subscriptionId) {
+            return null;
+        }
+
+        $subscription = Subscription::query()
+            ->where('provider', $this->gateway->provider())
+            ->where('provider_id', $remote->subscriptionId)
+            ->first();
+
+        if (! $subscription) {
+            // Its own alarm, not the generic "unknown payment id" further up.
+            // This is the shape a phantom agreement takes: the provider charging
+            // on a rhythm for something this site has no row for. Told apart
+            // from a stray webhook by the fact that it names an agreement.
+            Log::error('statamic-payments: a cycle arrived for an agreement this site has no record of. Someone may be being charged for nothing.', [
+                'provider_subscription_id' => $remote->subscriptionId,
+                'provider_id' => $providerId,
+            ]);
+
+            return null;
+        }
+
+        $payment = Payment::create([
+            'provider' => $this->gateway->provider(),
+            'provider_id' => $providerId,
+            'product' => $subscription->product,
+            'amount_cent' => $subscription->amount_cent,
+            'currency' => $subscription->currency,
+            'status' => Payment::STATUS_OPEN,
+            'email' => $remote->email ?: $subscription->email,
+            'name' => $subscription->name,
+            'customer_reference' => $subscription->customer_reference,
+            'subscription_id' => null,
+        ]);
+
+        // A line, like every other payment has. Without one
+        // `Payment::itemsTotalCent()` reads zero for a cycle, and any report
+        // built over lines silently leaves out all recurring revenue.
+        PaymentItem::create([
+            'payment_id' => $payment->getKey(),
+            'product' => $subscription->product,
+            'name' => $subscription->product,
+            'amount_cent' => $subscription->amount_cent,
+            'quantity' => 1,
+            'kind' => PaymentItem::KIND_PRIMARY,
+        ]);
+
+        return $payment;
     }
 
     protected function recordUnpaid(Payment $payment, RemotePayment $remote): void
@@ -239,6 +310,45 @@ class Fulfilment
             throw $e;
         }
 
-        return $payment;
+        $this->followTheAgreement($payment, $remote);
+
+        return $payment->fresh() ?? $payment;
+    }
+
+    /**
+     * Keep the subscription row in step with the money.
+     *
+     * **After** fulfilment, deliberately. A cycle is first and foremost a
+     * payment: it grants what it grants through `PaymentPaid`, exactly like a
+     * one-off, so a listener needs to know nothing about subscriptions. What
+     * happens here is bookkeeping on the agreement, and bookkeeping must never
+     * stand between a customer and the thing they paid for.
+     *
+     * Nothing here throws. A subscription that could not be recorded is a row
+     * to repair; a fulfilment claim released over it would make the provider
+     * redeliver and the customer receive everything twice.
+     */
+    protected function followTheAgreement(Payment $payment, RemotePayment $remote): void
+    {
+        $subscriptions = app(Subscriptions::class);
+
+        try {
+            // A payment the provider made on its own: a cycle of a running
+            // agreement. The id comes from the provider, never from the caller.
+            if ($remote->subscriptionId) {
+                $subscriptions->recordCycle($payment, $remote->subscriptionId);
+
+                return;
+            }
+
+            // A first payment that carried the intention to start one. Only now
+            // is there a mandate to build it on.
+            $subscriptions->startFromPayment($payment);
+        } catch (Throwable $e) {
+            Log::error('statamic-payments: the agreement could not be brought up to date; the payment stands.', [
+                'payment_id' => $payment->getKey(),
+                'exception' => $e->getMessage(),
+            ]);
+        }
     }
 }

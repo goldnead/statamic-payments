@@ -2,10 +2,12 @@
 
 namespace Goldnead\StatamicPayments\Tests\Support;
 
-use Goldnead\StatamicPayments\Contracts\FollowUpGateway;
+use Goldnead\StatamicPayments\Contracts\SubscriptionGateway;
 use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\CheckoutSession;
 use Goldnead\StatamicPayments\Support\RemotePayment;
+use Goldnead\StatamicPayments\Support\RemoteSubscription;
 use RuntimeException;
 
 /**
@@ -15,8 +17,95 @@ use RuntimeException;
  * claiming "paid" while the gateway still says "open", which is precisely the
  * forgery the design is meant to survive.
  */
-class FakeGateway implements FollowUpGateway
+class FakeGateway implements SubscriptionGateway
 {
+    /** Agreements this fake believes exist, keyed by id. */
+    public array $subscriptions = [];
+
+    public array $cancelled = [];
+
+    public bool $refuseSubscriptions = false;
+
+    /** The provider can do subscriptions and refuses this one. */
+    public bool $refuseThisSubscription = false;
+
+    /** A cancel that the provider accepts but that leaves the thing running. */
+    public bool $cancelLies = false;
+
+    /** For the case where the provider is still waiting for the mandate. */
+    public bool $subscriptionsArePending = false;
+
+    public int $subscriptionsCreated = 0;
+
+    public array $lastSubscriptionPayload = [];
+
+    public function supportsSubscriptions(): bool
+    {
+        return ! $this->refuseSubscriptions;
+    }
+
+    public function createSubscription(string $customerReference, array $payload): RemoteSubscription
+    {
+        if ($this->refuseSubscriptions || $this->refuseThisSubscription) {
+            throw new RuntimeException('this provider would not create the subscription');
+        }
+
+        $this->subscriptionsCreated++;
+        $this->lastSubscriptionPayload = $payload;
+
+        $id = 'sub_'.$this->subscriptionsCreated;
+
+        $this->subscriptions[$id] = [
+            'customer' => $customerReference,
+            // Active, even when the first charge is a month away: the
+            // agreement exists because the mandate does. A provider reports
+            // `pending` only while it is still waiting for that mandate, which
+            // in this package's flow has already happened.
+            'status' => $this->subscriptionsArePending ? Subscription::STATUS_PENDING : Subscription::STATUS_ACTIVE,
+        ];
+
+        return new RemoteSubscription(
+            providerId: $id,
+            status: $this->subscriptions[$id]['status'],
+            nextPaymentAt: $payload['startDate'] ?? null,
+        );
+    }
+
+    public function cancelSubscription(string $customerReference, string $subscriptionId): RemoteSubscription
+    {
+        $this->cancelled[] = $subscriptionId;
+
+        if ($this->cancelLies) {
+            return new RemoteSubscription($subscriptionId, Subscription::STATUS_ACTIVE);
+        }
+
+        $this->subscriptions[$subscriptionId]['status'] = Subscription::STATUS_CANCELLED;
+
+        return new RemoteSubscription($subscriptionId, Subscription::STATUS_CANCELLED);
+    }
+
+    public function fetchSubscription(string $customerReference, string $subscriptionId): RemoteSubscription
+    {
+        return new RemoteSubscription(
+            providerId: $subscriptionId,
+            status: $this->subscriptions[$subscriptionId]['status'] ?? Subscription::STATUS_CANCELLED,
+        );
+    }
+
+    /** Make the provider report this payment as a cycle of an agreement. */
+    public function markAsCycle(string $providerId, string $subscriptionId): void
+    {
+        $before = $this->remote[$providerId];
+
+        $this->remote[$providerId] = new RemotePayment(
+            providerId: $before->providerId,
+            status: $before->status,
+            metadata: $before->metadata,
+            email: $before->email,
+            subscriptionId: $subscriptionId,
+        );
+    }
+
     /** Customer ids the provider will accept a second charge for. */
     public array $mandates = [];
 
@@ -122,6 +211,29 @@ class FakeGateway implements FollowUpGateway
         $this->remote[$providerId] = new RemotePayment(
             $providerId, $status, $this->metadata[$providerId] ?? []
         );
+    }
+
+    /**
+     * A payment the provider made on its own: a cycle of a running agreement.
+     *
+     * There is no local row for it, which is the whole point — the site never
+     * asked for this payment and only learns of it from the webhook.
+     */
+    public function arrive(string $product, int $amountCent, string $subscriptionId): string
+    {
+        $this->created++;
+        $id = 'tr_zyklus_'.$this->created;
+
+        $this->metadata[$id] = ['product' => $product];
+        $this->remote[$id] = new RemotePayment(
+            providerId: $id,
+            status: Payment::STATUS_PAID,
+            metadata: $this->metadata[$id],
+            email: null,
+            subscriptionId: $subscriptionId,
+        );
+
+        return $id;
     }
 
     /** Let the provider know a payment the site has lost the id for. */

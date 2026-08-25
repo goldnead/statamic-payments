@@ -2,11 +2,14 @@
 
 namespace Goldnead\StatamicPayments\Gateways;
 
-use Goldnead\StatamicPayments\Contracts\FollowUpGateway;
+use Goldnead\StatamicPayments\Contracts\SubscriptionGateway;
 use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\CheckoutSession;
 use Goldnead\StatamicPayments\Support\RemotePayment;
+use Goldnead\StatamicPayments\Support\RemoteSubscription;
 use Illuminate\Support\Facades\Log;
+use Mollie\Api\Exceptions\ApiException;
 use Mollie\Api\MollieApiClient;
 use Mollie\Api\Types\SequenceType;
 
@@ -24,11 +27,88 @@ use Mollie\Api\Types\SequenceType;
  * uninstallable on half the versions its own composer.json promises. Found by
  * installing it, not by reading it.
  */
-class MollieGateway implements FollowUpGateway
+class MollieGateway implements SubscriptionGateway
 {
     public function supportsFollowUp(): bool
     {
         return true;
+    }
+
+    public function supportsSubscriptions(): bool
+    {
+        return true;
+    }
+
+    public function createSubscription(string $customerReference, array $payload): RemoteSubscription
+    {
+        $subscription = $this->client->subscriptions->createForId($customerReference, $payload);
+
+        return $this->asRemote($subscription);
+    }
+
+    public function cancelSubscription(string $customerReference, string $subscriptionId): RemoteSubscription
+    {
+        // Mollie answers 410 for one that is already gone. That is the outcome
+        // the caller wanted, so it is read as such rather than thrown: a second
+        // cancel click must not look like a failure.
+        try {
+            $subscription = $this->client->subscriptions->cancelForId($customerReference, $subscriptionId);
+        } catch (ApiException $e) {
+            if ($e->getCode() === 410) {
+                return new RemoteSubscription($subscriptionId, Subscription::STATUS_CANCELLED);
+            }
+
+            throw $e;
+        }
+
+        return $this->asRemote($subscription);
+    }
+
+    public function fetchSubscription(string $customerReference, string $subscriptionId): RemoteSubscription
+    {
+        return $this->asRemote($this->client->subscriptions->getForId($customerReference, $subscriptionId));
+    }
+
+    protected function asRemote(mixed $subscription): RemoteSubscription
+    {
+        return new RemoteSubscription(
+            providerId: (string) $subscription->id,
+            status: $this->normaliseSubscription((string) $subscription->status),
+            nextPaymentAt: isset($subscription->nextPaymentDate) ? (string) $subscription->nextPaymentDate : null,
+            timesCharged: isset($subscription->timesRemaining, $subscription->times)
+                ? max(0, (int) $subscription->times - (int) $subscription->timesRemaining)
+                : null,
+            meta: json_decode(json_encode($subscription->metadata) ?: '{}', true) ?: [],
+        );
+    }
+
+    /**
+     * Mollie's subscription vocabulary, mapped to ours.
+     *
+     * Same rule as for payments and for the same reason: an unknown status must
+     * not be read as running. `suspended` is the safe landing here rather than
+     * `active`, because acting on a suspended agreement as if it were live is
+     * the error that keeps somebody's access open after their card stopped
+     * working.
+     */
+    protected function normaliseSubscription(string $status): string
+    {
+        $known = match ($status) {
+            'active' => Subscription::STATUS_ACTIVE,
+            'pending' => Subscription::STATUS_PENDING,
+            'canceled', 'cancelled' => Subscription::STATUS_CANCELLED,
+            'completed' => Subscription::STATUS_COMPLETED,
+            'suspended' => Subscription::STATUS_SUSPENDED,
+            default => null,
+        };
+
+        if ($known === null) {
+            Log::warning('statamic-payments: unknown Mollie subscription status, treated as suspended.', ['status' => $status]);
+
+            return Subscription::STATUS_SUSPENDED;
+        }
+
+        return $known;
     }
 
     public function rememberBuyer(array $buyer): string
@@ -89,6 +169,10 @@ class MollieGateway implements FollowUpGateway
             status: $this->normalise((string) $payment->status),
             metadata: json_decode(json_encode($payment->metadata) ?: '{}', true) ?: [],
             email: $this->email($payment),
+            // Present only on a payment Mollie made on its own, on a rhythm.
+            subscriptionId: isset($payment->subscriptionId) && $payment->subscriptionId
+                ? (string) $payment->subscriptionId
+                : null,
         );
     }
 

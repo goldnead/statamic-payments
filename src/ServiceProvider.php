@@ -2,12 +2,21 @@
 
 namespace Goldnead\StatamicPayments;
 
+use Goldnead\StatamicPayments\Actions\CancelSubscription;
 use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Gateways\MollieGateway;
 use Goldnead\StatamicPayments\Http\Controllers\Cp\PaymentsController;
+use Goldnead\StatamicPayments\Http\Controllers\Cp\SubscriptionActionsController;
+use Goldnead\StatamicPayments\Http\Controllers\Cp\SubscriptionsController;
+use Goldnead\StatamicPayments\Scopes\PaymentFulfilment;
+use Goldnead\StatamicPayments\Scopes\PaymentStatus;
+use Goldnead\StatamicPayments\Scopes\SubscriptionLive;
+use Goldnead\StatamicPayments\Scopes\SubscriptionStatus;
 use Mollie\Api\MollieApiClient;
+use Statamic\Actions\Action;
 use Statamic\Facades\Utility;
 use Statamic\Providers\AddonServiceProvider;
+use Statamic\Query\Scopes\Scope;
 
 class ServiceProvider extends AddonServiceProvider
 {
@@ -15,6 +24,28 @@ class ServiceProvider extends AddonServiceProvider
 
     protected $routes = [
         'web' => __DIR__.'/../routes/web.php',
+    ];
+
+    /**
+     * Listed rather than left to the folder scan: autoloading resolves the
+     * addon through the manifest, which is exactly what is missing in a package
+     * test suite. A filter that is not registered does not fail loudly — it
+     * simply never appears on the screen.
+     *
+     * @var list<class-string<Scope>>
+     */
+    protected $scopes = [
+        PaymentStatus::class,
+        PaymentFulfilment::class,
+        SubscriptionStatus::class,
+        SubscriptionLive::class,
+    ];
+
+    /**
+     * @var list<class-string<Action>>
+     */
+    protected $actions = [
+        CancelSubscription::class,
     ];
 
     /**
@@ -67,7 +98,7 @@ class ServiceProvider extends AddonServiceProvider
     {
         $this->loadTranslationsFrom(__DIR__.'/../lang', 'statamic-payments');
 
-        $this->bootUtility();
+        $this->bootUtilities();
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
 
         $this->publishes([
@@ -80,26 +111,30 @@ class ServiceProvider extends AddonServiceProvider
     }
 
     /**
-     * One screen, registered as a utility.
+     * Two screens, each registered as a utility.
      *
-     * Registering here earns the nav entry, the `access payments utility`
-     * permission and the matching `can:` middleware from core. Hand-rolling a
-     * nav entry means writing each of those out, and the permission is the part
-     * people forget — on a screen that lists who bought what.
+     * Registering here earns the nav entry, the `access … utility` permission
+     * and the matching `can:` middleware from core. Hand-rolling a nav entry
+     * means writing each of those out, and the permission is the part people
+     * forget — on screens that list who bought what and let somebody stop the
+     * money.
      */
-    protected function bootUtility(): self
+    protected function bootUtilities(): self
     {
         // Registered inside `Utility::extend`, not straight in boot. `__()`
         // during boot resolves before core's `Localize` middleware has set the
         // user's language, so the title and description would freeze in the
         // application locale: an English nav entry above an otherwise German
         // screen.
-        Utility::extend(fn () => $this->registerUtility());
+        Utility::extend(function () {
+            $this->registerPaymentsUtility();
+            $this->registerSubscriptionsUtility();
+        });
 
         return $this;
     }
 
-    protected function registerUtility(): void
+    protected function registerPaymentsUtility(): void
     {
         Utility::register('payments')
             ->action([PaymentsController::class, 'index'])
@@ -108,5 +143,30 @@ class ServiceProvider extends AddonServiceProvider
             ->icon('money-cash-bill')
             ->description(__('statamic-payments::messages.utility_description'))
             ->docsUrl('https://github.com/goldnead/statamic-payments#readme');
+    }
+
+    /**
+     * Subscriptions get their own utility, which is what buys the second nav
+     * entry and the separate `access subscriptions utility` permission. Hanging
+     * this screen off the payments utility would have handed everyone who may
+     * look at an order a button that stops somebody's monthly charge, and
+     * "may read the till" is not the same authority as "may end an agreement".
+     */
+    protected function registerSubscriptionsUtility(): void
+    {
+        Utility::register('subscriptions')
+            ->action([SubscriptionsController::class, 'index'])
+            ->title(__('statamic-payments::messages.subscriptions_utility_title'))
+            ->navTitle(__('statamic-payments::messages.subscriptions_utility_nav'))
+            ->icon('sync')
+            ->description(__('statamic-payments::messages.subscriptions_utility_description'))
+            ->docsUrl('https://github.com/goldnead/statamic-payments#readme')
+            ->routes(function ($router) {
+                // The two endpoints a Listing's actions need: one to run the
+                // chosen action, one to ask which actions the selection offers.
+                // Both are what the checkboxes and the row menus talk to.
+                $router->post('actions', [SubscriptionActionsController::class, 'run'])->name('actions');
+                $router->post('actions/list', [SubscriptionActionsController::class, 'bulkActions'])->name('actions.list');
+            });
     }
 }

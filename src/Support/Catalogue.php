@@ -89,6 +89,9 @@ class Catalogue
             return null;
         }
 
+        // `$product + [...]` keeps whatever else the catalogue declared, which
+        // is how `interval`, `times`, `trial_days` and `trial_amount_cent`
+        // reach the subscription code without this class knowing what they are.
         return $product + [
             'handle' => $handle,
             'currency' => (string) Arr::get($product, 'currency', config('statamic-payments.currency', 'EUR')),

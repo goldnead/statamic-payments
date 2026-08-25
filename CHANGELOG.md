@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.2.0
+
+### What's new
+
+- **A payment carries lines, not one product.** An order bump — a checkbox at
+  checkout adding a second item — is now one payment with two lines:
+  `start(['noten-paket', 'uebungsblaetter'])`, or with quantities
+  `start(['noten-paket' => 1, 'uebungsblaetter' => 3])`. The total is their sum,
+  each line keeps the name it was sold under, and a line is never a second
+  payment.
+  **All or none:** a handle that is not in the catalogue refuses the whole
+  checkout instead of quietly dropping the line, and two currencies in one
+  payment are refused for the same reason.
+  Done now rather than later on purpose: the schema change costs nothing while
+  the addon has no installs, and would be a migration on other people's servers
+  afterwards.
+- **Follow-up offers**, off by default. An offer shown after a payment, charged
+  without asking for card details a second time. `docs/follow-up-offers.md` is
+  the whole story, and most of it is not technical: in Germany a follow-up order
+  still needs its own unambiguously labelled button with the essential details
+  directly above it. What is saved is the card number, **not** the consent.
+- The offer disappears once taken. A second click, a double submit, a reloaded
+  confirmation — all of them would otherwise charge again for the same thing. A
+  *refused* charge does not count as taken.
+- A follow-up is never treated as paid on acceptance. A recurring charge is
+  accepted now and settled later; only the webhook decides, exactly as at
+  checkout.
+- The entitlements bridge grants **every** paid line, not only the first. A bump
+  the buyer ticked and paid for is as bought as the thing they came for.
+
+### What's fixed
+
+- A payment's lines are deleted with it even where the database does not enforce
+  the foreign key — which on SQLite it quietly does not. Orphaned lines would
+  have counted towards every revenue report ever run.
+
+
 ## 1.1.0
 
 ### What's new

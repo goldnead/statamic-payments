@@ -25,7 +25,11 @@ class Catalogue
     /** @return array<string, mixed>|null */
     public function find(string $handle): ?array
     {
-        $product = Arr::get($this->all(), $handle);
+        // Plain array access, deliberately. A handle can come from a request,
+        // and `Arr::get()` splits on dots — a handle containing one would walk
+        // into a nested config array instead of simply missing.
+        $all = $this->all();
+        $product = $all[$handle] ?? null;
 
         if (! is_array($product)) {
             return null;

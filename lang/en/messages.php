@@ -25,4 +25,5 @@ return [
     'filter_fulfilment' => 'Fulfilment',
     'filter_unfulfilled' => 'Paid, not fulfilled',
     'filter_fulfilled' => 'Fulfilled',
+    'offer_refused' => 'This offer is no longer available.',
 ];

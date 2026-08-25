@@ -1,5 +1,6 @@
 <?php
 
+use Goldnead\StatamicPayments\Http\Controllers\OfferController;
 use Goldnead\StatamicPayments\Http\Controllers\WebhookController;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Routing\Middleware\ThrottleRequests;
@@ -32,3 +33,14 @@ Route::post('/!/statamic-payments/webhook', WebhookController::class)
         'Illuminate\Foundation\Http\Middleware\PreventRequestForgery',
     ])
     ->name('statamic-payments.webhook');
+
+/*
+ * Accepting a follow-up offer.
+ *
+ * Unlike the webhook above, this one keeps CSRF: the caller is a browser, a
+ * person and an order. Dropping it would let a page on another site place an
+ * order on this one.
+ */
+Route::post('/!/statamic-payments/offer', OfferController::class)
+    ->middleware(['web', ThrottleRequests::class.':10,1'])
+    ->name('statamic-payments.offer.accept');

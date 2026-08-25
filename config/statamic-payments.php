@@ -87,6 +87,34 @@ return [
     |
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Follow-up offers
+    |--------------------------------------------------------------------------
+    |
+    | An offer shown after a payment, charged without asking for card details a
+    | second time. Off by default, and there is more to switching it on than
+    | this flag:
+    |
+    | 1. `collect_mandate` has to be on as well. It makes the first payment ask
+    |    the provider to remember the buyer, which is the thing that makes a
+    |    later charge possible at all. The buyer has to be told, on the checkout
+    |    page, that this is happening.
+    |
+    | 2. **The offer page still needs its own order button.** Saving the card
+    |    details does not save the consent: under § 312j BGB the button must be
+    |    labelled unambiguously ("Zahlungspflichtig bestellen") with the
+    |    essential details directly above it. `docs/follow-up-offers.md` has the
+    |    whole list. This is not legal advice, and the wording is worth twenty
+    |    minutes of a lawyer's time before it goes live.
+    |
+    */
+
+    'follow_up' => [
+        'enabled' => env('STATAMIC_PAYMENTS_FOLLOW_UP', false),
+        'collect_mandate' => env('STATAMIC_PAYMENTS_COLLECT_MANDATE', false),
+    ],
+
     'entitlements' => [
         'enabled' => env('STATAMIC_PAYMENTS_ENTITLEMENTS', false),
     ],

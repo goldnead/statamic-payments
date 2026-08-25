@@ -2,7 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Tests\Support;
 
-use Goldnead\StatamicPayments\Contracts\PaymentGateway;
+use Goldnead\StatamicPayments\Contracts\FollowUpGateway;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Support\CheckoutSession;
 use Goldnead\StatamicPayments\Support\RemotePayment;
@@ -15,8 +15,52 @@ use RuntimeException;
  * claiming "paid" while the gateway still says "open", which is precisely the
  * forgery the design is meant to survive.
  */
-class FakeGateway implements PaymentGateway
+class FakeGateway implements FollowUpGateway
 {
+    /** Customer ids the provider will accept a second charge for. */
+    public array $mandates = [];
+
+    public bool $refuseFollowUp = false;
+
+    public function supportsFollowUp(): bool
+    {
+        return true;
+    }
+
+    public bool $refuseToRemember = false;
+
+    public function rememberBuyer(array $buyer): string
+    {
+        if ($this->refuseToRemember) {
+            throw new RuntimeException('the provider would not remember this buyer');
+        }
+
+        $reference = 'cst_'.count($this->mandates + [1]);
+        $this->mandates[] = $reference;
+
+        return $reference;
+    }
+
+    public function chargeAgain(string $customerReference, array $payload): RemotePayment
+    {
+        if ($this->refuseFollowUp || ! in_array($customerReference, $this->mandates, true)) {
+            // What Mollie does when there is no mandate: it refuses. Which is
+            // correct — no mandate means the buyer never agreed to this.
+            throw new RuntimeException('no mandate for '.$customerReference);
+        }
+
+        $this->created++;
+        $id = 'tr_folge_'.$this->created;
+        $this->metadata[$id] = is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [];
+
+        // Deliberately not `paid`. A recurring charge is usually accepted
+        // first and confirmed later; a fake that answered `paid` straight away
+        // would hide every mistake that treats acceptance as payment.
+        $this->remote[$id] = new RemotePayment($id, Payment::STATUS_OPEN, $this->metadata[$id]);
+
+        return $this->remote[$id];
+    }
+
     /** @var array<string, RemotePayment> */
     public array $remote = [];
 

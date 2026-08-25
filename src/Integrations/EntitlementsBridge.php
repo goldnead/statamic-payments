@@ -60,17 +60,38 @@ class EntitlementsBridge
             return;
         }
 
-        $product = config('statamic-payments.products.'.$payment->product);
-        $slug = is_array($product) ? ($product['grants'] ?? null) : null;
-
-        if (! is_string($slug) || $slug === '') {
-            return;
-        }
-
         $subject = $payment->email;
 
         if (! is_string($subject) || $subject === '') {
             // Nothing to grant it to. Already logged loudly by the fulfilment.
+            return;
+        }
+
+        // Every line, not just the primary one. An order bump the buyer ticked
+        // and paid for is as bought as the thing they came for; granting only
+        // the first would take money for the second and hand over nothing.
+        foreach ($payment->items as $item) {
+            $this->grantLine($payment, $item->product, $subject);
+        }
+
+        // A payment written before line items existed, or by something that
+        // does not use the checkout, still has its handle on the payment.
+        if ($payment->items->isEmpty()) {
+            $this->grantLine($payment, $payment->product, $subject);
+        }
+    }
+
+    protected function grantLine(Payment $payment, ?string $handle, string $subject): void
+    {
+        if (! is_string($handle) || $handle === '') {
+            return;
+        }
+
+        $products = config('statamic-payments.products', []);
+        $product = is_array($products) ? ($products[$handle] ?? null) : null;
+        $slug = is_array($product) ? ($product['grants'] ?? null) : null;
+
+        if (! is_string($slug) || $slug === '') {
             return;
         }
 
@@ -85,7 +106,7 @@ class EntitlementsBridge
         } catch (Throwable $e) {
             Log::error('statamic-payments: the entitlements bridge failed; the payment stands, the grant does not.', [
                 'payment_id' => $payment->getKey(),
-                'product' => $payment->product,
+                'product' => $handle,
                 'grants' => $slug,
                 'exception' => $e->getMessage(),
             ]);

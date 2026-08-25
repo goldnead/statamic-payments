@@ -3,6 +3,8 @@
 namespace Goldnead\StatamicPayments\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
 /**
@@ -22,6 +24,8 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $failed_notified_at
  * @property Carbon|null $paid_at
  * @property Carbon|null $created_at
+ * @property string|null $customer_reference
+ * @property int|null $parent_payment_id
  */
 class Payment extends Model
 {
@@ -59,6 +63,22 @@ class Payment extends Model
         ];
     }
 
+    /**
+     * The lines go with the payment.
+     *
+     * The migration already declares `cascadeOnDelete`, but that is only
+     * enforced when the connection has foreign keys switched on — and on
+     * SQLite, which is what a small client site is most likely to run, it
+     * quietly is not. Orphaned lines would then count towards every revenue
+     * report ever run. Belt and braces, deliberately.
+     */
+    protected static function booted(): void
+    {
+        static::deleting(function (self $payment) {
+            $payment->items()->delete();
+        });
+    }
+
     protected function casts(): array
     {
         return [
@@ -68,6 +88,31 @@ class Payment extends Model
             'failed_notified_at' => 'datetime',
             'paid_at' => 'datetime',
         ];
+    }
+
+    /** @return BelongsTo<Payment, $this> */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_payment_id');
+    }
+
+    /** @return HasMany<PaymentItem, $this> */
+    public function items(): HasMany
+    {
+        return $this->hasMany(PaymentItem::class);
+    }
+
+    /**
+     * What the lines add up to, in minor units.
+     *
+     * Not stored a second time. `amount_cent` on the payment is the total the
+     * provider was asked to charge; this recomputes it from the lines, which is
+     * what makes the two checkable against each other instead of merely equal
+     * by assumption.
+     */
+    public function itemsTotalCent(): int
+    {
+        return $this->items->sum(fn (PaymentItem $item) => $item->lineTotalCent());
     }
 
     public function isPaid(): bool

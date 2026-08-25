@@ -2,12 +2,13 @@
 
 namespace Goldnead\StatamicPayments\Gateways;
 
-use Goldnead\StatamicPayments\Contracts\PaymentGateway;
+use Goldnead\StatamicPayments\Contracts\FollowUpGateway;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Support\CheckoutSession;
 use Goldnead\StatamicPayments\Support\RemotePayment;
 use Illuminate\Support\Facades\Log;
 use Mollie\Api\MollieApiClient;
+use Mollie\Api\Types\SequenceType;
 
 /**
  * Mollie, behind the seam.
@@ -23,8 +24,45 @@ use Mollie\Api\MollieApiClient;
  * uninstallable on half the versions its own composer.json promises. Found by
  * installing it, not by reading it.
  */
-class MollieGateway implements PaymentGateway
+class MollieGateway implements FollowUpGateway
 {
+    public function supportsFollowUp(): bool
+    {
+        return true;
+    }
+
+    public function rememberBuyer(array $buyer): string
+    {
+        $customer = $this->client->customers->create(array_filter([
+            'name' => $buyer['name'] ?? null,
+            'email' => $buyer['email'] ?? null,
+        ]));
+
+        return (string) $customer->id;
+    }
+
+    /**
+     * Mollie's recurring path.
+     *
+     * The first payment has to have been made with `sequenceType: first` and a
+     * customer attached — that is what leaves a mandate behind. Without one,
+     * Mollie refuses, which is the correct outcome: it means the buyer never
+     * agreed to be charged again.
+     */
+    public function chargeAgain(string $customerReference, array $payload): RemotePayment
+    {
+        $payment = $this->client->customerPayments->createForId($customerReference, $payload + [
+            'sequenceType' => SequenceType::RECURRING,
+        ]);
+
+        return new RemotePayment(
+            providerId: (string) $payment->id,
+            status: $this->normalise((string) $payment->status),
+            metadata: json_decode(json_encode($payment->metadata) ?: '{}', true) ?: [],
+            email: $this->email($payment),
+        );
+    }
+
     public function provider(): string
     {
         return 'mollie';

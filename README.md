@@ -116,6 +116,27 @@ is.
 Access is the `access payments utility` permission, which appears in Statamic's own permission list
 once the addon is installed.
 
+## Order bumps and follow-up offers
+
+A payment carries **lines**, not a single product, so a checkbox at checkout
+adding a second item is one payment with two lines:
+
+```php
+app(Checkout::class)->start(['noten-paket', 'uebungsblaetter'], $buyer);
+app(Checkout::class)->start(['noten-paket' => 1, 'uebungsblaetter' => 3], $buyer);
+```
+
+**All or none.** A handle that is not in the catalogue refuses the whole
+checkout rather than quietly dropping the line — dropping it would charge the
+buyer for less than the page offered, and the first anyone hears of it is a
+customer who paid for two things and got one. Two currencies in one payment are
+refused for the same reason.
+
+An offer *after* the payment, charged without new card details, is off by
+default and has its own page: [docs/follow-up-offers.md](docs/follow-up-offers.md).
+Read it before switching it on — the technical part is small, the part that
+decides whether you may ship it is not.
+
 ## Configuration
 
 | Key | Default | What happens when it is wrong |

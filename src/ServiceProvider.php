@@ -2,21 +2,15 @@
 
 namespace Goldnead\StatamicPayments;
 
-use Goldnead\StatamicPayments\Actions\CancelSubscription;
 use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Gateways\MollieGateway;
 use Goldnead\StatamicPayments\Http\Controllers\Cp\PaymentsController;
 use Goldnead\StatamicPayments\Http\Controllers\Cp\SubscriptionActionsController;
 use Goldnead\StatamicPayments\Http\Controllers\Cp\SubscriptionsController;
-use Goldnead\StatamicPayments\Scopes\PaymentFulfilment;
-use Goldnead\StatamicPayments\Scopes\PaymentStatus;
-use Goldnead\StatamicPayments\Scopes\SubscriptionLive;
-use Goldnead\StatamicPayments\Scopes\SubscriptionStatus;
 use Mollie\Api\MollieApiClient;
 use Statamic\Actions\Action;
 use Statamic\Facades\Utility;
 use Statamic\Providers\AddonServiceProvider;
-use Statamic\Query\Scopes\Scope;
 
 class ServiceProvider extends AddonServiceProvider
 {
@@ -24,28 +18,6 @@ class ServiceProvider extends AddonServiceProvider
 
     protected $routes = [
         'web' => __DIR__.'/../routes/web.php',
-    ];
-
-    /**
-     * Listed rather than left to the folder scan: autoloading resolves the
-     * addon through the manifest, which is exactly what is missing in a package
-     * test suite. A filter that is not registered does not fail loudly — it
-     * simply never appears on the screen.
-     *
-     * @var list<class-string<Scope>>
-     */
-    protected $scopes = [
-        PaymentStatus::class,
-        PaymentFulfilment::class,
-        SubscriptionStatus::class,
-        SubscriptionLive::class,
-    ];
-
-    /**
-     * @var list<class-string<Action>>
-     */
-    protected $actions = [
-        CancelSubscription::class,
     ];
 
     /**

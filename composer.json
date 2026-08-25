@@ -1,80 +1,81 @@
 {
-  "name": "goldnead/statamic-payments",
-  "description": "Take payments in Statamic with Mollie: hosted checkout, a webhook that never trusts the caller, idempotent fulfilment.",
-  "type": "statamic-addon",
-  "license": "proprietary",
-  "keywords": [
-    "statamic",
-    "statamic-addon",
-    "payments",
-    "mollie",
-    "checkout",
-    "ecommerce"
-  ],
-  "autoload": {
-    "psr-4": {
-      "Goldnead\\StatamicPayments\\": "src/"
-    }
-  },
-  "autoload-dev": {
-    "psr-4": {
-      "Goldnead\\StatamicPayments\\Tests\\": "tests"
-    }
-  },
-  "extra": {
-    "statamic": {
-      "slug": "statamic-payments",
-      "name": "Statamic Payments",
-      "description": "Take payments in Statamic with Mollie: hosted checkout, a webhook that never trusts the caller, idempotent fulfilment.",
-      "url": "https://github.com/goldnead/statamic-payments",
-      "developer": "Adrian Goldner",
-      "developer-url": "https://gldnr.studio"
+    "name": "goldnead/statamic-payments",
+    "description": "Take payments in Statamic with Mollie: hosted checkout, a webhook that never trusts the caller, idempotent fulfilment.",
+    "type": "statamic-addon",
+    "license": "proprietary",
+    "keywords": [
+        "statamic",
+        "statamic-addon",
+        "payments",
+        "mollie",
+        "checkout",
+        "ecommerce"
+    ],
+    "autoload": {
+        "psr-4": {
+            "Goldnead\\StatamicPayments\\": "src/"
+        }
     },
-    "laravel": {
-      "providers": [
-        "Goldnead\\StatamicPayments\\ServiceProvider"
-      ]
+    "autoload-dev": {
+        "psr-4": {
+            "Goldnead\\StatamicPayments\\Tests\\": "tests"
+        }
+    },
+    "extra": {
+        "statamic": {
+            "slug": "statamic-payments",
+            "name": "Statamic Payments",
+            "description": "Take payments in Statamic with Mollie: hosted checkout, a webhook that never trusts the caller, idempotent fulfilment.",
+            "url": "https://github.com/goldnead/statamic-payments",
+            "developer": "Adrian Goldner",
+            "developer-url": "https://gldnr.studio"
+        },
+        "laravel": {
+            "providers": [
+                "Goldnead\\StatamicPayments\\ServiceProvider"
+            ]
+        }
+    },
+    "authors": [
+        {
+            "name": "Adrian Goldner",
+            "email": "info@adriangoldner.com"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/goldnead/statamic-payments/issues",
+        "source": "https://github.com/goldnead/statamic-payments"
+    },
+    "require": {
+        "php": "^8.2",
+        "statamic/cms": "^6.0",
+        "mollie/mollie-api-php": "^2.79 || ^3.0"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.0",
+        "laravel/pint": "^1.18",
+        "orchestra/testbench": "^10.0|^11.0",
+        "phpunit/phpunit": "^11.0|^12.0",
+        "goldnead/statamic-entitlements": "^1.0"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true,
+        "allow-plugins": true
+    },
+    "scripts": {
+        "test": [
+            "php -d memory_limit=-1 ./vendor/bin/phpunit"
+        ],
+        "lint": [
+            "./vendor/bin/pint --test"
+        ],
+        "fix": [
+            "./vendor/bin/pint"
+        ],
+        "analyse": [
+            "./vendor/bin/phpstan analyse"
+        ]
     }
-  },
-  "authors": [
-    {
-      "name": "Adrian Goldner",
-      "email": "info@adriangoldner.com"
-    }
-  ],
-  "support": {
-    "issues": "https://github.com/goldnead/statamic-payments/issues",
-    "source": "https://github.com/goldnead/statamic-payments"
-  },
-  "require": {
-    "php": "^8.2",
-    "statamic/cms": "^6.0",
-    "mollie/mollie-api-php": "^2.79 || ^3.0"
-  },
-  "require-dev": {
-    "larastan/larastan": "^3.0",
-    "laravel/pint": "^1.18",
-    "orchestra/testbench": "^10.0|^11.0",
-    "phpunit/phpunit": "^11.0|^12.0"
-  },
-  "config": {
-    "optimize-autoloader": true,
-    "preferred-install": "dist",
-    "sort-packages": true,
-    "allow-plugins": true
-  },
-  "scripts": {
-    "test": [
-      "php -d memory_limit=-1 ./vendor/bin/phpunit"
-    ],
-    "lint": [
-      "./vendor/bin/pint --test"
-    ],
-    "fix": [
-      "./vendor/bin/pint"
-    ],
-    "analyse": [
-      "./vendor/bin/phpstan analyse"
-    ]
-  }
 }

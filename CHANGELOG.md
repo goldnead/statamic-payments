@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.6.0 — 2026-08-25
+
+### Fixed — the entitlements bridge had never once worked
+
+The bridge handed the buyer's **email string** to `statamic-entitlements`, which
+refuses a bare string on purpose: a grant belongs to a `(type, id)` subject so it
+can outlive the record it points at. So every paid order on a real installation
+logged *"the entitlements bridge failed"* and granted nothing.
+
+Built, wired, documented, tested — and never working, because the tests bound a
+stub that accepted anything. A mock that says yes to everything proves you made
+a call, not that the call was accepted. Found by installing both addons side by
+side and paying with a real card.
+
+The bridge now passes a `SubjectReference('email', …)`, falling back to the old
+string for an older sibling. `statamic-entitlements` is a dev dependency of this
+package **because of the test**: a skipped test is what let this through.
+
+### New — the webhook URL is configurable
+
+A provider checks that a webhook URL is reachable from *its* side before it will
+create a payment, so a developer on `localhost` cannot check out at all. Mollie
+answers 422 and the checkout is refused.
+
+- `webhook_url` as a string overrides the route: a tunnel's address goes there.
+- `false` omits it, and the status has to be pulled instead —
+  `Fulfilment::handle($providerId)` is the same method the webhook route calls.
+  Fine for a demo, **wrong for production**, and the config comment says so.
+
+### Changed
+
+- `$actions` and `$scopes` are no longer declared: core discovers `src/Actions/`
+  and `src/Scopes/`, and an explicit list goes stale the moment somebody adds a
+  class.
+
 ## 1.5.0 — 2026-08-25
 
 ### Being charged again, on a rhythm

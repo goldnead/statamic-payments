@@ -114,13 +114,16 @@ class Checkout
             ],
             'description' => $this->description($lines),
             'redirectUrl' => $returnUrl ?: $this->url('return_url', ['payment' => $payment->id]),
-            'webhookUrl' => route('statamic-payments.webhook'),
             'metadata' => [
                 'payment_id' => $payment->id,
                 'product' => $primary['handle'],
                 'email' => $payment->email,
             ],
         ];
+
+        if ($webhook = $this->webhookUrl()) {
+            $payload['webhookUrl'] = $webhook;
+        }
 
         // Only if the site asked for it. Asking the provider to remember
         // somebody's payment method is a thing that buyer has to be told about
@@ -140,6 +143,33 @@ class Checkout
         ])->save();
 
         return new CheckoutResult($payment->fresh() ?? $payment, $session->checkoutUrl);
+    }
+
+    /**
+     * Where the provider should tell us what happened, or null to not be told.
+     *
+     * Configurable, and that is not a convenience: a provider checks that the
+     * URL is reachable from its own side, so a developer on `localhost` cannot
+     * create a payment at all. Refusing every checkout during development is a
+     * bad enough experience to be worth a config key.
+     *
+     * `false` omits it. Then nothing is pushed and the status has to be pulled
+     * — which is fine for a demo and wrong for production, so the config comment
+     * says so.
+     */
+    protected function webhookUrl(): ?string
+    {
+        $konfiguriert = config('statamic-payments.webhook_url');
+
+        if ($konfiguriert === false) {
+            return null;
+        }
+
+        if (is_string($konfiguriert) && $konfiguriert !== '') {
+            return $konfiguriert;
+        }
+
+        return route('statamic-payments.webhook');
     }
 
     /**

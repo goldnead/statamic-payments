@@ -81,6 +81,35 @@ class EntitlementsBridge
         }
     }
 
+    /**
+     * The buyer, in the shape the entitlements addon accepts.
+     *
+     * A bare email string is refused there, deliberately: a grant is a fact
+     * about a *subject*, and a subject is a `(type, id)` pair so that it can
+     * outlive the record it points at. This bridge used to hand over the string
+     * and every paid order logged an error and granted nothing — built, wired,
+     * documented and never once working, because the tests mocked the facade
+     * and a mock accepts anything.
+     *
+     * `email` as the type is the honest answer here. A payment knows an address
+     * and nothing else: there may be no user account and no contact, and
+     * inventing one to hang a grant on would be worse than saying what we have.
+     * A host that wants grants against its own users binds its own
+     * `SubjectResolver`, which is what that seam is for.
+     */
+    protected function subjectFor(string $email): mixed
+    {
+        $klasse = '\\Goldnead\\Entitlements\\Support\\SubjectReference';
+
+        if (! class_exists($klasse)) {
+            // An older sibling that still takes a string. Handing it the pair
+            // would break it, so the string stands.
+            return $email;
+        }
+
+        return new $klasse('email', mb_strtolower(trim($email)));
+    }
+
     protected function grantLine(Payment $payment, ?string $handle, string $subject): void
     {
         if (! is_string($handle) || $handle === '') {
@@ -98,7 +127,7 @@ class EntitlementsBridge
         try {
             $facade = self::FACADE;
             $facade::grant(
-                $subject,
+                $this->subjectFor($subject),
                 $slug,
                 'statamic-payments',
                 (string) $payment->provider_id,

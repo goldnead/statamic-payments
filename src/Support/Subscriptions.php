@@ -280,7 +280,9 @@ class Subscriptions
                 'times' => $remaining,
                 'startDate' => $startsAt->toDateString(),
                 'description' => (string) ($catalogue['name'] ?? $product),
-                'webhookUrl' => route('statamic-payments.webhook'),
+                'webhookUrl' => config('statamic-payments.webhook_url') === false
+                    ? null
+                    : (config('statamic-payments.webhook_url') ?: route('statamic-payments.webhook')),
                 'metadata' => [
                     'product' => $product,
                     'first_payment_id' => $payment->getKey(),

@@ -5,6 +5,7 @@ namespace Goldnead\StatamicPayments\Tests\Unit;
 use Goldnead\StatamicPayments\Events\PaymentPaid;
 use Goldnead\StatamicPayments\Integrations\EntitlementsBridge;
 use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Tests\Support\StrictEntitlements;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use PHPUnit\Framework\Attributes\Test;
 
@@ -53,5 +54,56 @@ class EntitlementsBridgeTest extends TestCase
         PaymentPaid::dispatch($payment);
 
         $this->assertTrue(true);
+    }
+
+    /**
+     * The regression that matters, and the one the old tests could not see.
+     *
+     * A stub that accepts anything proves the bridge made a call. It does not
+     * prove the call was accepted, and it was not: the real addon refuses a bare
+     * string subject, so every paid order on a real installation logged an error
+     * and granted nothing. Found by installing both addons side by side and
+     * paying with a real card, not by reading either of them.
+     *
+     * {@see StrictEntitlements} is
+     * as strict as the sibling. If the bridge ever hands over a string again,
+     * this fails here rather than in somebody's log.
+     */
+    #[Test]
+    public function the_subject_is_handed_over_in_a_shape_the_sibling_accepts(): void
+    {
+        config(['statamic-payments.entitlements.enabled' => true]);
+        config(['statamic-payments.products' => [
+            'noten-paket' => ['name' => 'Noten', 'amount_cent' => 1900, 'grants' => 'noten'],
+        ]]);
+
+        $sibling = new StrictEntitlements;
+
+        $this->bindEntitlements($sibling);
+
+        app(EntitlementsBridge::class)->grantFor($this->payment());
+
+        $this->assertCount(1, $sibling->granted, 'nothing was granted, so the sibling refused the subject');
+        $this->assertIsNotString($sibling->granted[0]['subject']);
+        $this->assertSame('noten', $sibling->granted[0]['slug']);
+    }
+
+    /**
+     * Bind a stand-in behind the facade name the bridge looks for.
+     *
+     * The bridge finds the sibling with `class_exists` on the facade and then
+     * asks the container for its root, which is exactly the seam a test needs.
+     */
+    protected function bindEntitlements(object $root): void
+    {
+        // The sibling is a dev dependency of this package *because of this
+        // test*. Without it installed the test would skip, and a skipped test
+        // is what let the bug through in the first place.
+        $this->assertTrue(
+            class_exists('Goldnead\\Entitlements\\Facades\\Entitlements'),
+            'the sibling has to be installed for this test to mean anything',
+        );
+
+        app()->instance('Goldnead\\Entitlements\\EntitlementManager', $root);
     }
 }

@@ -141,7 +141,9 @@ class FollowUp
                     'value' => $payment->amount(),
                 ],
                 'description' => $product['name'],
-                'webhookUrl' => route('statamic-payments.webhook'),
+                'webhookUrl' => config('statamic-payments.webhook_url') === false
+                    ? null
+                    : (config('statamic-payments.webhook_url') ?: route('statamic-payments.webhook')),
                 'metadata' => [
                     'payment_id' => $payment->id,
                     'product' => $product['handle'],

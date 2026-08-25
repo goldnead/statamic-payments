@@ -64,6 +64,26 @@ return [
     |
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Where the provider tells us what happened
+    |--------------------------------------------------------------------------
+    |
+    | Null uses this addon's own route, which is right in production.
+    |
+    | A string overrides it: on a development machine the provider checks that
+    | the URL is reachable **from its side** and refuses `localhost` outright,
+    | so a tunnel's address goes here.
+    |
+    | `false` omits it entirely. Then nothing is pushed and the status has to be
+    | pulled — `Fulfilment::handle($providerId)` does exactly what the webhook
+    | would. That is fine for a demo and **wrong for production**: a buyer who
+    | closes the tab is never followed up.
+    |
+    */
+
+    'webhook_url' => env('STATAMIC_PAYMENTS_WEBHOOK_URL'),
+
     'rate_limit' => 60,
 
     /*

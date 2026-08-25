@@ -214,6 +214,41 @@ A `Discount` is built by server-side code that looked something up, never from i
 clamps it anyway: it cannot exceed the total and cannot be negative, because a bug upstream should
 cost a wrong price, not a payment the provider rejects.
 
+## Abandoned checkouts
+
+Somebody started a checkout and did not finish it. Off by default:
+
+```php
+// config/statamic-payments.php
+'abandoned' => [
+    'enabled' => true,
+    'after_minutes' => 60,
+],
+```
+
+Then run the sweep on a schedule:
+
+```php
+// routes/console.php
+Schedule::command('payments:sweep-abandoned')->hourly();
+```
+
+Each unpaid checkout past the waiting period dispatches `CheckoutAbandoned` **once** — claimed with a
+conditional update on its own column, so overlapping sweeps cannot both announce the same one. A
+payment that arrives afterwards clears the claim, and the sequence should end on `PaymentPaid`, which
+is the honest signal that they bought it.
+
+`failed`, `expired` and `canceled` are not abandoned: those have `PaymentFailed` already, and
+announcing both would mean two mails about one thing.
+
+With `statamic-automations` installed, the trigger **Checkout Abandoned** appears under Payments and
+needs no code at all.
+
+> **Before you build a mail step on this.** The address on an unfinished checkout was given to
+> complete a purchase, not to receive advertising. Whether a reminder may go out is a question of
+> consent, not of configuration — and the suppression list belongs in front of the send either way.
+> That is why this ships switched off.
+
 ## Configuration
 
 | Key | Default | What happens when it is wrong |

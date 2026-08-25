@@ -84,6 +84,32 @@ return [
 
     'webhook_url' => env('STATAMIC_PAYMENTS_WEBHOOK_URL'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Abandoned checkouts
+    |--------------------------------------------------------------------------
+    |
+    | Somebody started a checkout and did not finish it. `payments:sweep-abandoned`
+    | announces those as `CheckoutAbandoned`, once each, and a sequence in
+    | statamic-automations can pick it up from there.
+    |
+    | **Off by default, and that is not caution about the code.** The address on
+    | an unfinished checkout was given to complete a purchase, not to receive
+    | advertising. Whether a reminder may go out is a question of consent — ask
+    | it before switching this on, and put the suppression list in front of the
+    | send either way.
+    |
+    | `after_minutes` is in minutes and not hours because the line between
+    | "still typing" and "gone" is not the same on a nine-euro download as on a
+    | course that costs two thousand.
+    |
+    */
+
+    'abandoned' => [
+        'enabled' => env('STATAMIC_PAYMENTS_ABANDONED', false),
+        'after_minutes' => env('STATAMIC_PAYMENTS_ABANDONED_AFTER', 60),
+    ],
+
     'rate_limit' => 60,
 
     /*

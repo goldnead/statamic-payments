@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.7.0
+
+### What's new
+
+- **Abandoned checkouts.** `payments:sweep-abandoned` announces every checkout that was started and
+  left unpaid past a waiting period, as `CheckoutAbandoned`, once each. With `statamic-automations`
+  installed the trigger **Checkout Abandoned** appears under Payments and needs no code.
+
+  Once-only is claimed with a conditional update on a new `abandoned_notified_at` column, the same
+  way fulfilment and failure already are: the sweep runs on a schedule and may overlap itself, and a
+  reminder arriving twice is a support ticket nobody can reproduce. A payment that arrives afterwards
+  clears the claim, so a sequence can end on `PaymentPaid`.
+
+  **Off by default, and that is not caution about the code.** The address on an unfinished checkout
+  was given to complete a purchase, not to receive advertising.
+
 ## 1.6.0 — 2026-08-25
 
 ### Fixed — the entitlements bridge had never once worked

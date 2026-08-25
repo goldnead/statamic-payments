@@ -292,6 +292,11 @@ class Fulfilment
             ]);
         }
 
+        // Wer doch noch bezahlt, ist nicht mehr abgesprungen. Vor dem Ereignis,
+        // damit ein Listener, der `abandoned_notified_at` liest, die Wahrheit
+        // sieht und nicht die Geschichte.
+        app(Abandonment::class)->settled($payment);
+
         try {
             PaymentPaid::dispatch($payment);
         } catch (Throwable $e) {

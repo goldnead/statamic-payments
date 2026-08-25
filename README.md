@@ -214,6 +214,50 @@ A `Discount` is built by server-side code that looked something up, never from i
 clamps it anyway: it cannot exceed the total and cannot be negative, because a bug upstream should
 cost a wrong price, not a payment the provider rejects.
 
+## Refunds
+
+This addon does not *make* refunds. That happens in the provider's dashboard, where somebody with
+the authority to move money does it — a button for it behind a Control Panel permission would be a
+way to refund a customer by misclicking. What it does is take note, so everything downstream can
+react:
+
+```php
+app(Refunds::class)->record($payment, 3000, 're_provider_id');
+```
+
+An **amount and a time**, never a status. An order half repaid is still a paid order — the money
+moved and the thing was delivered — and a status forced to choose between "paid" and "refunded"
+would be wrong about the other half.
+
+`PaymentRefunded` carries both what came back this time and whether everything has now been repaid,
+because those answer different questions. Passing the provider's own refund id makes it idempotent:
+a re-announced refund is not booked twice.
+
+**On a full refund the access goes with the money.** With the entitlements bridge on, every product
+line of the order is revoked with a reason. This is the one place in the bridge that revokes — a
+cancelled subscription keeps its paid period, because it *was* paid for; a refund is the opposite
+fact. A **partial** refund leaves access alone: half the money back is not half a course, and there
+is no honest way to withdraw half an access.
+
+## Deleting checkouts that were never paid
+
+```php
+// config/statamic-payments.php
+'prune_unpaid_after_days' => 30,
+```
+
+```bash
+php artisan payments:prune-unpaid --dry-run
+```
+
+The reason is not tidiness. A paid order carries a retention *obligation*; an abandoned checkout
+carries the opposite — the row holds the name and email of somebody with whom no contract was ever
+concluded. Deleted rather than anonymised: an anonymised record with no purpose is still a record.
+
+Never touched: anything paid, fulfilled, refunded, or that reached a final status — a failed attempt
+may still be a question later — and anything inside a running reminder sequence, because an
+automation whose trigger vanishes underneath it fails halfway through.
+
 ## What an invoice will need
 
 Two facts are recorded at checkout because they cannot be recovered afterwards.

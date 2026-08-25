@@ -238,6 +238,71 @@ class EntitlementsBridge
     }
 
     /**
+     * Money went back, so the access goes with it.
+     *
+     * **This is the one place in the bridge that revokes.** Everywhere else the
+     * rule is that a window simply stops being extended — cancelling a
+     * subscription leaves the paid period intact, because it was paid for. A
+     * refund is the opposite fact: it was *not* paid for after all, and letting
+     * somebody keep a course they were repaid for is the failure this whole
+     * method exists to end.
+     *
+     * Only on a **full** refund. Half the money back does not mean half a
+     * course, and there is no honest way to withdraw half an access — so a
+     * partial refund is recorded and left to a person, which is what the
+     * Control Panel screen is for.
+     *
+     * The reason is mandatory in the sibling, on purpose: a revocation nobody
+     * can explain later is a revocation somebody undoes.
+     */
+    public function revokeFor(Payment $payment, bool $isFull): void
+    {
+        if (! $isFull || ! $this->available()) {
+            return;
+        }
+
+        $subject = $payment->email;
+
+        if (! is_string($subject) || $subject === '') {
+            return;
+        }
+
+        $handles = $payment->items->isNotEmpty()
+            ? $payment->items->pluck('product')->all()
+            : [$payment->product];
+
+        foreach ($handles as $handle) {
+            $slug = $this->slugFor($handle);
+
+            if ($slug === null) {
+                continue;
+            }
+
+            try {
+                $facade = self::FACADE;
+
+                $grants = $facade::forSubject($this->subjectFor($subject))
+                    ->where('product_slug', $slug)
+                    ->get();
+
+                foreach ($grants as $grant) {
+                    $facade::revoke($grant, 'Zahlung erstattet');
+                }
+            } catch (Throwable $e) {
+                // Laut, nicht still: hier bleibt jemand mit Zugang zurueck, den
+                // er zurueckgezahlt bekommen hat. Das ist der Fall, in dem ein
+                // Mensch nachsehen muss.
+                Log::error('statamic-payments: a refund was recorded but the access could not be withdrawn.', [
+                    'payment_id' => $payment->getKey(),
+                    'product' => $handle,
+                    'grants' => $slug,
+                    'exception' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    /**
      * The buyer, in the shape the entitlements addon accepts.
      *
      * A bare email string is refused there, deliberately: a grant is a fact

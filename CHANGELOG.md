@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.10.0
+
+### What's new
+
+- **Refunds are recorded, and a full one withdraws the access.** Until now the refund happened in the
+  provider's dashboard, nothing here heard about it, and somebody who was repaid kept their course
+  indefinitely. The sibling has had `revoke()` with a mandatory reason all along — nobody called it.
+
+  `Refunds::record()` notes an **amount and a time**, never a status: an order half repaid is still a
+  paid order, and a status forced to choose would be wrong about the other half. Idempotent per the
+  provider's refund id, because "the customer was refunded three times" is the kind of number that
+  ends up in an annual return.
+
+  A **full** refund revokes every product line of the order. A **partial** one does not: half the
+  money back is not half a course, and there is no honest way to withdraw half an access — so it is
+  recorded and left to a person.
+
+  Verified against the real entitlements addon, not a stand-in.
+
+- **`payments:prune-unpaid`** deletes checkouts that were started and never paid, after a number of
+  days the site names (`prune_unpaid_after_days`, off by default). A paid order carries a retention
+  obligation; an abandoned checkout carries the opposite. Deleted rather than anonymised — an
+  anonymised record with no purpose is still a record.
+
+  Everything paid, fulfilled, refunded or in a final status is left alone, as is anything inside a
+  running reminder sequence: an automation whose trigger vanishes underneath it fails halfway through.
+
 ## 1.9.0
 
 ### What's new

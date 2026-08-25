@@ -24,6 +24,8 @@ use Illuminate\Support\Carbon;
  * @property array<string, mixed>|null $meta
  * @property Carbon|null $fulfilled_at
  * @property Carbon|null $failed_notified_at
+ * @property int $refunded_cent
+ * @property Carbon|null $refunded_at
  * @property Carbon|null $abandoned_notified_at
  * @property Carbon|null $paid_at
  * @property Carbon|null $created_at
@@ -93,6 +95,7 @@ class Payment extends Model
             'fulfilled_at' => 'datetime',
             'failed_notified_at' => 'datetime',
             'abandoned_notified_at' => 'datetime',
+            'refunded_at' => 'datetime',
             'paid_at' => 'datetime',
         ];
     }

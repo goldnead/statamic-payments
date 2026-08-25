@@ -105,6 +105,24 @@ return [
     |
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Unpaid checkouts
+    |--------------------------------------------------------------------------
+    |
+    | After how many days `payments:prune-unpaid` deletes a checkout that was
+    | started and never paid. `0` switches it off.
+    |
+    | The reason is not tidiness. A paid order carries a retention obligation; an
+    | abandoned checkout carries the opposite — what sits in the row is the name
+    | and address of somebody with whom no contract was ever concluded. Pick a
+    | number that fits how long a reminder sequence may still be running; 30 is
+    | a common one, and it is your decision rather than this addon's.
+    |
+    */
+
+    'prune_unpaid_after_days' => env('STATAMIC_PAYMENTS_PRUNE_UNPAID_DAYS', 0),
+
     'abandoned' => [
         'enabled' => env('STATAMIC_PAYMENTS_ABANDONED', false),
         'after_minutes' => env('STATAMIC_PAYMENTS_ABANDONED_AFTER', 60),

@@ -3,6 +3,8 @@
 namespace Goldnead\StatamicPayments\Integrations;
 
 use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Models\Subscription;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -79,6 +81,160 @@ class EntitlementsBridge
         if ($payment->items->isEmpty()) {
             $this->grantLine($payment, $payment->product, $subject);
         }
+    }
+
+    /**
+     * A cycle was charged. The access that goes with it runs one interval longer.
+     *
+     * Not a second `grant()`. That call refuses to widen an existing window on
+     * purpose — a retry is not a renewal — so calling it once a month writes a
+     * grant a month, and after a year the question "does this person have
+     * access" has twelve answers. The sibling grew a `renew()` verb for exactly
+     * this; if it is an older version without one, this stays quiet rather than
+     * writing the wrong thing.
+     *
+     * The new end comes from the provider's own `next_payment_at` wherever it
+     * has one. It knows when it will charge again; computing it here would mean
+     * two clocks that drift.
+     */
+    public function renewFor(Subscription $subscription, Payment $payment): void
+    {
+        if (! $this->available() || ! $this->canRenew()) {
+            return;
+        }
+
+        $subject = $subscription->email ?: $payment->email;
+
+        if (! is_string($subject) || $subject === '') {
+            return;
+        }
+
+        $bis = $subscription->next_payment_at;
+
+        if ($bis === null) {
+            // Kein Datum vom Anbieter: lieber nichts verlaengern als raten. Ein
+            // geratenes Ende ist ein Zugang, der zu frueh oder zu spaet endet,
+            // und beides merkt erst der Kunde.
+            Log::warning('statamic-payments: a renewal without a next date; the entitlement was left as it was.', [
+                'subscription_id' => $subscription->getKey(),
+            ]);
+
+            return;
+        }
+
+        $slug = $this->slugFor($subscription->product);
+
+        if ($slug === null) {
+            return;
+        }
+
+        try {
+            $facade = self::FACADE;
+            $verlaengert = $facade::renew($this->subjectFor($subject), $slug, $bis);
+
+            // Nichts zu verlaengern heisst: es gab noch keinen Zugang. Das ist
+            // der erste Zyklus eines Abos, das vor dieser Bruecke begann, oder
+            // eine Installation, die sie gerade erst eingeschaltet hat. Dann
+            // ist Vergeben richtig.
+            if ($verlaengert === null) {
+                $facade::grant(
+                    $this->subjectFor($subject),
+                    $slug,
+                    'statamic-payments',
+                    (string) $subscription->provider_id,
+                    expiresAt: $bis,
+                );
+            }
+        } catch (Throwable $e) {
+            Log::error('statamic-payments: the entitlements bridge could not renew; the charge stands, the access does not follow.', [
+                'subscription_id' => $subscription->getKey(),
+                'product' => $subscription->product,
+                'exception' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * The subscription was cancelled, or it ran out.
+     *
+     * Deliberately **not** a revocation. Somebody who cancels has paid for the
+     * period they are in and keeps it to its end; revoking would take away time
+     * they bought, and `revoke()` in the sibling carries a reason precisely
+     * because it means "taken away deliberately". Ending a subscription means
+     * the window simply stops being pushed forward — which needs no call at all.
+     *
+     * What this does do is close an open-ended grant. A membership granted
+     * without an expiry date would otherwise outlive the subscription that paid
+     * for it, forever, silently.
+     */
+    public function closeFor(Subscription $subscription): void
+    {
+        if (! $this->available() || ! $this->canRenew()) {
+            return;
+        }
+
+        $subject = $subscription->email;
+
+        if (! is_string($subject) || $subject === '') {
+            return;
+        }
+
+        $slug = $this->slugFor($subscription->product);
+
+        if ($slug === null) {
+            return;
+        }
+
+        // Bis zum Ende des bezahlten Zeitraums, und wenn es keinen gibt, bis
+        // jetzt. Das Datum des Anbieters ist auch hier die Wahrheit.
+        $bis = $subscription->next_payment_at ?? $subscription->ended_at ?? Carbon::now();
+
+        try {
+            $facade = self::FACADE;
+            $grant = $facade::forSubject($this->subjectFor($subject))
+                ->where('product_slug', $slug)
+                ->whereNull('expires_at')
+                ->orderByDesc('id')
+                ->first();
+
+            if ($grant === null) {
+                // Ein Zugang mit Ablaufdatum laeuft von selbst aus. Nichts zu tun.
+                return;
+            }
+
+            $grant->forceFill(['expires_at' => $bis])->save();
+        } catch (Throwable $e) {
+            Log::error('statamic-payments: the entitlements bridge could not close an open-ended grant.', [
+                'subscription_id' => $subscription->getKey(),
+                'exception' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /** Whether the installed sibling knows how to renew. */
+    protected function canRenew(): bool
+    {
+        try {
+            $root = (self::FACADE)::getFacadeRoot();
+        } catch (Throwable) {
+            return false;
+        }
+
+        return $root !== null && method_exists($root, 'renew');
+    }
+
+    /** What a product grants, or null if it grants nothing. */
+    protected function slugFor(?string $handle): ?string
+    {
+        if (! is_string($handle) || $handle === '') {
+            return null;
+        }
+
+        $products = config('statamic-payments.products', []);
+        $product = is_array($products) ? ($products[$handle] ?? null) : null;
+        $slug = is_array($product) ? ($product['grants'] ?? null) : null;
+
+        return is_string($slug) && $slug !== '' ? $slug : null;
     }
 
     /**

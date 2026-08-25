@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.8.0
+
+### What's new
+
+- **A subscription now keeps its entitlement in step.** `SubscriptionRenewed` pushes the window to
+  the provider's own `next_payment_at`; `SubscriptionCancelled` and `SubscriptionEnded` close an
+  open-ended grant at the end of the paid period. Until now every installation wrote these three
+  listeners itself.
+
+  Each rule is deliberately not the obvious one. A renewal calls the sibling's `renew()`, not
+  `grant()` — that call refuses to widen an existing window on purpose, so once a month would mean
+  twelve grants a year and "does this person have access" would become an aggregation. Cancelling
+  **closes** rather than revokes: somebody who cancels has paid for the period they are in. And a
+  renewal without a date from the provider changes nothing and logs why — a guessed end is a grant
+  that stops too early or too late, and the customer finds out first.
+
+  Requires `statamic-entitlements` 1.1. Against an older sibling the bridge stays quiet rather than
+  writing the wrong thing.
+
+  Covered twice: once against a stand-in as strict as the real class, and once **against the sibling
+  itself** — three cycles, one entitlement, ending on the third date. The last time this bridge was
+  tested only against a stand-in, it had never worked on a single real installation.
+
 ## 1.7.0
 
 ### What's new

@@ -214,6 +214,25 @@ A `Discount` is built by server-side code that looked something up, never from i
 clamps it anyway: it cannot exceed the total and cannot be negative, because a bug upstream should
 cost a wrong price, not a payment the provider rejects.
 
+## A subscription and the access it pays for
+
+With `statamic-entitlements` installed and `entitlements.enabled` on, a subscription keeps its grant
+in step by itself: a renewal pushes the window to the provider's own `next_payment_at`, and
+cancelling or ending closes an open-ended grant at the end of the paid period.
+
+Three rules, and each of them is deliberately *not* the obvious thing:
+
+- **A renewal is not a second grant.** `grant()` refuses to widen an existing window on purpose — a
+  retry is not a renewal — so calling it once a month would write a grant a month, and a year of
+  membership would be twelve rows. Requires `statamic-entitlements` 1.1, which grew a `renew()` verb
+  for this; against an older sibling the bridge stays quiet rather than writing the wrong thing.
+- **Cancelling is not revoking.** Somebody who cancels has paid for the period they are in and keeps
+  it to the end. Revoking would take away time they bought, and in the sibling a revocation carries a
+  reason precisely because it means "taken away deliberately".
+- **A renewal without a date from the provider changes nothing**, and says so in the log. The
+  provider knows when it will charge again; a guess here is a grant that ends too early or too late,
+  and either way the customer finds out first.
+
 ## Abandoned checkouts
 
 Somebody started a checkout and did not finish it. Off by default:

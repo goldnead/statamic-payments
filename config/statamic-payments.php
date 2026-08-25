@@ -123,6 +123,22 @@ return [
 
     'prune_unpaid_after_days' => env('STATAMIC_PAYMENTS_PRUNE_UNPAID_DAYS', 0),
 
+    /*
+    |--------------------------------------------------------------------------
+    | The largest quantity anybody may buy at once
+    |--------------------------------------------------------------------------
+    |
+    | A safety net, not a business rule. The quantity is the one number a
+    | checkout accepts from a request — the unit price never is — so a mistyped
+    | or hostile figure must not become a five-figure charge.
+    |
+    | A product that offers a *variable* quantity (a donation, a pay-what-you-
+    | want) says so itself with `min_quantity` and `max_quantity`, and those win.
+    |
+    */
+
+    'max_quantity' => env('STATAMIC_PAYMENTS_MAX_QUANTITY', 1000),
+
     'abandoned' => [
         'enabled' => env('STATAMIC_PAYMENTS_ABANDONED', false),
         'after_minutes' => env('STATAMIC_PAYMENTS_ABANDONED_AFTER', 60),

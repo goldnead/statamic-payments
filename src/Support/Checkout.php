@@ -126,7 +126,7 @@ class Checkout
                 'value' => $payment->amount(),
             ],
             'description' => $this->description($lines),
-            'redirectUrl' => $returnUrl ?: $this->url('return_url', ['payment' => $payment->id]),
+            'redirectUrl' => $this->safeReturnUrl($returnUrl, $payment),
             'metadata' => [
                 'payment_id' => $payment->id,
                 'product' => $primary['handle'],
@@ -170,6 +170,115 @@ class Checkout
      * — which is fine for a demo and wrong for production, so the config comment
      * says so.
      */
+
+    /**
+     * Where the provider sends the buyer back to.
+     *
+     * Checked against this application rather than trusted. No shipped code
+     * path feeds this from a request today — funnels builds it from its own
+     * graph — so this is not a hole in the addons but a trapdoor for hosts: an
+     * application that passes `$request->input('return')` through would build an
+     * open redirect, and one with unusually good cover, because it sits behind a
+     * real and successful payment.
+     *
+     * An external URL is dropped rather than refused. The buyer has paid by the
+     * time this is read; failing the checkout over a bad return address would
+     * take their money and show them an error.
+     *
+     * The check is `URL::isExternalToApplication()`, the same one Laravel uses
+     * for its own redirect safety. The approach is the one
+     * `thomasvantuycom/statamic-mollie` takes in `Payments::getRedirectUrl()`
+     * (MIT, checked at the repository on 25.08.2026).
+     */
+    protected function safeReturnUrl(?string $returnUrl, Payment $payment): string
+    {
+        $fallback = $this->url('return_url', ['payment' => $payment->id]);
+
+        if (! is_string($returnUrl) || trim($returnUrl) === '') {
+            return $fallback;
+        }
+
+        if ($this->pointsAwayFromHere($returnUrl)) {
+            Log::warning('statamic-payments: a return URL pointing away from this site was dropped.', [
+                'payment_id' => $payment->getKey(),
+            ]);
+
+            return $fallback;
+        }
+
+        return $returnUrl;
+    }
+
+    /**
+     * Does this URL leave the application?
+     *
+     * A relative path never does. An absolute one has to match the host this
+     * site runs on — scheme included, because `//evil.example` is a URL a
+     * browser follows and a naive prefix check waves through.
+     */
+    protected function pointsAwayFromHere(string $url): bool
+    {
+        $url = trim($url);
+
+        // Protocol-relative: the browser reads `//host/x` as another site.
+        if (str_starts_with($url, '//')) {
+            return true;
+        }
+
+        // Relative path, query or fragment — always this application.
+        if (! preg_match('~^[a-zA-Z][a-zA-Z0-9+.-]*:~', $url)) {
+            return ! str_starts_with($url, '/') ? true : false;
+        }
+
+        $host = parse_url($url, PHP_URL_HOST);
+
+        if (! is_string($host) || $host === '') {
+            return true;
+        }
+
+        // Zwei zulaessige Quellen fuer "hier": die konfigurierte Adresse und
+        // die der laufenden Anfrage. Die zweite, weil eine Installation hinter
+        // mehreren Domains liegen kann und ein Kaeufer, der bezahlt hat, nicht
+        // auf der falschen Seite landen soll, nur weil app.url eine davon nennt.
+        $eigene = array_filter([
+            parse_url((string) config('app.url', ''), PHP_URL_HOST),
+            request()?->getHost(),
+        ], fn ($h) => is_string($h) && $h !== '');
+
+        foreach ($eigene as $kandidat) {
+            if (strcasecmp($host, $kandidat) === 0) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Is this quantity one the catalogue allows?
+     *
+     * Bounds are opt-in: a product that says nothing keeps the behaviour it
+     * always had, capped by a generous global limit that exists only so a
+     * mistyped or hostile number cannot become a five-figure charge. A product
+     * that offers a *variable* quantity — a donation, a pay-what-you-want —
+     * declares `min_quantity` and `max_quantity` and gets them enforced.
+     *
+     * @param  array<string, mixed>  $product
+     */
+    protected function quantityAllowed(array $product, int $quantity): bool
+    {
+        $min = isset($product['min_quantity']) ? max(1, (int) $product['min_quantity']) : 1;
+
+        $max = isset($product['max_quantity'])
+            ? (int) $product['max_quantity']
+            : (int) config('statamic-payments.max_quantity', 1000);
+
+        if ($max < $min) {
+            $max = $min;
+        }
+
+        return $quantity >= $min && $quantity <= $max;
+    }
 
     /**
      * A country code, or nothing.
@@ -227,7 +336,7 @@ class Checkout
 
         return new CheckoutResult(
             $payment,
-            $returnUrl ?: $this->url('return_url', ['payment' => $payment->id]),
+            $this->safeReturnUrl($returnUrl, $payment),
         );
     }
 
@@ -301,6 +410,22 @@ class Checkout
             $product = $this->catalogue->find($handle);
 
             if (! $product) {
+                return [];
+            }
+
+            // Die Menge ist die einzige Zahl, die aus einem Request stammen
+            // darf — und auch nur, weil der Stueckpreis es nicht tut. Damit das
+            // traegt, sagt der Katalog, was zulaessig ist: eine Spende ueber 0
+            // ist keine, und eine ueber 999999 ist ein Tippfehler oder ein
+            // Angriff. Die Grenzen stehen am Produkt und nicht als Parameter an
+            // start(), denn ein Parameter waere wieder eine Zahl aus dem
+            // Request, nur mit mehr Schritten dazwischen.
+            //
+            // Ohne Angabe gilt weiter, was immer galt: eine Menge ist erlaubt
+            // (drei Hefte sind drei Hefte), gedeckelt durch ein grosszuegiges
+            // Netz gegen Unsinn. Ein Produkt, das eine *variable* Menge
+            // anbietet, deklariert seine Grenzen und bekommt sie geprueft.
+            if (! $this->quantityAllowed($product, $quantity)) {
                 return [];
             }
 

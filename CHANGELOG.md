@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.11.0
+
+### What's new
+
+- **Quantity bounds in the catalogue.** The quantity is the only figure a checkout accepts from a
+  request — the unit price never is — so a product that offers a *variable* one now says what it
+  allows: `min_quantity` and `max_quantity`. That is what makes a donation or a pay-what-you-want
+  possible without the rule falling: the unit price stays server-side, and what comes from the
+  browser is a bounded integer.
+
+  Opt-in. A product that says nothing behaves exactly as before, capped by a new global
+  `max_quantity` (default 1000) that exists only so a mistyped or hostile figure cannot become a
+  five-figure charge.
+
+### What's fixed
+
+- **A currency is not always divided by a hundred.** `amount_cent` is minor units and `amount()`
+  hard-coded two decimals. The Japanese yen has none and the Tunisian dinar three, so 1.000 ¥ went
+  to the provider as either ten times or a hundredth of the price. `Support\Money` knows the
+  zero- and three-decimal currencies; two remains the default, because a table of every ISO 4217
+  code is one nobody maintains.
+
+- **The return URL is checked against this application.** No shipped code path feeds it from a
+  request, so this was never a hole in the addons — it was a trapdoor for hosts: an application
+  passing `$request->input('return')` through would build an open redirect, and one with unusually
+  good cover, because it sits behind a real and successful payment. An external target is now
+  dropped rather than refused: the buyer has paid by then, and failing the checkout over a bad
+  return address would take their money and show them an error.
+
+  Approach taken from `thomasvantuycom/statamic-mollie` (MIT, checked at the repository).
+
 ## 1.10.0
 
 ### What's new

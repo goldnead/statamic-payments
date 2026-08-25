@@ -164,10 +164,10 @@ class OrderBumpTest extends TestCase
         // A funnel passes its own page here. Without it the provider sends the
         // buyer to the site's configured thank-you page — outside the flow they
         // were walking, halfway through a purchase.
-        app(Checkout::class)->start('noten-paket', [], 'https://example.test/f/kurs/danke');
+        app(Checkout::class)->start('noten-paket', [], 'http://localhost/f/kurs/danke');
 
         $this->assertSame(
-            'https://example.test/f/kurs/danke',
+            'http://localhost/f/kurs/danke',
             $this->gateway->lastPayload['redirectUrl'] ?? null,
         );
     }

@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Models;
 
+use Goldnead\StatamicPayments\Support\Money;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -138,6 +139,9 @@ class Payment extends Model
     /** The amount as a decimal string, for display and for the provider's API. */
     public function amount(): string
     {
-        return number_format($this->amount_cent / 100, 2, '.', '');
+        // Not a hard-coded 100. `amount_cent` is minor units, and how many of
+        // those make one depends on the currency: the yen has none, the dinar
+        // three. See {@see Money}.
+        return Money::format($this->amount_cent, $this->currency);
     }
 }

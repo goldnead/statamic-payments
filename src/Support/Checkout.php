@@ -36,7 +36,7 @@ class Checkout
      *                                  buyer who lands outside the flow they were walking has been dropped
      *                                  halfway through a purchase.
      */
-    public function start(string|array $products, array $buyer = [], ?string $returnUrl = null): ?CheckoutResult
+    public function start(string|array $products, array $buyer = [], ?string $returnUrl = null, ?Discount $discount = null): ?CheckoutResult
     {
         $lines = $this->lines($products);
 
@@ -45,14 +45,22 @@ class Checkout
         }
 
         $primary = $lines[0];
-        $total = array_sum(array_map(fn (array $l) => $l['amount_cent'] * $l['quantity'], $lines));
+        $gross = array_sum(array_map(fn (array $l) => $l['amount_cent'] * $l['quantity'], $lines));
+
+        // Clamped here rather than trusted, even though a Discount is always
+        // built by server-side code. A discount bigger than the basket would
+        // otherwise become a negative amount, which providers reject with an
+        // error the buyer sees and nobody can explain.
+        $off = $discount?->against($gross) ?? 0;
+        $total = $gross - $off;
+
         $currency = $primary['currency'];
 
         // Created before the provider is called, with the id filled in after.
         // The other order — provider first, row second — loses the payment
         // entirely if the process dies in between, and the buyer has by then
         // been charged.
-        $payment = DB::transaction(function () use ($lines, $primary, $total, $currency, $buyer): Payment {
+        $payment = DB::transaction(function () use ($lines, $primary, $total, $off, $discount, $currency, $buyer): Payment {
             $payment = Payment::create([
                 'provider' => $this->gateway->provider(),
                 'provider_id' => 'pending-'.Str::uuid(),
@@ -61,6 +69,8 @@ class Checkout
                 // shows, and reading it should not mean joining a table.
                 'product' => $primary['handle'],
                 'amount_cent' => $total,
+                'discount_code' => $discount?->code,
+                'discount_cent' => $off ?: null,
                 'currency' => $currency,
                 // Not `open`: until the provider has answered, this is not a
                 // payment anybody can make, and every report the host builds
@@ -85,6 +95,17 @@ class Checkout
 
             return $payment;
         });
+
+        // Nothing to charge, so nobody is charged.
+        //
+        // A provider will not take a payment of zero, and a free offer that
+        // failed at the checkout would be the most confusing possible outcome:
+        // the buyer was told it costs nothing and then told it did not work.
+        // The payment is marked paid on the spot and fulfilment runs, which is
+        // the same thing the webhook would have done.
+        if ($total <= 0) {
+            return $this->free($payment, $returnUrl);
+        }
 
         $payload = [
             'amount' => [
@@ -119,6 +140,31 @@ class Checkout
         ])->save();
 
         return new CheckoutResult($payment->fresh() ?? $payment, $session->checkoutUrl);
+    }
+
+    /**
+     * A payment of nothing.
+     *
+     * Deliberately not a shortcut around fulfilment: the same `PaymentPaid`
+     * event fires, the same claim is staked, and a listener cannot tell the
+     * difference. A free product that skipped the entitlement would be a
+     * customer with an empty account and a receipt.
+     */
+    protected function free(Payment $payment, ?string $returnUrl): CheckoutResult
+    {
+        $payment->forceFill([
+            // Its own provider marker, so a report can tell a free order from a
+            // real one without guessing from the amount.
+            'provider' => 'free',
+            'provider_id' => 'free-'.$payment->id,
+        ])->save();
+
+        $payment = app(Fulfilment::class)->fulfilFree($payment->fresh() ?? $payment);
+
+        return new CheckoutResult(
+            $payment,
+            $returnUrl ?: $this->url('return_url', ['payment' => $payment->id]),
+        );
     }
 
     /**

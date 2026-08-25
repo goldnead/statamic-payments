@@ -126,17 +126,24 @@ class WebhookTrustTest extends TestCase
     #[Test]
     public function a_product_without_a_sane_amount_is_not_a_product(): void
     {
+        // Zero is **not** in this list any more, and that is a deliberate
+        // change: since free offers exist, an explicit `0` means "this one is
+        // free" (see FreeAndDiscountTest). What is still refused is an amount
+        // that arrived by accident — a negative number, or a price typed as a
+        // string — because those are the shapes a mistake takes, and a mistake
+        // must never turn into a giveaway.
         config(['statamic-payments.products' => [
-            'kaputt' => ['name' => 'Kaputt', 'amount_cent' => 0],
             'auch-kaputt' => ['name' => 'Auch kaputt', 'amount_cent' => -100],
             'ganz-kaputt' => ['name' => 'Ganz kaputt', 'amount_cent' => '19,00'],
+            'gar-keiner' => ['name' => 'Ohne Preis'],
         ]]);
 
-        foreach (['kaputt', 'auch-kaputt', 'ganz-kaputt'] as $handle) {
+        foreach (['auch-kaputt', 'ganz-kaputt', 'gar-keiner'] as $handle) {
             $this->assertNull(app(Checkout::class)->start($handle), $handle.' should not be sellable');
         }
 
         $this->assertSame(0, Payment::count());
+        $this->assertSame(0, $this->gateway->created);
     }
 
     #[Test]

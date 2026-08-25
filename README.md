@@ -158,6 +158,39 @@ rather than a parameter.
 
 `goldnead/statamic-offers` is built on it.
 
+## Free products, and discounts
+
+A product may cost **zero**. It is looked up in the catalogue like any other, the provider is never
+called, and the payment is marked paid and fulfilled on the spot — same `PaymentPaid` event, same
+one-time claim, so a listener that grants access cannot tell the difference and a free product is
+not an account with nothing in it.
+
+A **missing or mistyped** price is still refused. That is the distinction worth keeping: `0` is
+somebody saying "this one is free"; `null`, a negative number, or `'19,00'` is a mistake, and a
+mistake must never become a giveaway.
+
+For a total lower than its lines, hand `start()` a `Discount`:
+
+```php
+use Goldnead\StatamicPayments\Support\Discount;
+
+app(Checkout::class)->start(
+    ['kurs', 'begleit-cd'],
+    ['email' => $email],
+    $returnUrl,
+    new Discount(code: 'FRUEHLING', amountCent: 2500),
+);
+```
+
+This addon knows nothing about coupons and should not: what a code is worth, who may use it and how
+often are questions about **pricing**, and pricing lives in `statamic-offers`. What lives here is the
+consequence — the payment records `discount_code` and `discount_cent`, so an old receipt keeps
+saying what came off even after the coupon is edited or expires.
+
+A `Discount` is built by server-side code that looked something up, never from input. The checkout
+clamps it anyway: it cannot exceed the total and cannot be negative, because a bug upstream should
+cost a wrong price, not a payment the provider rejects.
+
 ## Configuration
 
 | Key | Default | What happens when it is wrong |

@@ -162,6 +162,26 @@ class Fulfilment
         PaymentFailed::dispatch($payment->fresh() ?? $payment);
     }
 
+    /**
+     * Fulfil a payment there was never anything to charge for.
+     *
+     * There is no provider to ask, so the usual "never believe the caller" rule
+     * has nothing to check against. That is safe here for one reason and it is
+     * worth stating: this is only reachable from `Checkout::start()`, after the
+     * **catalogue** priced the basket at zero. Nothing a browser sent decided
+     * that. It goes through the same claim as every other fulfilment, so a
+     * double submit still delivers once.
+     */
+    public function fulfilFree(Payment $payment): Payment
+    {
+        return $this->fulfilOnce($payment, new RemotePayment(
+            providerId: (string) $payment->provider_id,
+            status: Payment::STATUS_PAID,
+            metadata: ['free' => true],
+            email: $payment->email,
+        ));
+    }
+
     protected function fulfilOnce(Payment $payment, RemotePayment $remote): Payment
     {
         // The claim is staked in the database, not in PHP. A read-then-write

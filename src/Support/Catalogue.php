@@ -78,9 +78,14 @@ class Catalogue
 
         $amount = Arr::get($product, 'amount_cent');
 
-        // A product without a positive integer amount is not a product. Letting
-        // it through would create a payment for nothing and call it an order.
-        if (! is_int($amount) || $amount <= 0) {
+        // A product needs an amount, and it has to be a whole number of minor
+        // units. **Zero is allowed and negative is not**, and the difference
+        // matters: a missing or mistyped price arrives here as null or a string
+        // and is refused, which is what stops a typo becoming a free giveaway.
+        // An explicit `0` is somebody saying "this one is free" — the lead
+        // magnet at the top of a funnel, the sample chapter — and refusing it
+        // meant every free thing had to live outside this addon.
+        if (! is_int($amount) || $amount < 0) {
             return null;
         }
 

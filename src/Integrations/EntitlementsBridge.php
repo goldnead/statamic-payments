@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Integrations;
 
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\Catalogue;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -230,9 +231,30 @@ class EntitlementsBridge
             return null;
         }
 
-        $products = config('statamic-payments.products', []);
-        $product = is_array($products) ? ($products[$handle] ?? null) : null;
-        $slug = is_array($product) ? ($product['grants'] ?? null) : null;
+        // Through the catalogue, not past it. Reading the config array
+        // directly skips every resolver another addon registered — and
+        // `statamic-offers` registers one. Anything bought through an offer
+        // therefore granted nothing at all: the customer paid, the payment
+        // settled, and the access never arrived. Nothing errored, because
+        // "this product grants nothing" and "I could not find this product"
+        // came back as the same null.
+        $product = app(Catalogue::class)->find($handle);
+
+        if ($product === null) {
+            // Said out loud, because the catalogue is stricter than the raw
+            // config array this used to read: an entry without an integer
+            // `amount_cent` does not exist to it at all. For a payment that
+            // was never sellable through the checkout — imported, entered by
+            // hand, left over from an older catalogue — that turns "grants
+            // nothing" into "grants nothing, and nobody notices".
+            Log::warning('statamic-payments: no catalogue entry for a paid product, so no access was granted', [
+                'product' => $handle,
+            ]);
+
+            return null;
+        }
+
+        $slug = $product['grants'] ?? null;
 
         return is_string($slug) && $slug !== '' ? $slug : null;
     }
@@ -337,8 +359,9 @@ class EntitlementsBridge
             return;
         }
 
-        $products = config('statamic-payments.products', []);
-        $product = is_array($products) ? ($products[$handle] ?? null) : null;
+        // Same reason as slugFor(): the catalogue is where a handle becomes a
+        // product, and an offer's handle only resolves there.
+        $product = app(Catalogue::class)->find($handle);
         $slug = is_array($product) ? ($product['grants'] ?? null) : null;
 
         if (! is_string($slug) || $slug === '') {

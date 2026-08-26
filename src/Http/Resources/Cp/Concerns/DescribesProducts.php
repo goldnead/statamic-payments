@@ -2,6 +2,8 @@
 
 namespace Goldnead\StatamicPayments\Http\Resources\Cp\Concerns;
 
+use Goldnead\StatamicPayments\Support\Catalogue;
+
 /**
  * The two lookups every listed row in this package needs.
  *
@@ -12,17 +14,24 @@ namespace Goldnead\StatamicPayments\Http\Resources\Cp\Concerns;
 trait DescribesProducts
 {
     /**
-     * The configured name of a product, if there is one.
+     * The catalogue's name for a product, if there is one.
      *
-     * Plain array access, deliberately. A product handle comes from the
-     * database, and both `config('…products.'.$handle)` and `Arr::get()` split
-     * on dots — a handle containing one would walk into nested configuration
-     * instead of missing.
+     * Through the catalogue rather than the config array, because a handle in
+     * this column may belong to something another addon resolves — an offer,
+     * for one — and the listing showed the raw `offer:fruehling-upsell` where a
+     * name belongs. The dot-notation trap that used to be handled here is
+     * handled one level down, in Catalogue::find().
      */
     protected function productName(?string $handle): ?string
     {
-        $products = config('statamic-payments.products', []);
-        $product = is_array($products) ? ($products[$handle] ?? null) : null;
+        if (! is_string($handle) || $handle === '') {
+            return null;
+        }
+
+        // Through the catalogue: a row sold through an offer carries a handle
+        // no config array knows, and the listing showed the raw
+        // `offer:fruehling-upsell` where a name belongs.
+        $product = app(Catalogue::class)->find($handle);
 
         return is_array($product) ? ($product['name'] ?? null) : null;
     }

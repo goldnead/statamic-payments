@@ -49,7 +49,23 @@ class Catalogue
         return (array) config('statamic-payments.products', []);
     }
 
-    /** @return array<string, mixed>|null */
+    /**
+     * NO memo here, deliberately, and it was written and taken back out.
+     *
+     * `find()` is asked for the same handle repeatedly — once per row of a
+     * listing, three times per invoice line — and a resolver may hit the
+     * database, so caching looks free. It is not: the catalogue is read from
+     * configuration, and configuration changes within a request. A memo would
+     * answer a question about a price from before that change, and the one rule
+     * this class exists for is that an amount is always the current
+     * server-side one.
+     *
+     * Cheap and wrong beats expensive and right nowhere, and least of all here.
+     * If the query count ever matters, the place to fix it is the resolver in
+     * `statamic-offers`, which knows when its own table changed.
+     *
+     * @return array<string, mixed>|null
+     */
     public function find(string $handle): ?array
     {
         // Plain array access, deliberately. A handle can come from a request,

@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.12.0
+
+### Fixed — wer über ein Angebot kaufte, bekam keinen Zugang
+
+`EntitlementsBridge` las `config('statamic-payments.products')` direkt und ging damit an jedem
+Resolver vorbei, den ein anderes Addon am `Catalogue` angemeldet hat — und `statamic-offers` meldet
+einen an. Jede Bestellung über ein Angebot gewährte deshalb **gar nichts**: Zahlung erfolgreich,
+Geld da, Zugang nie.
+
+So still, wie ein Fehler nur sein kann. „Dieses Produkt gewährt nichts" und „dieses Produkt kenne
+ich nicht" kamen beide als dasselbe `null` zurück — kein Fehler, keine Logzeile, kein Unterschied zu
+einem Produkt, das rechtmäßig nichts gewährt.
+
+`slugFor()` und `grantLine()` gehen jetzt über den Katalog. Dasselbe galt für `productName()` im
+Control Panel, wo statt eines Namens der rohe Handle `offer:fruehling-upsell` stand.
+
+Belegt gegen das echte `statamic-entitlements`, nicht gegen eine Attrappe: das letzte Mal, als diese
+Brücke nur gegen einen Doppelgänger geprüft wurde, hatte sie auf keiner einzigen echten Installation
+je funktioniert.
+
 ## 1.11.0
 
 ### What's new

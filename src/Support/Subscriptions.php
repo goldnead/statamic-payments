@@ -102,9 +102,16 @@ class Subscriptions
      * stored card is not a subscription.
      *
      * @param  array<string, mixed>  $buyer
+     * @param  array<string, mixed>|PaymentDetails  $details  Was die aufrufende
+     *                                                        Strecke an die erste Zahlung heften will. Siehe
+     *                                                        {@see PaymentDetails}.
+     *
+     * @throws \InvalidArgumentException wenn $details etwas enthält, das dem Paket gehört
      */
-    public function start(string $product, array $buyer = [], ?string $returnUrl = null): ?CheckoutResult
+    public function start(string $product, array $buyer = [], ?string $returnUrl = null, array|PaymentDetails $details = []): ?CheckoutResult
     {
+        $details = PaymentDetails::from($details);
+
         $plan = $this->planFor($product);
 
         if (! $plan || ! $this->available()) {
@@ -122,14 +129,19 @@ class Subscriptions
         // The first payment. An ordinary checkout in every respect except that
         // it carries the intention: what it establishes is the agreement, and
         // the row it leaves behind is what the webhook later turns into one.
-        $result = $this->checkout->start($product, $buyer, $returnUrl, $this->trialDiscount($product, $plan));
-
-        if (! $result) {
-            return null;
-        }
-
-        $result->payment->forceFill([
-            'meta' => array_merge($result->payment->meta ?? [], [
+        //
+        // Die Absicht geht **in** den Checkout hinein und wird nicht danach
+        // nachgetragen. Nachgetragen war sie zweimal zu spät: der Anbieter war
+        // gerufen, bevor sie in der Datenbank stand, und bei einem Testzeitraum
+        // ohne Betrag ist die Zahlung noch innerhalb von `start()` erfüllt —
+        // `startFromPayment()` sah dann kein `subscription_intent`, tat nichts,
+        // und niemand erfuhr, dass ein bezahltes Abo keines wurde.
+        return $this->checkout->start(
+            $product,
+            $buyer,
+            $returnUrl,
+            $this->trialDiscount($product, $plan),
+            $details->plus([
                 'subscription_intent' => [
                     'product' => $product,
                     'interval' => $plan['interval'],
@@ -137,9 +149,7 @@ class Subscriptions
                     'trial_days' => $plan['trial_days'],
                 ],
             ]),
-        ])->save();
-
-        return $result;
+        );
     }
 
     /**

@@ -119,3 +119,85 @@ Same rule as at checkout: only the provider decides whether money moved.
 A funnel. There is no notion of steps, conditions, downsells, or what to offer
 next. This is one offer, on one page, charged once. If you need sequencing, that
 belongs above this seam — and it is a different product.
+
+## Eigene Angaben an die Folge-Zahlung
+
+`FollowUp::accept()` nimmt als vierten Parameter `$details` entgegen. Was dort
+steht, wird in dieselbe Transaktion geschrieben wie die Zahlung selbst, also
+festgeschrieben, **bevor** der Anbieter gerufen wird.
+
+```php
+$follow = app(FollowUp::class)->accept($original, 'begleit-cd', $context, [
+    'meta' => [
+        'thanks_ref' => $verweis,
+        'address' => ['street' => 'Hauptstr. 1', 'zip' => '50667', 'city' => 'Köln'],
+    ],
+    'country' => 'DE',
+    'country_source' => $erste->country_source,
+]);
+```
+
+Drei Schlüssel, mehr nicht:
+
+- **`meta`**: frei. Landet auf der Zahlung, nicht auf der Zeile. (Der dritte
+  Parameter `$context` gehört weiterhin der Zeile.)
+- **`country`**: ISO 3166-1 alpha-2. Eine eigene Spalte und keine Notiz in
+  `meta`, weil der Steuersatz daran hängt. Ein Wert, der kein Ländercode ist,
+  wird abgelehnt statt still verworfen.
+- **`country_source`**: woher dieses Land stammt, nur zusammen mit ihm. Ohne
+  Angabe steht dort `caller`. Wer das Land aus der ersten Zahlung übernimmt,
+  gibt deren Herkunft mit: die EU will für den Ort eines Verbrauchers zwei
+  nicht widersprechende Nachweise, und „der Kartenherausgeber sagt es" wiegt
+  schwerer als „jemand hat es getippt".
+
+Alles andere gehört dem Paket: `amount_cent`, `product`, `status`,
+`provider_id`, `parent_payment_id` und die übrigen Kennungen. Wer sie mitgibt,
+bekommt eine `InvalidArgumentException`, und zwar bevor eine Zeile angelegt und
+bevor Geld bewegt wurde. Dasselbe gilt für die Schlüssel in `meta`, die das
+Paket selbst führt: `subscription_intent`, `refunds`, `cycle_of` und die zwei
+Notizen, die ein misslungener Abo-Start hinterlässt.
+
+Denselben Parameter hat `Checkout::start()` (als fünften) und
+`Subscriptions::start()` (als vierten). Am Checkout bleibt `$buyer['country']`
+der Weg für das Land des Käufers; was über `$details` ankommt, füllt die Spalte
+nur, wenn sie sonst leer bliebe.
+
+### Abo-Zyklen erben, sie bekommen nichts mitgegeben
+
+Ab dem zweiten Zyklus bucht der Anbieter von sich aus ab, und die Zahlung
+entsteht im Webhook. Es gibt dort keine aufrufende Strecke und deshalb auch
+keine Naht. Was diese Zeile braucht, erbt sie stattdessen von der ersten Zahlung
+des Abos: alles aus deren `meta`, ausgenommen die Schlüssel, die das Paket selbst
+führt. Die Anschrift ändert sich nicht dadurch, dass ein Monat vergeht.
+
+Dazu kommt `meta['cycle_of']` mit der Abo-Kennung und der Kennung der ersten
+Zahlung. Den Zeiger braucht ein Listener, weil die Spalte `subscription_id` zum
+Zeitpunkt von `PaymentPaid` noch leer ist: sie wird erst danach gesetzt, und sie
+ist der Anspruch, an dem eine zweite Zustellung desselben Zyklus scheitert.
+
+Das Land wird **nicht** geerbt. Es trägt der Anbieter nach, noch vor
+`PaymentPaid`, und was der Kartenherausgeber sagt, ist der bessere Nachweis.
+
+### Warum das keine Bequemlichkeit ist
+
+Ohne diese Naht kann eine Anwendung ihre Angaben erst **nach** `accept()`
+nachtragen. Das ist ein Rennen gegen den Webhook, und der Webhook kann es
+gewinnen: der Anbieter meldet die Zahlung, `PaymentPaid` feuert, ein
+Rechnungsschreiber liest die Zeile und findet die Anschrift nicht, weil sie in
+diesem Moment noch nicht dasteht.
+
+Herauskommt eine Rechnung ohne Anschrift des Leistungsempfängers. Über 250 EUR
+ist das eine fehlende Pflichtangabe (§ 33 UStDV kennt die Kleinbetragsrechnung
+nur bis dorthin), und ein ausgestellter Beleg wird nicht nachträglich korrigiert,
+sondern storniert und neu geschrieben. Unter 250 EUR fällt es nicht auf. Das ist
+der unangenehme Teil: die Lücke meldet sich nicht beim billigen Angebot, mit dem
+man anfängt, sondern beim teuren, das man später dazustellt.
+
+### Wenn die Angaben pro Bestellung anders sind
+
+Der mitgelieferte `OfferController` kennt keine Angaben und soll auch keine aus
+dem Request annehmen: eine Anschrift, die aus einem Formularfeld in eine Rechnung
+läuft, ist keine geprüfte Anschrift. Wer eigene Angaben braucht, routet das
+Formular auf einen eigenen Controller und ruft `FollowUp::accept()` selbst. Die
+Prüfungen (Berechtigung, kein zweiter Kauf desselben Angebots, Katalogpreis)
+liegen alle in `accept()` und nicht im Controller.

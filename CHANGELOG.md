@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.13.0
+
+### Neu: eine Naht für Angaben, die dem Paket nichts bedeuten
+
+`FollowUp::accept()`, `Checkout::start()` und `Subscriptions::start()` nehmen jetzt einen
+Parameter `$details` entgegen: `meta`, `country` und `country_source`. Was dort steht, wird in
+dieselbe Transaktion geschrieben wie die Zahlung selbst und steht damit fest, **bevor** der
+Anbieter gerufen wird. Beschrieben in `docs/follow-up-offers.md`.
+
+Was der Aufrufer mitgibt, überschreibt nichts, was das Paket selbst setzt. Betrag, Produkt,
+Status, die Kennungen des Anbieters, die Verbindung zur Eltern-Zahlung: wer sie mitschickt,
+bekommt eine `InvalidArgumentException`, bevor eine Zeile angelegt und bevor Geld bewegt wurde.
+Ein still verworfener Betrag sähe für den Aufrufer aus wie ein gesetzter, und der Unterschied
+fällt dann erst auf dem Kontoauszug auf.
+
+### Behoben: die Folge-Zahlung hatte keine Stelle, an der ihre Angaben ankommen konnten
+
+`FollowUp::accept()` legte eine Zahlung an und rief den Anbieter, ohne dass die aufrufende
+Strecke etwas an diese Zahlung heften konnte. Wer die Anschrift oder einen eigenen Verweis
+brauchte, trug beides **nach** dem Aufruf nach, und das ist ein Rennen gegen den Webhook: meldet
+der Anbieter die Zahlung schneller, als der Aufrufer schreibt, liest der Rechnungsschreiber eine
+Zeile ohne Anschrift.
+
+Auffliegen konnte das erst ab 250 EUR. Bis dorthin reicht die Kleinbetragsrechnung nach
+§ 33 UStDV, die ohne Anschrift des Leistungsempfängers auskommt; darüber ist es eine fehlende
+Pflichtangabe auf einem Beleg, der nicht mehr korrigiert, sondern storniert und neu geschrieben
+wird. Ein Folgeangebot ist typischerweise das billige Ding neben der Bestellung, und genau
+deshalb hält die Lücke still, bis jemand ein teures danebenstellt.
+
+### Behoben: eine Abo-Zahlung ab dem zweiten Zyklus hatte nie eine Anschrift
+
+Ein Zyklus entsteht im Webhook, weil der Anbieter von sich aus abbucht. Die Zeile wurde
+ausschließlich aus dem Abo gebaut und erbte nichts von der Zahlung, die das Abo begonnen hat.
+Damit fehlte jeder Zyklus-Rechnung die Anschrift, und ein Abo ist die Umsatzart, die die
+250-EUR-Grenze am ehesten reißt. Erschwerend: die Spalte `subscription_id` steht zum Zeitpunkt
+von `PaymentPaid` noch nicht, ein Listener hatte also nicht einmal einen Zeiger, um sie
+nachzuschlagen.
+
+Ein Zyklus erbt jetzt die `meta` der ersten Zahlung, ohne die Schlüssel, die das Paket selbst
+führt, und trägt in `meta['cycle_of']` die Kennungen des Abos und der ersten Zahlung. Das Land
+wird bewusst nicht geerbt: das trägt der Anbieter nach, und sein Beleg wiegt schwerer.
+
+### Behoben: ein Testzeitraum ohne Betrag wurde nie ein Abo
+
+`Subscriptions::start()` schrieb `subscription_intent` erst, nachdem `Checkout::start()`
+zurückgekehrt war. Bei einem Testzeitraum, der heute nichts kostet, ist die Zahlung zu diesem
+Zeitpunkt schon erfüllt: der Katalog preist sie mit null, `Checkout::start()` erfüllt sie selbst,
+`PaymentPaid` feuert, `startFromPayment()` sieht nach der Absicht und findet keine. Ergebnis: eine
+bezahlte Bestellung, kein Abo, keine Logzeile, kein Unterschied zu einer gewöhnlichen Einzelzahlung.
+
+Die Absicht geht jetzt in den Checkout hinein statt hinterher. Bei einem Testzeitraum ohne Betrag
+bleibt es dabei, dass kein Abo entsteht (ohne Belastung gibt es kein Mandat, und ohne Mandat kein
+Abo), aber es steht jetzt als Fehler im Log statt gar nirgends.
+
 ## 1.12.0
 
 ### Fixed — wer über ein Angebot kaufte, bekam keinen Zugang

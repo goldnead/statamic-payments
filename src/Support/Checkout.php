@@ -35,9 +35,19 @@ class Checkout
      *                                  to. Defaults to the configured page. A funnel passes its own, because a
      *                                  buyer who lands outside the flow they were walking has been dropped
      *                                  halfway through a purchase.
+     * @param  array<string, mixed>|PaymentDetails  $details  Was die aufrufende
+     *                                                        Strecke an *diese* Zahlung heften will: `meta`, `country`. Siehe
+     *                                                        {@see PaymentDetails}. Steht in derselben Transaktion wie die Zahlung
+     *                                                        selbst und damit fest, bevor der Anbieter etwas davon weiß.
+     *
+     * @throws \InvalidArgumentException wenn $details etwas enthält, das dem Paket gehört
      */
-    public function start(string|array $products, array $buyer = [], ?string $returnUrl = null, ?Discount $discount = null): ?CheckoutResult
+    public function start(string|array $products, array $buyer = [], ?string $returnUrl = null, ?Discount $discount = null, array|PaymentDetails $details = []): ?CheckoutResult
     {
+        // Vor allem anderen, damit ein Aufrufer-Fehler folgenlos bleibt: hier
+        // ist noch keine Zeile angelegt und kein Anbieter gerufen.
+        $details = PaymentDetails::from($details);
+
         $lines = $this->lines($products);
 
         if ($lines === []) {
@@ -60,8 +70,8 @@ class Checkout
         // The other order — provider first, row second — loses the payment
         // entirely if the process dies in between, and the buyer has by then
         // been charged.
-        $payment = DB::transaction(function () use ($lines, $primary, $total, $off, $discount, $currency, $buyer): Payment {
-            $payment = Payment::create([
+        $payment = DB::transaction(function () use ($lines, $primary, $total, $off, $discount, $currency, $buyer, $details): Payment {
+            $payment = Payment::create($details->onto([
                 'provider' => $this->gateway->provider(),
                 'provider_id' => 'pending-'.Str::uuid(),
                 // The primary handle stays on the payment as well as in the
@@ -84,7 +94,10 @@ class Checkout
                 // Fehlt es hier, traegt der Anbieter es spaeter nach.
                 'country' => self::country($buyer['country'] ?? null),
                 'country_source' => isset($buyer['country']) ? 'checkout' : null,
-            ]);
+                // Was der Aufrufer mitgibt, kommt hier dazu und überschreibt
+                // nichts von dem, was darüber steht. Das Land des Käufers hat
+                // also weiter genau eine Quelle: das Formular, über `$buyer`.
+            ]));
 
             // Der Rabatt, aufgeteilt. Ein Betrag auf der Zahlung reicht nicht:
             // liegen die Zeilen auf verschiedenen Steuersaetzen, ist aus einer

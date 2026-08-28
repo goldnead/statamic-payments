@@ -78,9 +78,20 @@ class FollowUp
      * normal outcome when the buyer never agreed to be charged again.
      *
      * @param  array<string, mixed>  $context  Free-form, stored on the line.
+     * @param  array<string, mixed>|PaymentDetails  $details  Was die aufrufende
+     *                                                        Strecke an *diese* Zahlung heften will: `meta`, `country`. Siehe
+     *                                                        {@see PaymentDetails}. Wird geschrieben, bevor der Anbieter gerufen
+     *                                                        wird, weil ein Nachtragen ein Rennen gegen den Webhook wäre.
+     *
+     * @throws \InvalidArgumentException wenn $details etwas enthält, das dem Paket gehört
      */
-    public function accept(Payment $original, string $productHandle, array $context = []): ?Payment
+    public function accept(Payment $original, string $productHandle, array $context = [], array|PaymentDetails $details = []): ?Payment
     {
+        // Zuerst, und vor jeder Prüfung, die vom Zustand abhängt: ein Aufrufer,
+        // der etwas Unerlaubtes mitgibt, soll das immer erfahren und nicht nur
+        // dann, wenn dieses Angebot gerade zulässig ist.
+        $details = PaymentDetails::from($details);
+
         if (! $this->eligible($original)) {
             return null;
         }
@@ -101,8 +112,13 @@ class FollowUp
         // The row exists before the provider is called, exactly as at checkout:
         // the other order loses the payment if the process dies in between, and
         // the buyer has by then been charged.
-        $payment = DB::transaction(function () use ($original, $product, $context): Payment {
-            $payment = Payment::create([
+        $payment = DB::transaction(function () use ($original, $product, $context, $details): Payment {
+            // Die Angaben des Aufrufers kommen in dasselbe INSERT wie alles
+            // andere, also festgeschrieben, bevor `chargeAgain()` unten den
+            // Anbieter ruft. Das ist der ganze Punkt: es gibt keinen Moment, in
+            // dem die Zahlung beim Anbieter liegt und die Anschrift noch nicht
+            // in der Datenbank steht.
+            $payment = Payment::create($details->onto([
                 'provider' => $this->gateway->provider(),
                 'provider_id' => 'pending-'.Str::uuid(),
                 'product' => $product['handle'],
@@ -116,7 +132,7 @@ class FollowUp
                 // like an unrelated second purchase, and nobody can answer
                 // "did the offer work" without guessing.
                 'parent_payment_id' => $original->getKey(),
-            ]);
+            ]));
 
             PaymentItem::create([
                 'payment_id' => $payment->id,

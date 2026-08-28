@@ -145,6 +145,18 @@ class Fulfilment
      * naming a real subscription id therefore cannot invent an amount — the
      * worst it can do is create a row for a payment the provider will not
      * confirm, and `isPaid()` is checked afterwards.
+     *
+     * **Hier gibt es keine aufrufende Strecke und deshalb keine Naht.** Der
+     * Anbieter treibt, niemand kann dieser Zahlung etwas mitgeben. Was sie
+     * trotzdem braucht, wird geerbt: was der Aufrufer der ersten Zahlung dieses
+     * Abos an `meta` mitgab, gilt auch für ihre Zyklen. Sonst hätte eine
+     * Abo-Rechnung ab dem zweiten Monat keine Anschrift, und das ist genau der
+     * Beleg, der über 250 EUR eine Pflichtangabe vermissen lässt — bei der
+     * Umsatzart, die diese Grenze am ehesten reißt.
+     *
+     * Das Land wird **nicht** geerbt. Es trägt der Anbieter nach, noch vor
+     * `PaymentPaid`, und was der Kartenherausgeber sagt, ist der bessere
+     * Nachweis. Ein geerbtes Land stünde ihm im Weg.
      */
     protected function openCycle(string $providerId, ?RemotePayment $remote): ?Payment
     {
@@ -180,7 +192,13 @@ class Fulfilment
             'email' => $remote->email ?: $subscription->email,
             'name' => $subscription->name,
             'customer_reference' => $subscription->customer_reference,
+            // Leer, und das mit Absicht: `Subscriptions::recordCycle()` füllt
+            // die Spalte mit einem bedingten UPDATE auf `whereNull`, und das
+            // ist der Anspruch, an dem eine zweite Zustellung desselben Zyklus
+            // scheitert. Sie hier zu setzen hiesse, jeden Zyklus ungezählt zu
+            // lassen. Der Zeiger für einen Listener steht deshalb in `meta`.
             'subscription_id' => null,
+            'meta' => $this->fromTheFirstPayment($subscription),
         ]);
 
         // A line, like every other payment has. Without one
@@ -196,6 +214,43 @@ class Fulfilment
         ]);
 
         return $payment;
+    }
+
+    /**
+     * Was ein Zyklus von der ersten Zahlung seines Abos mitbekommt.
+     *
+     * Zwei Dinge, und beide stehen da, bevor `PaymentPaid` feuert:
+     *
+     * 1. Die Angaben, die die aufrufende Strecke der ersten Zahlung mitgab.
+     *    Die Anschrift ändert sich nicht dadurch, dass ein Monat vergeht.
+     * 2. Ein Zeiger auf das Abo. Die Spalte `subscription_id` steht zu diesem
+     *    Zeitpunkt noch nicht (siehe oben), ein Listener hätte sonst nichts in
+     *    der Hand als die Kundenkennung und eine Rückwärtssuche.
+     *
+     * Nicht mitgeerbt wird, was das Paket in `meta` selbst führt. Ein
+     * `subscription_intent` gehört der Zahlung, die das Abo begonnen hat, und
+     * ein `refunds` der Zahlung, die erstattet wurde.
+     *
+     * @return array<string, mixed>
+     */
+    protected function fromTheFirstPayment(Subscription $subscription): array
+    {
+        $first = Payment::query()
+            ->where('subscription_id', $subscription->getKey())
+            ->orderBy('id')
+            ->first();
+
+        $inherited = $first === null ? [] : array_diff_key(
+            $first->meta ?? [],
+            array_flip(PaymentDetails::RESERVED_META),
+        );
+
+        return $inherited + [
+            'cycle_of' => array_filter([
+                'subscription_id' => $subscription->getKey(),
+                'first_payment_id' => $first?->getKey(),
+            ], fn ($v) => $v !== null),
+        ];
     }
 
     protected function recordUnpaid(Payment $payment, RemotePayment $remote): void

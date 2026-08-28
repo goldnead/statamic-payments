@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Tests\Support;
 
+use Closure;
 use Goldnead\StatamicPayments\Contracts\SubscriptionGateway;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
@@ -19,6 +20,25 @@ use RuntimeException;
  */
 class FakeGateway implements SubscriptionGateway
 {
+    /**
+     * Was in dem Augenblick gilt, in dem der Anbieter gerufen wird.
+     *
+     * Der einzige Weg, die Reihenfolge zu belegen statt sie zu behaupten: ein
+     * Test schaut von hier aus in die Datenbank und sieht genau den Zustand,
+     * den auch ein Webhook sähe, der jetzt einträfe.
+     *
+     * Typisiert und nicht nullbar, also im Konstruktor gesetzt: eine Closure
+     * lässt sich nicht als Vorgabewert einer Eigenschaft schreiben, und ein
+     * `null` mit Prüfung an jeder Aufrufstelle wäre dasselbe mit mehr
+     * Gelegenheit, eine davon zu vergessen.
+     */
+    public Closure $whileCalling;
+
+    public function __construct()
+    {
+        $this->whileCalling = fn (array $payload) => null;
+    }
+
     /** Agreements this fake believes exist, keyed by id. */
     public array $subscriptions = [];
 
@@ -132,6 +152,8 @@ class FakeGateway implements SubscriptionGateway
 
     public function chargeAgain(string $customerReference, array $payload): RemotePayment
     {
+        ($this->whileCalling)($payload);
+
         if ($this->refuseFollowUp || ! in_array($customerReference, $this->mandates, true)) {
             // What Mollie does when there is no mandate: it refuses. Which is
             // correct — no mandate means the buyer never agreed to this.
@@ -173,6 +195,8 @@ class FakeGateway implements SubscriptionGateway
 
     public function createPayment(array $payload): CheckoutSession
     {
+        ($this->whileCalling)($payload);
+
         $this->lastPayload = $payload;
         $this->created++;
         $id = 'tr_'.($this->created);

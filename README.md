@@ -287,6 +287,27 @@ the parts always add up to the whole.
 Existing rows keep `null` for the country and `0` for the line discounts. That is the honest state,
 and everything downstream has to tolerate it rather than guess.
 
+**Anything else your invoice needs goes in the same insert.** `Checkout::start()`,
+`FollowUp::accept()` and `Subscriptions::start()` all take a `$details` array with three keys,
+`meta`, `country` and `country_source`, and write it in the same transaction as the payment:
+
+```php
+app(FollowUp::class)->accept($original, 'begleit-cd', $context, [
+    'meta' => ['address' => $anschrift],
+    'country' => 'DE',
+]);
+```
+
+Adding it *after* the call would be a race against the webhook, and losing that race produces an
+invoice without the buyer's address: a missing mandatory detail above 250 EUR, on a document that
+gets cancelled and reissued rather than corrected. Fields the package owns (the amount, the product,
+the status, the provider's ids) are refused with an exception rather than quietly dropped.
+
+Subscription cycles have no caller to be given anything: the provider charges on its own and the row
+is written in the webhook. They inherit instead, taking the first payment's `meta` minus the keys the
+package runs itself, plus a `meta['cycle_of']` pointer, because the `subscription_id` column is still
+empty when `PaymentPaid` fires. See `docs/follow-up-offers.md`.
+
 ## A subscription and the access it pays for
 
 With `statamic-entitlements` installed and `entitlements.enabled` on, a subscription keeps its grant

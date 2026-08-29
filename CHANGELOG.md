@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Neu: `grants` darf eine Liste sein
+
+Ein Produkt konnte genau einen Zugang vergeben. Für ein Bündel — eine Zeile, ein Preis, drei
+Dinge — reichte das nicht, und `statamic-offers` 1.4 verkauft genau so etwas.
+
+`grants` nimmt jetzt auch eine Liste:
+
+    'fruehlings-buendel' => [
+        'name' => 'Frühlings-Bündel',
+        'amount_cent' => 4900,
+        'grants' => ['noten-fruehling', 'playback-fruehling', 'workshop-mitschnitt'],
+    ],
+
+Eine einzelne Zeichenkette bleibt erlaubt und ist unverändert der Normalfall; alte Konfigurationen
+ändern sich nicht. Doppelte Slugs werden einmal vergeben — zwei Zeilen mit derselben Aussage sind
+kein zweiter Zugang.
+
+Betroffen sind alle vier Wege, an denen ein Zugang hängt: Kauf, Verlängerung, Kündigung und
+Erstattung. Jeder Slug ist ein eigener Versuch, damit der Fehlschlag des zweiten nicht den dritten
+verhindert — und die Zeile im Log nennt den fehlenden Slug statt „das Bündel".
+
+**Vorher war das ein stiller Totalausfall, kein Teilausfall.** Eine Liste fiel an `is_string()`
+heraus, und `slugFor()` gab `null` zurück: nicht das erste Stück, sondern nichts. Zahlung durch,
+Rechnung geschrieben, kein Zugang, keine Fehlermeldung.
+
+
 ### Neu: Selbstbedienung für Käufer
 
 Ein Käufer kann jetzt ohne Konto seine Bestellungen ansehen, seine Rechnung herunterladen, sein

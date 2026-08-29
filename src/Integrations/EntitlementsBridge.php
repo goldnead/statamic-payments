@@ -123,35 +123,35 @@ class EntitlementsBridge
             return;
         }
 
-        $slug = $this->slugFor($subscription->product);
+        // Je Slug einzeln, und der Fehlschlag des einen haelt den naechsten
+        // nicht auf: ein Abo auf ein Buendel verlaengert drei Zugaenge, und
+        // zwei verlaengerte sind besser als keiner.
+        foreach ($this->slugsFor($subscription->product) as $slug) {
+            try {
+                $facade = self::FACADE;
+                $verlaengert = $facade::renew($this->subjectFor($subject), $slug, $bis);
 
-        if ($slug === null) {
-            return;
-        }
-
-        try {
-            $facade = self::FACADE;
-            $verlaengert = $facade::renew($this->subjectFor($subject), $slug, $bis);
-
-            // Nichts zu verlaengern heisst: es gab noch keinen Zugang. Das ist
-            // der erste Zyklus eines Abos, das vor dieser Bruecke begann, oder
-            // eine Installation, die sie gerade erst eingeschaltet hat. Dann
-            // ist Vergeben richtig.
-            if ($verlaengert === null) {
-                $facade::grant(
-                    $this->subjectFor($subject),
-                    $slug,
-                    'statamic-payments',
-                    (string) $subscription->provider_id,
-                    expiresAt: $bis,
-                );
+                // Nichts zu verlaengern heisst: es gab noch keinen Zugang. Das ist
+                // der erste Zyklus eines Abos, das vor dieser Bruecke begann, oder
+                // eine Installation, die sie gerade erst eingeschaltet hat. Dann
+                // ist Vergeben richtig.
+                if ($verlaengert === null) {
+                    $facade::grant(
+                        $this->subjectFor($subject),
+                        $slug,
+                        'statamic-payments',
+                        (string) $subscription->provider_id,
+                        expiresAt: $bis,
+                    );
+                }
+            } catch (Throwable $e) {
+                Log::error('statamic-payments: the entitlements bridge could not renew; the charge stands, the access does not follow.', [
+                    'subscription_id' => $subscription->getKey(),
+                    'product' => $subscription->product,
+                    'grants' => $slug,
+                    'exception' => $e->getMessage(),
+                ]);
             }
-        } catch (Throwable $e) {
-            Log::error('statamic-payments: the entitlements bridge could not renew; the charge stands, the access does not follow.', [
-                'subscription_id' => $subscription->getKey(),
-                'product' => $subscription->product,
-                'exception' => $e->getMessage(),
-            ]);
         }
     }
 
@@ -180,35 +180,34 @@ class EntitlementsBridge
             return;
         }
 
-        $slug = $this->slugFor($subscription->product);
-
-        if ($slug === null) {
-            return;
-        }
-
         // Bis zum Ende des bezahlten Zeitraums, und wenn es keinen gibt, bis
         // jetzt. Das Datum des Anbieters ist auch hier die Wahrheit.
         $bis = $subscription->next_payment_at ?? $subscription->ended_at ?? Carbon::now();
 
-        try {
-            $facade = self::FACADE;
-            $grant = $facade::forSubject($this->subjectFor($subject))
-                ->where('product_slug', $slug)
-                ->whereNull('expires_at')
-                ->orderByDesc('id')
-                ->first();
+        foreach ($this->slugsFor($subscription->product) as $slug) {
+            try {
+                $facade = self::FACADE;
+                $grant = $facade::forSubject($this->subjectFor($subject))
+                    ->where('product_slug', $slug)
+                    ->whereNull('expires_at')
+                    ->orderByDesc('id')
+                    ->first();
 
-            if ($grant === null) {
-                // Ein Zugang mit Ablaufdatum laeuft von selbst aus. Nichts zu tun.
-                return;
+                if ($grant === null) {
+                    // Ein Zugang mit Ablaufdatum laeuft von selbst aus. Nichts
+                    // zu tun — aber die uebrigen Slugs noch pruefen, statt hier
+                    // die ganze Schleife zu verlassen.
+                    continue;
+                }
+
+                $grant->forceFill(['expires_at' => $bis])->save();
+            } catch (Throwable $e) {
+                Log::error('statamic-payments: the entitlements bridge could not close an open-ended grant.', [
+                    'subscription_id' => $subscription->getKey(),
+                    'grants' => $slug,
+                    'exception' => $e->getMessage(),
+                ]);
             }
-
-            $grant->forceFill(['expires_at' => $bis])->save();
-        } catch (Throwable $e) {
-            Log::error('statamic-payments: the entitlements bridge could not close an open-ended grant.', [
-                'subscription_id' => $subscription->getKey(),
-                'exception' => $e->getMessage(),
-            ]);
         }
     }
 
@@ -224,11 +223,22 @@ class EntitlementsBridge
         return $root !== null && method_exists($root, 'renew');
     }
 
-    /** What a product grants, or null if it grants nothing. */
-    protected function slugFor(?string $handle): ?string
+    /**
+     * What a product grants. Empty when it grants nothing.
+     *
+     * **One product may grant several things, and it has to.** A bundle is one
+     * line at one price that hands over three courses; `statamic-offers` sells
+     * exactly that, and before this returned a list, a bundle handed over the
+     * first slug and dropped the rest — `is_string()` on an array is false, so
+     * a `grants` list granted *nothing at all*. Silently: the payment settled,
+     * the invoice was written, and no access arrived.
+     *
+     * @return list<string>
+     */
+    protected function slugsFor(?string $handle): array
     {
         if (! is_string($handle) || $handle === '') {
-            return null;
+            return [];
         }
 
         // Through the catalogue, not past it. Reading the config array
@@ -251,12 +261,39 @@ class EntitlementsBridge
                 'product' => $handle,
             ]);
 
-            return null;
+            return [];
         }
 
-        $slug = $product['grants'] ?? null;
+        return self::slugList($product['grants'] ?? null);
+    }
 
-        return is_string($slug) && $slug !== '' ? $slug : null;
+    /**
+     * One slug, a list of them, or nothing.
+     *
+     * A single string stays allowed and is the common case; wrapping it here
+     * rather than at every call site is what keeps `'grants' => 'kurs'` in a
+     * config file that was written years ago working unchanged.
+     *
+     * Duplicates go: granting the same entitlement twice from one payment is
+     * two rows that say the same thing, and the second one has no meaning the
+     * first did not already carry.
+     *
+     * @return list<string>
+     */
+    protected static function slugList(mixed $grants): array
+    {
+        if (is_string($grants)) {
+            $grants = [$grants];
+        }
+
+        if (! is_array($grants)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter(
+            $grants,
+            static fn (mixed $slug): bool => is_string($slug) && $slug !== '',
+        )));
     }
 
     /**
@@ -294,32 +331,31 @@ class EntitlementsBridge
             : [$payment->product];
 
         foreach ($handles as $handle) {
-            $slug = $this->slugFor($handle);
+            // Ein Buendel gibt mehrere Zugaenge her, und eine Erstattung nimmt
+            // alle zurueck. Einen davon stehen zu lassen waere die Haelfte
+            // einer Rueckabwicklung.
+            foreach ($this->slugsFor($handle) as $slug) {
+                try {
+                    $facade = self::FACADE;
 
-            if ($slug === null) {
-                continue;
-            }
+                    $grants = $facade::forSubject($this->subjectFor($subject))
+                        ->where('product_slug', $slug)
+                        ->get();
 
-            try {
-                $facade = self::FACADE;
-
-                $grants = $facade::forSubject($this->subjectFor($subject))
-                    ->where('product_slug', $slug)
-                    ->get();
-
-                foreach ($grants as $grant) {
-                    $facade::revoke($grant, 'Zahlung erstattet');
+                    foreach ($grants as $grant) {
+                        $facade::revoke($grant, 'Zahlung erstattet');
+                    }
+                } catch (Throwable $e) {
+                    // Laut, nicht still: hier bleibt jemand mit Zugang zurueck, den
+                    // er zurueckgezahlt bekommen hat. Das ist der Fall, in dem ein
+                    // Mensch nachsehen muss.
+                    Log::error('statamic-payments: a refund was recorded but the access could not be withdrawn.', [
+                        'payment_id' => $payment->getKey(),
+                        'product' => $handle,
+                        'grants' => $slug,
+                        'exception' => $e->getMessage(),
+                    ]);
                 }
-            } catch (Throwable $e) {
-                // Laut, nicht still: hier bleibt jemand mit Zugang zurueck, den
-                // er zurueckgezahlt bekommen hat. Das ist der Fall, in dem ein
-                // Mensch nachsehen muss.
-                Log::error('statamic-payments: a refund was recorded but the access could not be withdrawn.', [
-                    'payment_id' => $payment->getKey(),
-                    'product' => $handle,
-                    'grants' => $slug,
-                    'exception' => $e->getMessage(),
-                ]);
             }
         }
     }
@@ -359,30 +395,31 @@ class EntitlementsBridge
             return;
         }
 
-        // Same reason as slugFor(): the catalogue is where a handle becomes a
+        // Same reason as slugsFor(): the catalogue is where a handle becomes a
         // product, and an offer's handle only resolves there.
         $product = app(Catalogue::class)->find($handle);
-        $slug = is_array($product) ? ($product['grants'] ?? null) : null;
+        $slugs = self::slugList(is_array($product) ? ($product['grants'] ?? null) : null);
 
-        if (! is_string($slug) || $slug === '') {
-            return;
-        }
-
-        try {
-            $facade = self::FACADE;
-            $facade::grant(
-                $this->subjectFor($subject),
-                $slug,
-                'statamic-payments',
-                (string) $payment->provider_id,
-            );
-        } catch (Throwable $e) {
-            Log::error('statamic-payments: the entitlements bridge failed; the payment stands, the grant does not.', [
-                'payment_id' => $payment->getKey(),
-                'product' => $handle,
-                'grants' => $slug,
-                'exception' => $e->getMessage(),
-            ]);
+        // Je Slug ein eigener Versuch. Scheitert der zweite von drei, sind die
+        // anderen beiden trotzdem vergeben — und die Zeile im Log nennt genau
+        // den, der fehlt, statt „das Buendel".
+        foreach ($slugs as $slug) {
+            try {
+                $facade = self::FACADE;
+                $facade::grant(
+                    $this->subjectFor($subject),
+                    $slug,
+                    'statamic-payments',
+                    (string) $payment->provider_id,
+                );
+            } catch (Throwable $e) {
+                Log::error('statamic-payments: the entitlements bridge failed; the payment stands, the grant does not.', [
+                    'payment_id' => $payment->getKey(),
+                    'product' => $handle,
+                    'grants' => $slug,
+                    'exception' => $e->getMessage(),
+                ]);
+            }
         }
     }
 }

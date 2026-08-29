@@ -161,6 +161,15 @@ return [
     |         'grants' => 'noten-fruehling',
     |     ],
     |
+    | `grants` may also be a list, and that is how a bundle is expressed: one
+    | line, one price, several things handed over.
+    |
+    |     'fruehlings-buendel' => [
+    |         'name' => 'Frühlings-Bündel',
+    |         'amount_cent' => 4900,
+    |         'grants' => ['noten-fruehling', 'playback-fruehling', 'workshop-mitschnitt'],
+    |     ],
+    |
     | Off by default, and off again for any product without `grants`. A payment
     | addon that granted access by default would be deciding something that is
     | the site's to decide.

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unveröffentlicht
+## 1.15.0 — 2026-08-30
 
 ### Neu: `Brands::readerId()` — die fehlende Hälfte von `Brands::only()`
 

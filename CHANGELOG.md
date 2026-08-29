@@ -2,6 +2,27 @@
 
 ## Unveröffentlicht
 
+### Neu: `Brands::readerId()` — die fehlende Hälfte von `Brands::only()`
+
+`only()` nimmt eine nullbare Marken-ID und macht mit jedem Fall das Richtige. Nur musste sich jede
+aufrufende Stelle diese ID selbst besorgen, und die naheliegende falsche Antwort lag direkt daneben:
+`stampId()`. Das beantwortet „auf welche Marke wird diese **neue** Zeile geschrieben" und liefert
+dort, wo keine Marke gesetzt ist, eine **Null**. An `only()` weitergereicht heißt Null nicht „zeig
+nichts", sondern „zeig die Zeilen, die niemand beansprucht hat" — also alles, was ein Webhook oder
+ein Konsolenbefehl angelegt hat.
+
+Eine so geschriebene Liste sieht auf einer Einmarken-Installation richtig aus, sieht auf einer
+Mehrmarken-Installation mit gewählter Marke richtig aus, und zeigt still die herrenlosen Zeilen,
+sobald jemand sie ohne Marke öffnet.
+
+```php
+Brands::only($query, Brands::readerId());   // richtig
+Brands::only($query, Brands::stampId());    // die herrenlosen Zeilen
+```
+
+Null hier, Null dort — zwei verschiedene Fragen, wie der Klassenkommentar schon sagte. Der
+Kommentar allein hat nicht gereicht.
+
 ### Neu: `Catalogue::contribute()` — der Katalog kann jetzt aufzählen
 
 `Catalogue::extend()` beantwortet „was kostet dieser Handle". Es kann nicht beantworten „was gibt

@@ -132,6 +132,41 @@ final class Brands
     }
 
     /**
+     * The brand whose rows the caller may read, or null when nobody said.
+     *
+     * The missing half of {@see self::only()}, and it is missing on purpose no
+     * longer: `only()` takes a nullable id and does the right thing with each,
+     * but every caller had to work out that id for itself, and the obvious
+     * wrong answer was sitting right there. `stampId()` returns **zero** where
+     * no brand is current, and zero passed to `only()` does not mean "show
+     * nothing" — it means "show the rows nobody claimed". A listing written
+     * that way looks correct on a single-brand install, looks correct on a
+     * multi-brand install with a brand selected, and quietly shows the
+     * unassigned rows to whoever opens it without one.
+     *
+     * Null here, zero there. The two questions are "whose row is this about to
+     * be" and "whose rows may this reader see", and the class docblock already
+     * says they are not the same one.
+     */
+    public static function readerId(): ?int
+    {
+        if (! self::multiBrand()) {
+            // `only()` does not filter a single-brand install at all, so the
+            // value is unused. Null rather than zero anyway, so that a caller
+            // who reaches for it outside `only()` gets the honest answer.
+            return null;
+        }
+
+        try {
+            $manager = app('brand-context');
+
+            return $manager->hasCurrent() ? (int) $manager->currentId() : null;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * The brand that `brand-context` itself calls default.
      *
      * Asked, never assumed. `DB::table('brands')->orderBy('id')->value('id')`

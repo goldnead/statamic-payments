@@ -84,4 +84,30 @@ return [
     'timeline_label_amount' => 'Amount',
     'timeline_label_discount' => 'Discount',
     'timeline_label_campaign' => 'Campaign',
+
+    // Metrics for statamic-insights. The handles are fixed, these words are not
+    // — what is on the screen is a translation, what is in the URL is a
+    // contract.
+    'metric_group' => 'Payments',
+    'metric_revenue_gross' => 'Revenue',
+    'metric_revenue_gross_description' => 'What came in during the period, counted on the day of payment, before refunds.',
+    'metric_revenue_net' => 'Net revenue',
+    'metric_revenue_net_description' => "The period's revenue less the period's refunds. A refund counts on the day the money went back, even when the purchase is older.",
+    'metric_refunded' => 'Refunds',
+    'metric_refunded_description' => 'What was paid back during the period, counted on the day of the refund.',
+    'metric_orders' => 'Orders',
+    'metric_orders_description' => 'Confirmed payments in the period. An order bump in the same checkout is one order, not a second.',
+    'metric_buyers' => 'Buyers',
+    'metric_buyers_description' => 'Distinct addresses that bought during the period. Somebody who bought twice counts once.',
+    'metric_refund_rate' => 'Refund rate',
+    'metric_refund_rate_description' => "Refunds against the period's revenue. With no revenue there is no value.",
+    'metric_average_order' => 'Average order value',
+    'metric_average_order_description' => 'Revenue divided by orders. With no orders there is no value.',
+    'metric_breakdown_campaign' => 'Campaign',
+    'metric_breakdown_source' => 'Source',
+    'metric_breakdown_product' => 'Product',
+    'metric_breakdown_country' => 'Country',
+    'metric_no_campaign' => 'No campaign',
+    'metric_no_source' => 'No source',
+    'metric_no_country' => 'No country',
 ];

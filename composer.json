@@ -59,6 +59,7 @@
         "goldnead/statamic-entitlements": "^1.1"
     },
     "suggest": {
+        "goldnead/statamic-insights": "Show revenue, refunds, orders and buyers on the Insights dashboard, split by campaign, source, product and country",
         "goldnead/statamic-leadhub": "Write paid purchases onto the buyer's CRM timeline and into their lifetime revenue (set statamic-payments.leadhub.enabled)"
     },
     "config": {

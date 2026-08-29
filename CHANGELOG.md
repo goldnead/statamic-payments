@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Seven metrics for `statamic-insights`** — gross revenue, net, refunded,
+  orders, buyers, average order and refund rate, with splits by campaign,
+  source, product and country. The addon that owns the data now owns the query;
+  Insights owns the screen. Optional in both directions: a `suggest`, a
+  `class_exists` guard, and nothing loaded when the sibling is absent.
+- `HasFilterOptions` on every metric, so the currency switch on the reporting
+  screen is filled by this addon rather than guessed by the other one.
+
 ## 1.13.0
 
 ### Neu: eine Naht für Angaben, die dem Paket nichts bedeuten

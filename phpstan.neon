@@ -12,5 +12,14 @@ parameters:
     stubFiles:
         - phpstan/AddonServiceProvider.stub
 
+    # The analytics addon is a `suggest`, not a `require`: the metrics under
+    # src/Integrations/Insights implement its contract and it is not in vendor.
+    # Scanned from the test stand-in — the same declarations, byte for byte —
+    # so the metrics are checked against the real signatures instead of being
+    # reported as forty-one unknown classes. Scanned, not analysed: the file
+    # itself is not code this package ships.
+    scanFiles:
+        - tests/Fakes/insights-contracts.php
+
     # A ratchet for new code. The baseline is empty because the findings from the
     # first run were fixed; keep it that way rather than appending to it.

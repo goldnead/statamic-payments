@@ -84,4 +84,30 @@ return [
     'timeline_label_amount' => 'Betrag',
     'timeline_label_discount' => 'Rabatt',
     'timeline_label_campaign' => 'Kampagne',
+
+    // Kennzahlen für statamic-insights. Die Handles stehen fest, die Wörter hier
+    // nicht — was auf dem Bildschirm steht, ist Übersetzung, was in der URL
+    // steht, ist Vertrag.
+    'metric_group' => 'Zahlungen',
+    'metric_revenue_gross' => 'Einnahmen',
+    'metric_revenue_gross_description' => 'Was im Zeitraum eingegangen ist, gezählt am Tag der Zahlung, vor Erstattungen.',
+    'metric_revenue_net' => 'Einnahmen netto',
+    'metric_revenue_net_description' => 'Einnahmen des Zeitraums abzüglich der Erstattungen des Zeitraums. Eine Erstattung zählt an dem Tag, an dem das Geld zurückging, auch wenn der Kauf älter ist.',
+    'metric_refunded' => 'Erstattungen',
+    'metric_refunded_description' => 'Was im Zeitraum zurückgezahlt wurde, gezählt am Tag der Erstattung.',
+    'metric_orders' => 'Bestellungen',
+    'metric_orders_description' => 'Bestätigte Zahlungen im Zeitraum. Ein Zusatzkauf im selben Bezahlvorgang ist eine Bestellung, keine zweite.',
+    'metric_buyers' => 'Käufer',
+    'metric_buyers_description' => 'Verschiedene Adressen, die im Zeitraum gekauft haben. Wer zweimal gekauft hat, zählt einmal.',
+    'metric_refund_rate' => 'Erstattungsquote',
+    'metric_refund_rate_description' => 'Erstattungen im Verhältnis zu den Einnahmen des Zeitraums. Ohne Einnahmen gibt es keinen Wert.',
+    'metric_average_order' => 'Durchschnittlicher Bestellwert',
+    'metric_average_order_description' => 'Einnahmen geteilt durch Bestellungen. Ohne Bestellungen gibt es keinen Wert.',
+    'metric_breakdown_campaign' => 'Kampagne',
+    'metric_breakdown_source' => 'Quelle',
+    'metric_breakdown_product' => 'Produkt',
+    'metric_breakdown_country' => 'Land',
+    'metric_no_campaign' => 'Ohne Kampagne',
+    'metric_no_source' => 'Ohne Quelle',
+    'metric_no_country' => 'Ohne Land',
 ];

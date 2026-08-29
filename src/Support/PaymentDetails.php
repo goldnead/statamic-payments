@@ -43,7 +43,30 @@ use InvalidArgumentException;
 final class PaymentDetails
 {
     /** Was ein Aufrufer setzen darf. */
-    public const ALLOWED = ['meta', 'country', 'country_source'];
+    public const ALLOWED = [
+        'meta', 'country', 'country_source',
+        'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+        'referrer', 'landing_page',
+    ];
+
+    /**
+     * Herkunftsangaben und die Breite ihrer Spalte.
+     *
+     * Die Namen sind die von LeadHub, damit beide Seiten dieselbe Tatsache
+     * gleich nennen. Die Breiten stehen hier und nicht nur in der Migration,
+     * weil ein zu langer Wert hier gekürzt wird statt später von der Datenbank
+     * abgeschnitten oder abgelehnt zu werden — und weil abgeschnitten und
+     * abgelehnt zwei sehr verschiedene Kaufabbrüche sind.
+     */
+    private const ATTRIBUTION = [
+        'utm_source' => 255,
+        'utm_medium' => 255,
+        'utm_campaign' => 255,
+        'utm_term' => 255,
+        'utm_content' => 255,
+        'referrer' => 1024,
+        'landing_page' => 1024,
+    ];
 
     /** Die Herkunft eines Landes, das keine bessere nennt. */
     public const SOURCE = 'caller';
@@ -66,11 +89,13 @@ final class PaymentDetails
 
     /**
      * @param  array<string, mixed>  $meta
+     * @param  array<string, string>  $attribution
      */
     private function __construct(
         private array $meta,
         private ?string $country,
         private ?string $countrySource,
+        private array $attribution = [],
     ) {}
 
     /**
@@ -115,6 +140,7 @@ final class PaymentDetails
             self::meta($details['meta'] ?? []),
             $country,
             $source,
+            self::attribution($details),
         );
     }
 
@@ -125,7 +151,7 @@ final class PaymentDetails
      */
     public function plus(array $own): self
     {
-        return new self(array_merge($this->meta, $own), $this->country, $this->countrySource);
+        return new self(array_merge($this->meta, $own), $this->country, $this->countrySource, $this->attribution);
     }
 
     /**
@@ -164,6 +190,10 @@ final class PaymentDetails
         if ($this->country !== null) {
             $columns['country'] = $this->country;
             $columns['country_source'] = $this->countrySource ?? self::SOURCE;
+        }
+
+        foreach ($this->attribution as $key => $value) {
+            $columns[$key] = $value;
         }
 
         return $columns;
@@ -210,6 +240,53 @@ final class PaymentDetails
 
         /** @var array<string, mixed> $meta */
         return $meta;
+    }
+
+    /**
+     * Woher der Kauf kam.
+     *
+     * Hier wird anders geurteilt als bei `country`, und der Unterschied ist
+     * beabsichtigt: ein falscher **Typ** ist ein Programmierfehler und fliegt,
+     * ein zu **langer** Wert ist Wirklichkeit und wird gekürzt. UTM-Werte
+     * stammen am Ende aus einer URL, die ein Fremder gebaut hat; ein
+     * 4000 Zeichen langer `utm_content` ist kein Fehler des Hosts, sondern ein
+     * Werkzeug, das Unsinn anhängt. Daran darf kein Kauf scheitern.
+     *
+     * Leere Werte werden verworfen statt als leerer Text gespeichert. „Kam von
+     * nirgendwo" und „wir haben nicht hingesehen" sind dieselbe Aussage, und
+     * beide heißen null.
+     *
+     * @param  array<string, mixed>  $details
+     * @return array<string, string>
+     */
+    private static function attribution(array $details): array
+    {
+        $values = [];
+
+        foreach (self::ATTRIBUTION as $key => $laenge) {
+            $value = $details[$key] ?? null;
+
+            if ($value === null) {
+                continue;
+            }
+
+            if (! is_string($value)) {
+                throw new InvalidArgumentException(sprintf(
+                    'statamic-payments: `%s` muss ein Text sein.',
+                    $key,
+                ));
+            }
+
+            $value = trim($value);
+
+            if ($value === '') {
+                continue;
+            }
+
+            $values[$key] = mb_substr($value, 0, $laenge);
+        }
+
+        return $values;
     }
 
     /**

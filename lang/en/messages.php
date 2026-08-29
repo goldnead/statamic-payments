@@ -75,4 +75,13 @@ return [
     'subscription_cancel_failed' => 'The provider would not cancel :failed of :total subscriptions. Those are unchanged; check them in your provider dashboard.',
 
     'offer_refused' => 'This offer is no longer available.',
+
+    'timeline_purchase' => 'Bought: :product for :amount',
+    'timeline_refund_full' => 'Fully refunded: :amount',
+    'timeline_refund_partial' => 'Partially refunded: :amount',
+    'timeline_product_plus' => ':product and one more item|:product and :count more items',
+    'timeline_label_product' => 'Product',
+    'timeline_label_amount' => 'Amount',
+    'timeline_label_discount' => 'Discount',
+    'timeline_label_campaign' => 'Campaign',
 ];

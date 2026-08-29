@@ -75,4 +75,13 @@ return [
     'subscription_cancel_failed' => 'Der Anbieter hat :failed von :total Abos nicht gekündigt. Diese sind unverändert; bitte im Anbieter-Konto nachsehen.',
 
     'offer_refused' => 'Dieses Angebot ist nicht mehr verfügbar.',
+
+    'timeline_purchase' => 'Gekauft: :product für :amount',
+    'timeline_refund_full' => 'Vollständig erstattet: :amount',
+    'timeline_refund_partial' => 'Teilweise erstattet: :amount',
+    'timeline_product_plus' => ':product und eine weitere Position|:product und :count weitere Positionen',
+    'timeline_label_product' => 'Produkt',
+    'timeline_label_amount' => 'Betrag',
+    'timeline_label_discount' => 'Rabatt',
+    'timeline_label_campaign' => 'Kampagne',
 ];

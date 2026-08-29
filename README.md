@@ -287,9 +287,61 @@ the parts always add up to the whole.
 Existing rows keep `null` for the country and `0` for the line discounts. That is the honest state,
 and everything downstream has to tolerate it rather than guess.
 
+## Where the sale came from
+
+A payment can carry the campaign that produced it: `utm_source`, `utm_medium`, `utm_campaign`,
+`utm_term`, `utm_content`, `referrer` and `landing_page`. The names are LeadHub's, letter for
+letter, so the two sides never have to translate.
+
+**Hand them in at the start of the checkout, not at the end.** The addon reads no request, ever —
+the amount does not come from one and neither does this. Where you read them out of is your
+decision (a session, a cookie, a signed link); what the addon refuses to do is invent them.
+
+```php
+app(Checkout::class)->start(['noten-paket'], $buyer, $returnUrl, null, [
+    'utm_source' => session('utm.source'),
+    'utm_campaign' => session('utm.campaign'),
+    'landing_page' => session('utm.landing_page'),
+]);
+```
+
+The reason for the timing is that there is no later. A visitor arrives from a newsletter, browses
+for three days and buys; by the time the money lands, the campaign lives nowhere but in that
+session. Read from the success redirect it is already gone, and "which newsletter sold anything"
+stays unanswerable forever.
+
+A wrong **type** throws — that is your code being wrong. An over-long **value** is cut to the
+column width — that is a link builder appending noise, and no purchase may fail over it. A blank
+value is dropped rather than stored, because "came from nowhere" and "we did not look" are the same
+statement and both are `null`.
+
+A follow-up offer inherits the original's attribution, so the upsell counts towards the campaign
+that earned it.
+
+## Sending purchases to LeadHub
+
+Off by default. `STATAMIC_PAYMENTS_LEADHUB=true` (or `statamic-payments.leadhub.enabled`) and
+`goldnead/statamic-leadhub` installed, and a paid order then leaves two facts in the CRM: a line on
+the buyer's timeline saying what they bought, and an entry in their revenue ledger saying what it
+was worth. A refund corrects both. The contact is created if it does not exist — a purchase may do
+that, unlike a tracking pixel.
+
+Both halves are idempotent: the timeline entry is keyed by a dedupe key, the ledger line by
+`payments:payment:<id>`. A redelivered webhook changes nothing.
+
+`php artisan payments:leadhub-backfill` sends paid orders that never arrived — because the bridge
+was switched on afterwards, or the CRM was briefly unavailable. Safe to repeat.
+
+**One limit, stated plainly:** a payment has no brand. On a multi-brand install
+(`BRAND_CONTEXT_MULTI_BRAND=true`) the CRM resolves the contact against whichever brand is active,
+and a payment webhook has none — so the bridge is built for single-brand sites today. The ledger
+entry itself takes its brand from the contact rather than from the ambient context, so nothing is
+mis-filed; what a multi-brand site would see is a contact not found and a warning in the log.
+
 **Anything else your invoice needs goes in the same insert.** `Checkout::start()`,
-`FollowUp::accept()` and `Subscriptions::start()` all take a `$details` array with three keys,
-`meta`, `country` and `country_source`, and write it in the same transaction as the payment:
+`FollowUp::accept()` and `Subscriptions::start()` all take a `$details` array; besides the
+attribution keys above it accepts `meta`, `country` and `country_source`, and writes them in the
+same transaction as the payment:
 
 ```php
 app(FollowUp::class)->accept($original, 'begleit-cd', $context, [

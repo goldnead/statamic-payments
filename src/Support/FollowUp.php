@@ -132,6 +132,12 @@ class FollowUp
                 // like an unrelated second purchase, and nobody can answer
                 // "did the offer work" without guessing.
                 'parent_payment_id' => $original->getKey(),
+                // The campaign that produced the original produced this too.
+                // Left off, the upsell — the very revenue an offer exists to
+                // create — counts towards no campaign at all, and the report
+                // credits the funnel for less than it earned. `onto()` means a
+                // caller that hands its own attribution in still wins.
+                ...self::inheritedAttribution($original),
             ]));
 
             PaymentItem::create([
@@ -191,5 +197,29 @@ class FollowUp
         ])->save();
 
         return $payment->fresh() ?? $payment;
+    }
+
+    /**
+     * The attribution of the order this one grew out of.
+     *
+     * Copied rather than looked up: the original froze it at its own checkout,
+     * and by the time an upsell is accepted the session that knew it may be
+     * gone. The same reason the country is frozen one column over.
+     *
+     * @return array<string, string>
+     */
+    protected static function inheritedAttribution(Payment $original): array
+    {
+        $values = [];
+
+        foreach (['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'referrer', 'landing_page'] as $column) {
+            $value = $original->{$column} ?? null;
+
+            if (is_string($value) && $value !== '') {
+                $values[$column] = $value;
+            }
+        }
+
+        return $values;
     }
 }

@@ -195,6 +195,26 @@ return [
         'collect_mandate' => env('STATAMIC_PAYMENTS_COLLECT_MANDATE', false),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | CRM
+    |--------------------------------------------------------------------------
+    |
+    | Write a paid purchase to the contact's timeline and into their lifetime
+    | total in statamic-leadhub. Off by default like every other bridge here:
+    | two addons installed for unrelated reasons must not start exchanging
+    | customer data because they happen to be in the same vendor directory.
+    |
+    | What travels: the buyer's email and name, what they bought, what they
+    | paid, and the campaign the checkout froze. Turning this on is a decision
+    | about personal data, which is why it is a switch and not a default.
+    |
+    */
+
+    'leadhub' => [
+        'enabled' => env('STATAMIC_PAYMENTS_LEADHUB', false),
+    ],
+
     'entitlements' => [
         'enabled' => env('STATAMIC_PAYMENTS_ENTITLEMENTS', false),
     ],

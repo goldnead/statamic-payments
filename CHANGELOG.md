@@ -1,6 +1,35 @@
 # Changelog
 
-## Unreleased
+## 1.14.0 — 2026-08-29
+
+### Behoben: Umsatzzahlen zählten jede Marke, und verloren die letzte Sekunde
+
+Drei Fehler derselben Familie, keiner davon mit einem roten Test.
+
+**Die Marke.** `paidInPeriod()` und `refundedInPeriod()` summierten jede Marke, ganz gleich was der
+Markenwähler oben rechts sagte. Ein Test, der eine eigene Zeile gegen zwei fremde stellt, meldet
+gegen den alten Stand 13.000 statt 1.000 Cent. `brandScoped()` ist hier wortgleich zu
+`TableMetric::brandScoped()` abgeschrieben — diese Klasse baut nicht darauf auf, sie ist älter und
+liest zwei Tabellen und einen Join —, denn zwei Schreibweisen einer Regel sind der Weg, auf dem zwei
+Kacheln nebeneinander verschiedene Dinge zählen.
+
+**Das Fenster.** Die Obergrenze war einschließend, und eine Bindung formatiert `23:59:59.999999`
+als `Y-m-d H:i:s`. Auf einer Millisekunden-Spalte fiel damit jeder Verkauf der letzten Sekunde
+heraus: auf SQLite immer, auf einfachen MySQL-Zeitstempeln zufällig richtig, in beiden Fällen
+unsichtbar. Jetzt halboffen. Der Test schreibt eine Millisekunde und meldet gegen den alten Stand
+1 statt 2.
+
+**Der Join.** `productRows()` geht nicht durch `paidInPeriod()`, sondern fängt bei den Positionen an
+und verbindet zurück — genau die Form, die an einem zentral gesetzten Filter vorbeiläuft. Dort steht
+jede Bedingung jetzt ausgeschrieben.
+
+### Neu: sieben Zahlen in Insights
+
+Brutto, netto, erstattet, Bestellungen, Käufer, mittlerer Bestellwert und Erstattungsquote, mit
+Aufteilungen nach Kampagne, Quelle, Produkt und Land. `statamic-insights` liest dafür **keine**
+Tabelle dieses Addons mehr — die Rechnerei liegt jetzt auf der Seite des Zauns, der die Daten
+gehören. Die Kopplung ist in beide Richtungen `suggest`, nie `require`.
+
 
 ### Neu: `grants` darf eine Liste sein
 

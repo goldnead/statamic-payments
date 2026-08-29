@@ -529,6 +529,31 @@ the brand a row was created in, inherited from the parent row where a webhook cr
 on the single-brand installs that are the great majority. In multi-brand mode a row on `0` belongs
 to nobody and is shown to nobody. Fail-closed, on purpose.
 
+#### Rows that predate the column
+
+The migration that adds `brand_id` **derives** the brand of existing rows rather than picking one.
+Three routes, strongest first: a payment with an invoice takes the invoice's brand, an agreement
+takes the brand of its first payment, and a cycle or follow-up charge takes the brand of the row it
+belongs to. Applied until nothing more resolves, because each route feeds the next.
+
+What none of them answers stays on `0` and is written to the log. `0` already means "belongs to no
+brand" and is shown to nobody, and a reported gap is worth more than a quiet wrong answer. The
+default brand is never written onto a row that could not be resolved.
+
+```
+php artisan payments:brand-backfill --dry-run
+php artisan payments:brand-backfill
+```
+
+The same derivation as a repair pass, for installs that already migrated with the first version of
+that backfill — which stamped the lowest brand id onto everything. It writes a row **only where a
+derived source contradicts it**, leaves rows nothing can be derived for exactly as they are, and
+counts both. Where `statamic-invoices` is installed, `php artisan invoices:brand-check` is the
+measurement afterwards: it compares every invoice against the brand of its payment.
+
+Nothing happens at all without `goldnead/statamic-brand-context`, or with multi-brand off. Then
+every row is `0`, and `0` is right.
+
 ## Configuration
 
 | Key | Default | What happens when it is wrong |

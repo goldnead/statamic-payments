@@ -1,8 +1,10 @@
 <?php
 
+use Goldnead\StatamicPayments\Support\BrandBackfill;
+use Goldnead\StatamicPayments\Support\Brands;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -44,33 +46,59 @@ return new class extends Migration
     /**
      * Rows that existed before the column did.
      *
-     * On a single-brand install `0` is already right and nothing happens. On a
-     * multi-brand install every existing row is stamped with the default brand,
-     * which is where they were all sold as long as nothing was scoping them —
-     * the same backfill `brand-context` performs for its own dependants.
+     * **Derived, one row at a time, and left at zero where nothing says.** The
+     * first version of this method took the lowest brand id and wrote it onto
+     * every existing payment and subscription. On the demo playground that made
+     * eleven payments "nordlicht" and put seven invoices into a different
+     * brand's number series than the payment they belong to — and since
+     * `goldnead/statamic-invoices` `0d66f59` the invoice writer reads this
+     * column, so the guess would have been handed forward into new documents.
      *
-     * Left at `0` where the brands table is absent or unreadable: a migration
-     * that guesses a tenant is worse than one that leaves a visible zero.
+     * The derivation lives in {@see BrandBackfill} because the repair command
+     * `payments:brand-backfill` has to run exactly the same one: this migration
+     * is committed and has already run on installs where the rows now stand at
+     * the wrong brand rather than at zero. Two copies of that logic would drift
+     * on the first correction.
+     *
+     * Nothing happens at all where `brand-context` is absent or multi-brand is
+     * off. That is the single-brand case, every row is zero, and zero is right.
      */
     protected function backfill(): void
     {
-        if (! Schema::hasTable('brands')) {
+        if (! BrandBackfill::possible()) {
             return;
         }
 
         try {
-            $default = DB::table('brands')->orderBy('id')->value('id');
-        } catch (Throwable) {
+            $report = (new BrandBackfill)->fillGaps();
+        } catch (Throwable $e) {
+            // A backfill is a convenience; the column is the migration. Failing
+            // here would leave a half-migrated schema behind on an install
+            // whose data simply could not be read.
+            Log::warning('statamic-payments: die Marken des Altbestands liessen sich nicht ableiten; alle Zeilen bleiben auf 0.', [
+                'exception' => $e->getMessage(),
+            ]);
+
             return;
         }
 
-        if (! $default) {
+        if ($report->stillZeroCount() === 0) {
             return;
         }
 
-        foreach (['payments', 'subscriptions'] as $table) {
-            DB::table($table)->where('brand_id', 0)->update(['brand_id' => $default]);
-        }
+        // The reported gap. A migration has no console output worth the name,
+        // so this is the only place it can be said — and it has to be said,
+        // because a row on 0 is a row the customer portal shows to nobody.
+        Log::warning(
+            'statamic-payments: '.$report->stillZeroCount().' Zeilen liessen sich keiner Marke zuordnen und '
+            .'stehen auf 0. Sie wurden NICHT auf die Standardmarke geschrieben. '
+            .'`php artisan payments:brand-backfill --dry-run` zeigt sie.',
+            [
+                'still_zero' => $report->stillZero,
+                'sources' => $report->countsBySource(),
+                'default_brand_id' => Brands::defaultId(),
+            ]
+        );
     }
 
     public function down(): void

@@ -44,6 +44,32 @@ der die Zeile entsteht; entsteht sie im Webhook für eine andere Zeile — ein A
 Nachfass-Zahlung —, erbt sie deren Marke, statt eine zu raten. Im Mandanten-Betrieb gehört eine
 Zeile auf 0 niemandem und wird niemandem gezeigt.
 
+**Der Altbestand wird abgeleitet, nicht geraten.** Die erste Fassung dieser Migration nahm die
+kleinste Marken-Id und schrieb sie auf jede bestehende Zahlung und jedes Abo. Am Demo-Playground
+machte das elf Zahlungen zu „nordlicht", und `invoices:brand-check` fand sieben Rechnungen, die in
+der Reihe einer anderen Marke stehen als die Zahlung, zu der sie gehören. Die Rechnungen hatten
+recht — und seit `statamic-invoices` die Spalte liest, wäre die geratene Antwort ab sofort in neue
+Dokumente weitergereicht worden.
+
+Drei Wege, stärkster zuerst: eine Zahlung mit Rechnung bekommt die Marke der Rechnung, ein Abo die
+Marke seiner ersten Zahlung, eine Folgeabbuchung die Marke der Zeile, zu der sie gehört. Gefahren
+bis nichts mehr dazukommt, weil jeder Weg den nächsten speist. Was danach übrig bleibt, steht
+weiter auf `0` und wird ins Log geschrieben; die Standardmarke wird nirgends eingesetzt. Der
+Zugriff auf `invoices` läuft über `Schema::hasTable()` und ist ein Hinweis, keine Voraussetzung:
+das Rechnungs-Addon ist ein `suggest`, und die echte Abhängigkeit läuft andersherum.
+
+### Neu: `payments:brand-backfill`
+
+Die kaputte Migration ist committet und auf mindestens zwei Installationen schon gelaufen; dort
+läuft sie nie wieder, und die Zeilen stehen auf der falschen Marke statt auf `0`. Dieser Befehl
+fährt **dieselbe** Ableitung (eine Stelle, `Support\BrandBackfill`, nicht zweimal geschrieben) und
+korrigiert eine Zeile nur dann, wenn eine abgeleitete Quelle ihr widerspricht. Eine Zeile, für die
+sich nichts ableiten lässt, bleibt, wie sie ist — auch wenn sie die geratene Marke trägt: fehlender
+Beleg ist kein Beleg. Gezählt und ausgegeben wird beides.
+
+`--dry-run` zeigt nur. Ohne die Option wird geschrieben, mit einer Zusammenfassung, wie viele
+Zeilen aus welcher Quelle stammen.
+
 ### Neu: eine weiche Naht zur Rechnung
 
 `Contracts\InvoiceSource` + `Support\Invoices` (Registry, wie `Catalogue`). Ohne

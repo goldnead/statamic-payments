@@ -132,6 +132,33 @@ final class Brands
     }
 
     /**
+     * The brand that `brand-context` itself calls default.
+     *
+     * Asked, never assumed. `DB::table('brands')->orderBy('id')->value('id')`
+     * answers a different question — "which brand was created first" — and the
+     * two only coincide by accident. The sibling decides its default by handle
+     * and by an `is_default` flag, and a host may move it.
+     *
+     * Nothing in this package ever *writes* this id onto a row. It exists so a
+     * report can name the brand that a guessing backfill would have written,
+     * which is the difference between "seven rows could not be resolved" and
+     * "seven rows could not be resolved and were **not** silently made
+     * nordlicht's". Zero where the sibling is absent or has no default.
+     */
+    public static function defaultId(): int
+    {
+        if (! self::available()) {
+            return self::NONE;
+        }
+
+        try {
+            return (int) app('brand-context')->defaultId();
+        } catch (Throwable) {
+            return self::NONE;
+        }
+    }
+
+    /**
      * Narrow a query to one brand's rows, fail-closed.
      *
      * Four cases and only four:

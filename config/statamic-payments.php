@@ -218,4 +218,119 @@ return [
     'entitlements' => [
         'enabled' => env('STATAMIC_PAYMENTS_ENTITLEMENTS', false),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Kundenselbstbedienung
+    |--------------------------------------------------------------------------
+    |
+    | The buyer's own screens: their orders, their invoice, ending a
+    | subscription, changing the card it is charged against. No account and no
+    | password — the way in is a signed, expiring link to the address on the
+    | order.
+    |
+    | **On by default, and that is deliberate.** § 312k BGB requires a
+    | cancellation button on the site where a recurring consumer contract was
+    | concluded. An addon that ships the requirement switched off ships it to
+    | nobody. A site that genuinely has no consumer subscriptions can turn it
+    | off; a site that has them and does not know about the statute is exactly
+    | the site this default is for.
+    |
+    | `prefix` starts with `!/` like every other route this addon serves, which
+    | is Statamic's convention for a URL that belongs to a package rather than
+    | to the content tree. Change it if the words should be in another language;
+    | the route *names* never change.
+    |
+    */
+
+    'portal' => [
+
+        'enabled' => env('STATAMIC_PAYMENTS_PORTAL', true),
+
+        'prefix' => env('STATAMIC_PAYMENTS_PORTAL_PREFIX', '!/statamic-payments/konto'),
+
+        'middleware' => ['web'],
+
+        /*
+        | How long a mailed link works, in minutes. This is the whole of the
+        | revocation story — there is no token table to revoke against — so
+        | shorten it rather than lengthen it. Thirty minutes is long enough for
+        | a mail to be delivered and read.
+        */
+        'link_ttl_minutes' => 30,
+
+        /*
+        | How long the visit lasts once the link has been followed, in minutes.
+        | Its own clock, independent of the session lifetime the host has set
+        | for people who log in — a buyer on a shared machine is not a member
+        | of staff at a desk.
+        */
+        'session_minutes' => 60,
+
+        /*
+        | Both limiters, and both are needed. Per address so one mailbox cannot
+        | be flooded; per origin so the endpoint cannot be pointed at a list of
+        | addresses somebody else owns. One without the other is not a limit.
+        */
+        'throttle' => [
+            'per_address' => ['max' => 3, 'decay_minutes' => 60],
+            'per_origin' => ['max' => 10, 'decay_minutes' => 60],
+        ],
+
+        /*
+        | The floor the "we have sent you a link" response is held open to, in
+        | milliseconds. Identical wording with a 12 ms "never bought anything"
+        | and a 340 ms "mail sent" is a customer-list oracle with good manners.
+        */
+        'min_response_ms' => 350,
+
+        /*
+        | Requests per minute per IP on the form itself, on top of the two
+        | limiters above. This one protects the worker, not the mailbox.
+        */
+        'request_rate_limit' => 10,
+
+        /*
+        | Query parameters a mail service provider appends to the link in
+        | transit, which the signature check may overlook. Each name says who
+        | adds it. `expires` and `signature` can never be listed here whatever
+        | is written — see Portal\TrackingParameters for why that guard exists
+        | rather than being left to good sense.
+        */
+        'ignored_query_parameters' => [
+            '_se',   // Brevo, appended by its click counter
+            'utm_source', 'utm_medium', 'utm_campaign',
+        ],
+
+        /*
+        | Who the two portal mails come from. Left empty, the application's own
+        | `mail.from` is used, which is right on a single-brand install.
+        */
+        'from' => [
+            'address' => env('STATAMIC_PAYMENTS_PORTAL_FROM'),
+            'name' => env('STATAMIC_PAYMENTS_PORTAL_FROM_NAME'),
+        ],
+
+        /*
+        | The most rows a buyer's page shows. A ceiling on the page, not a
+        | business rule: somebody with four hundred orders should not be sent a
+        | four-hundred-row page from a mail client on a phone.
+        */
+        'max_rows' => 100,
+
+        /*
+        | What a buyer is charged to put a new payment method on file, in minor
+        | units.
+        |
+        | **This charges real money and there is no way around it.** Mollie has
+        | no zero-amount authorisation and no hosted "update your card" screen;
+        | a mandate comes from a payment made with `sequenceType: first` and
+        | from nothing else. One cent is the usual answer for cards. Some
+        | methods have a higher floor and will refuse — raise it for those.
+        |
+        | The buyer is shown this amount before the button. See
+        | `portal.method_note` in the translations.
+        */
+        'mandate_verification_cent' => 1,
+    ],
 ];

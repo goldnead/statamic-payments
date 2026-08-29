@@ -14,6 +14,8 @@ use Goldnead\StatamicPayments\Integrations\Insights\Refunded;
 use Goldnead\StatamicPayments\Integrations\Insights\RefundRate;
 use Goldnead\StatamicPayments\Integrations\Insights\RevenueGross;
 use Goldnead\StatamicPayments\Integrations\Insights\RevenueNet;
+use Goldnead\StatamicPayments\Integrations\InvoiceBridge;
+use Goldnead\StatamicPayments\Support\Invoices;
 use Illuminate\Support\Facades\Log;
 use Mollie\Api\MollieApiClient;
 use Statamic\Actions\Action;
@@ -79,8 +81,17 @@ class ServiceProvider extends AddonServiceProvider
     {
         $this->loadTranslationsFrom(__DIR__.'/../lang', 'statamic-payments');
 
+        // Explicit, and not left to the parent's `$viewNamespace`. That resolves
+        // the addon directory through the manifest, which comes up empty in a
+        // package test suite — the same reason `$config` is false above. The
+        // customer portal is the first thing here that renders a Blade view on
+        // a public URL, so a namespace that only works in a host application
+        // would fail exactly where nobody looks.
+        $this->loadViewsFrom(__DIR__.'/../resources/views', 'statamic-payments');
+
         $this->bootUtilities();
         $this->registerInsightsMetrics();
+        $this->registerInvoiceSource();
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
 
         $this->publishes([
@@ -90,6 +101,42 @@ class ServiceProvider extends AddonServiceProvider
         $this->publishes([
             __DIR__.'/../database/migrations' => database_path('migrations'),
         ], 'statamic-payments-migrations');
+
+        // The portal's pages and its wording, both publishable. The wording is
+        // the one that matters: § 312k BGB prescribes the two button labels, the
+        // statute has been amended once already, and a site whose lawyer wants a
+        // different phrase must not have to wait for a release of this addon.
+        $this->publishes([
+            __DIR__.'/../resources/views' => resource_path('views/vendor/statamic-payments'),
+        ], 'statamic-payments-views');
+
+        $this->publishes([
+            __DIR__.'/../lang' => lang_path('vendor/statamic-payments'),
+        ], 'statamic-payments-translations');
+    }
+
+    /**
+     * Offer the invoice addon a place to answer from, if it is there.
+     *
+     * From an `app->booted()` callback and behind a `class_exists` on a string,
+     * for the same two reasons the insights registration is: the sibling's
+     * bindings only exist once its own provider has booted, and a missing,
+     * half-installed or mid-upgrade sibling must cost a download button on a page
+     * about somebody's orders — never a page, and never a checkout.
+     *
+     * The bridge itself names no class from that package beyond one facade
+     * string; it asks whatever it is handed what it can do. See
+     * {@see InvoiceBridge}.
+     */
+    protected function registerInvoiceSource(): void
+    {
+        $this->app->booted(function (): void {
+            if (! class_exists(InvoiceBridge::FACADE)) {
+                return;
+            }
+
+            Invoices::extend(new InvoiceBridge);
+        });
     }
 
     /**

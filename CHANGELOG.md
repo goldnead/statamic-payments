@@ -2,6 +2,69 @@
 
 ## Unreleased
 
+### Neu: Selbstbedienung für Käufer
+
+Ein Käufer kann jetzt ohne Konto seine Bestellungen ansehen, seine Rechnung herunterladen, sein
+Abo kündigen und sein Zahlungsmittel wechseln. Der Weg hinein ist ein signierter, ablaufender
+Link an die Adresse, die auf der Bestellung steht — kein Passwort, kein Konto, weil ein Käufer
+eines Notenhefts keins anlegen wollte.
+
+Die Mechanik ist die von `statamic-preference-center`, übernommen statt neu erfunden: doppelte
+Drosselung, eine Antwort für jeden Ausgang, Antwortzeit auf einen Boden gehalten, Sitzungs-ID beim
+Öffnen erneuert. Dasselbe Aussehen, dieselbe Palette, kein Build-Schritt — die Seite wird aus einem
+Mailprogramm geöffnet und muss beim ersten Byte da sein.
+
+**§ 312k BGB liefert das Addon mit.** Kündigungsschaltfläche mit eigener URL, Bestätigungsseite,
+die den Vertrag benennt, und danach eine Bestätigung in Textform mit Datum und Uhrzeit — als Mail,
+nicht als grüner Kasten, der beim Neuladen weg ist. **Jeder vorgeschriebene Wortlaut steht in
+`lang/*/portal.php`** und in keiner PHP-Datei; er gehört vor einen Anwalt, und die Vorschrift ist
+schon einmal geändert worden. `--tag=statamic-payments-translations`.
+
+Gekündigt wird über `Subscriptions::cancel()`: der Anbieter wird zuerst gefragt, seine Antwort wird
+geschrieben. Antwortet er nicht — oder nimmt er den Aufruf an und lässt das Abo weiterlaufen —,
+bleibt die Zeile unangetastet und der Käufer bekommt eine ehrliche Meldung statt einer Bestätigung.
+
+### Neu: `brand_id` auf `payments` und `subscriptions`
+
+Bisher trug hier nichts eine Marke, und `statamic-invoices` schrieb genau das in eine
+Ausnahme-Klasse: „a brand is not recoverable from the payment either". Für den Kundenbereich ist
+diese Lücke nicht bezahlbar — auf einem Mandanten-Host ist die Marke auf der Bestellung das
+Einzige, was den Link der Marke A von der Bestellung der Marke B fernhält.
+
+Die Naht kennt **drei** Zustände, nicht zwei: „keine Mandanten", „Mandanten, und die aktuelle ist
+bekannt" und „das Geschwister-Addon ist da und hat nicht geantwortet". Ein `bool` fasst die letzten
+beiden zusammen, und ein `catch (Throwable) { return false; }` um `multiBrandEnabled()` hätte einen
+werfenden Lizenz-Rückruf — den der Host selbst schreibt — in „diese Installation hat keine
+Mandanten" verwandelt, also in „kein Filter". Ein defensiver Fang, der nach außen aufmacht, ist
+schlimmer als kein Fang: er erzeugt eine Seite, die funktioniert.
+
+`default(0)`, kein Fremdschlüssel, keine harte Abhängigkeit auf `brand-context`: auf jeder
+Ein-Marken-Installation steht überall 0 und nichts ändert sich. Gestempelt wird aus der Marke, in
+der die Zeile entsteht; entsteht sie im Webhook für eine andere Zeile — ein Abo-Zyklus, eine
+Nachfass-Zahlung —, erbt sie deren Marke, statt eine zu raten. Im Mandanten-Betrieb gehört eine
+Zeile auf 0 niemandem und wird niemandem gezeigt.
+
+### Neu: eine weiche Naht zur Rechnung
+
+`Contracts\InvoiceSource` + `Support\Invoices` (Registry, wie `Catalogue`). Ohne
+Rechnungs-Addon zeigt sich die Bestellung ohne Download, statt zu brechen.
+`Integrations\InvoiceBridge` erkennt `goldnead/statamic-invoices` **an der Form, nicht am Typ**:
+eine einzige Zeichenkette nennt dessen Fassade, alles danach ist `method_exists`. Dort wird gerade
+parallel PDF und Zustellung gebaut; eine Brücke gegen die heutigen Klassen wäre eine Wette auf
+unfertige Arbeit.
+
+### Neu: `Contracts\MandateGateway`
+
+Zahlungsmittel wechseln über den Mandats-Weg des Anbieters. `MollieGateway` implementiert es; der
+Kundenbereich fragt, ob das gebundene Gateway es kann, und nennt Mollie nirgends beim Namen. Auf
+Mollie kostet das den Käufer einen Cent — es gibt dort keine Null-Betrags-Autorisierung —, und der
+Betrag steht über der Schaltfläche statt später auf dem Kontoauszug.
+
+### Behoben
+
+- `Payment` kannte die Attributions-Spalten aus 1.13 in seinem `@property`-Block nicht.
+- `Checkout` fragte `request()` mit `?->`, was nie null wird.
+
 ### Added
 
 - **Seven metrics for `statamic-insights`** — gross revenue, net, refunded,

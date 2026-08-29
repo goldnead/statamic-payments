@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Models;
 
+use Goldnead\StatamicPayments\Support\Brands;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
@@ -28,6 +29,7 @@ use Illuminate\Support\Carbon;
  * *agreement*; the payments record the money.
  *
  * @property int $id
+ * @property int $brand_id
  * @property string $provider
  * @property string $provider_id
  * @property string $customer_reference
@@ -67,6 +69,21 @@ class Subscription extends Model
     public const STATUS_SUSPENDED = 'suspended';
 
     protected $guarded = [];
+
+    /**
+     * Whose agreement this is. Same rule as on {@see Payment}: only set where
+     * the caller did not say, so that an agreement created from a first payment
+     * inherits that payment's brand instead of asking a webhook which tenant it
+     * is standing in.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (self $subscription) {
+            if ($subscription->getAttribute('brand_id') === null) {
+                $subscription->setAttribute('brand_id', Brands::stampId());
+            }
+        });
+    }
 
     protected function casts(): array
     {

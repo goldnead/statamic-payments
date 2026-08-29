@@ -185,6 +185,11 @@ class Fulfilment
         $payment = Payment::create([
             'provider' => $this->gateway->provider(),
             'provider_id' => $providerId,
+            // Geerbt, nicht erfragt. Dieser Zyklus entsteht im Webhook des
+            // Anbieters, wo keine Marke gesetzt ist; `Brands::stampId()` gäbe
+            // hier 0 zurück und die Zahlung wäre im Kundenbereich für niemanden
+            // sichtbar. Sie gehört der Marke, die das Abo verkauft hat.
+            'brand_id' => $subscription->brand_id,
             'product' => $subscription->product,
             'amount_cent' => $subscription->amount_cent,
             'currency' => $subscription->currency,

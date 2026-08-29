@@ -52,6 +52,9 @@ class FakeGateway implements SubscriptionGateway
     /** A cancel that the provider accepts but that leaves the thing running. */
     public bool $cancelLies = false;
 
+    /** The provider is unreachable, or refuses. What a 500 or a timeout is. */
+    public bool $refuseToCancel = false;
+
     /** For the case where the provider is still waiting for the mandate. */
     public bool $subscriptionsArePending = false;
 
@@ -93,6 +96,13 @@ class FakeGateway implements SubscriptionGateway
 
     public function cancelSubscription(string $customerReference, string $subscriptionId): RemoteSubscription
     {
+        if ($this->refuseToCancel) {
+            // Thrown before anything is recorded, like a provider that never
+            // received the request. A fake that noted the attempt and then threw
+            // would let a caller believe the cancellation had been seen.
+            throw new RuntimeException('the provider would not cancel '.$subscriptionId);
+        }
+
         $this->cancelled[] = $subscriptionId;
 
         if ($this->cancelLies) {

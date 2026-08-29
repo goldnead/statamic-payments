@@ -255,7 +255,7 @@ class Checkout
         // auf der falschen Seite landen soll, nur weil app.url eine davon nennt.
         $eigene = array_filter([
             parse_url((string) config('app.url', ''), PHP_URL_HOST),
-            request()?->getHost(),
+            request()->getHost(),
         ], fn ($h) => is_string($h) && $h !== '');
 
         foreach ($eigene as $kandidat) {

@@ -414,6 +414,121 @@ needs no code at all.
 > consent, not of configuration — and the suppression list belongs in front of the send either way.
 > That is why this ships switched off.
 
+## Customer self-service
+
+A buyer with no account can see their orders, download the invoice, cancel a subscription and put a
+different card on file. There is no password: the way in is a signed, expiring link mailed to the
+address on the order.
+
+```
+GET  /!/statamic-payments/konto/anmelden            ask for a link
+POST /!/statamic-payments/konto/anmelden            …and send it
+GET  /!/statamic-payments/konto/kuendigen           the § 312k cancellation button's destination
+GET  /!/statamic-payments/konto/link/{payLink}      follow one (signed, expiring)
+GET  /!/statamic-payments/konto/                    orders and running contracts
+GET  /!/statamic-payments/konto/bestellung/{payOrder}
+GET  /!/statamic-payments/konto/bestellung/{payOrder}/rechnung
+GET  /!/statamic-payments/konto/abo/{paySubscription}/kuendigen    the confirmation page
+POST /!/statamic-payments/konto/abo/{paySubscription}/kuendigen    „Jetzt kündigen"
+POST /!/statamic-payments/konto/abo/{paySubscription}/zahlungsmittel
+```
+
+On by default, because § 312k BGB requires the cancellation button on the site where the contract
+was concluded and an addon that ships the requirement switched off ships it to nobody. Everything
+about it is under `statamic-payments.portal`.
+
+**Link to it from your site.** The two URLs worth putting in a footer are
+`route('statamic-payments.portal.request')` and, for the statutory button,
+`route('statamic-payments.portal.cancel.entry')`.
+
+### The link
+
+Signed, encrypted, and good for thirty minutes. There is no token table: the payload rides inside
+the URL, which means there is nothing to revoke against and the lifetime *is* the revocation story
+— shorten it rather than reaching for a table.
+
+Requesting one is public and unauthenticated by definition, so it is throttled twice (by address and
+by origin), the response says the same sentence whatever happened, and it is held open to a floor so
+the outcome cannot be read off a stopwatch either. An address that has bought nothing gets no link
+and no hint that it got none. Following a link regenerates the session id, so a session somebody
+else fixed does not become a way into a stranger's order history.
+
+### Cancelling, and § 312k BGB
+
+The statute prescribes a shape and the addon ships that shape: a button reading „Verträge hier
+kündigen", a confirmation page naming the contract with „Jetzt kündigen" on it, and an immediate
+confirmation in Textform carrying the date and the time. The confirmation is a **mail**, not a green
+box on the page — a screen is gone on reload and proves nothing afterwards.
+
+**Every one of those words is a translation key.** Not one of them is compiled into a PHP file:
+
+```bash
+php artisan vendor:publish --tag=statamic-payments-translations
+```
+
+The wording of a statutory button belongs in front of a lawyer, the statute has already been amended
+once, and a site that needs a different phrase must not have to wait for a release of this addon.
+What the code owns is the sequence; what `lang/*/portal.php` owns is the text. **None of this is
+legal advice.**
+
+The cancellation itself goes through `Subscriptions::cancel()`, which asks the provider first and
+writes the provider's answer. A provider that will not answer — and a provider that accepts the call
+while the agreement keeps running — both leave the row untouched, and the buyer is told plainly that
+nothing happened and to try again. A screen that said "cancelled" on a local flag is how somebody
+keeps being charged for a thing their account says they ended.
+
+### The invoice
+
+`statamic-payments` does not write invoices and must not have to be installed with something that
+does, so the download comes through a seam. With no invoicing addon the order page shows the order
+without a download button, which is also what an order with no invoice yet looks like.
+
+`goldnead/statamic-invoices` is picked up automatically where it is installed — by shape rather than
+by type, so that the PDF and delivery work happening in that package lands here without a change on
+this side. A host with its own accounting system registers an answer directly:
+
+```php
+use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Support\InvoiceDocument;
+use Goldnead\StatamicPayments\Support\Invoices;
+
+Invoices::extend(fn (Payment $payment) => new InvoiceDocument(
+    number: 'RE2026-08-001',
+    issuedAt: $payment->paid_at,
+    contents: fn () => $pdfBytes,          // called only on the download route
+    filename: 'RE2026-08-001.pdf',
+    contentType: 'application/pdf',
+));
+```
+
+Returning `null` is a normal answer. The document is served by this addon rather than linked into
+another one, because the only thing that says the buyer may have it is the portal session this route
+sits behind.
+
+### Changing the payment method
+
+Offered where the bound gateway implements `Contracts\MandateGateway`, and hidden where it does not
+— the screen asks the gateway what it can do and never asks it by name, so a second provider is a
+class and a binding rather than a change to the portal.
+
+**On Mollie this charges the buyer.** There is no zero-amount authorisation and no hosted "update
+your card" screen: a mandate comes from a payment made with `sequenceType: first` and from nothing
+else. The amount is `portal.mandate_verification_cent` (one cent by default) and the buyer is shown
+it above the button. No local row is written for that charge and it deliberately carries no webhook
+URL — a paid payment with no local row reaches the fulfilment path as a phantom purchase and is
+logged as an alarm about something that went exactly to plan.
+
+### Multi-brand
+
+With `goldnead/statamic-brand-context` in multi-brand mode, a link for one brand shows only that
+brand's orders — and its subscriptions, and its invoices. The brand is sealed into the link next to
+the address, so it travels with the link and never with the session.
+
+`payments.brand_id` and `subscriptions.brand_id` are what make that possible; they are stamped from
+the brand a row was created in, inherited from the parent row where a webhook creates one, and `0`
+on the single-brand installs that are the great majority. In multi-brand mode a row on `0` belongs
+to nobody and is shown to nobody. Fail-closed, on purpose.
+
 ## Configuration
 
 | Key | Default | What happens when it is wrong |

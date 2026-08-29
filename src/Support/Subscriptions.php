@@ -261,6 +261,10 @@ class Subscriptions
         // no provider id is a thing to notice and repair. A subscription at the
         // provider with no row is not.
         $subscription = Subscription::create([
+            // Von der ersten Zahlung geerbt. Sie entstand im Browser des
+            // Käufers, wo die Marke gesetzt war; dieses Abo entsteht im
+            // Webhook, wo sie es nicht ist.
+            'brand_id' => $payment->brand_id,
             'provider' => $this->gateway->provider(),
             // Unique per payment, so a redelivery cannot make a second.
             'provider_id' => 'pending-'.$payment->getKey(),

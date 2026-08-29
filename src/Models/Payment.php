@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Models;
 
+use Goldnead\StatamicPayments\Support\Brands;
 use Goldnead\StatamicPayments\Support\Money;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -12,6 +13,7 @@ use Illuminate\Support\Carbon;
  * One payment, as the provider reports it.
  *
  * @property int $id
+ * @property int $brand_id
  * @property string $provider
  * @property string $provider_id
  * @property string $product
@@ -22,6 +24,13 @@ use Illuminate\Support\Carbon;
  * @property string|null $name
  * @property string|null $country
  * @property string|null $country_source
+ * @property string|null $utm_source
+ * @property string|null $utm_medium
+ * @property string|null $utm_campaign
+ * @property string|null $utm_term
+ * @property string|null $utm_content
+ * @property string|null $referrer
+ * @property string|null $landing_page
  * @property array<string, mixed>|null $meta
  * @property Carbon|null $fulfilled_at
  * @property Carbon|null $failed_notified_at
@@ -85,6 +94,17 @@ class Payment extends Model
     {
         static::deleting(function (self $payment) {
             $payment->items()->delete();
+        });
+
+        // Whose sale this is. Zero on every single-brand install, which is all
+        // but a few of them. Only set where the caller did not say: a cycle of
+        // a subscription and a follow-up charge inherit the brand of the row
+        // they belong to rather than the brand that happens to be current in a
+        // webhook, which is usually none. See {@see Brands::stampId()}.
+        static::creating(function (self $payment) {
+            if ($payment->getAttribute('brand_id') === null) {
+                $payment->setAttribute('brand_id', Brands::stampId());
+            }
         });
     }
 

@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Gateways;
 
+use Goldnead\StatamicPayments\Contracts\MandateGateway;
 use Goldnead\StatamicPayments\Contracts\SubscriptionGateway;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
@@ -27,11 +28,64 @@ use Mollie\Api\Types\SequenceType;
  * uninstallable on half the versions its own composer.json promises. Found by
  * installing it, not by reading it.
  */
-class MollieGateway implements SubscriptionGateway
+class MollieGateway implements MandateGateway, SubscriptionGateway
 {
     public function supportsFollowUp(): bool
     {
         return true;
+    }
+
+    public function supportsMandateUpdate(): bool
+    {
+        return true;
+    }
+
+    /**
+     * A new card for a buyer Mollie already knows.
+     *
+     * Mollie's only mechanism, and it is worth being blunt about it: there is no
+     * SetupIntent here and no zero-amount authorisation. A mandate comes from a
+     * payment made with `sequenceType: first` against the customer, and nothing
+     * else. So changing a payment method **charges the buyer**, once, a small
+     * amount — the same trade `Subscriptions` refuses to hide behind the word
+     * "trial", refused again here.
+     *
+     * **No webhook on this payment, deliberately.** It buys a mandate, not a
+     * product: there is no local row for it, nothing to fulfil, and no
+     * entitlement to grant. Handing Mollie a webhook URL would deliver a paid
+     * payment this site has no record of into the fulfilment path, which logs it
+     * as a phantom purchase — a loud alarm about something that went exactly to
+     * plan.
+     *
+     * What makes it work afterwards is that this package never pins a `mandateId`
+     * when it creates a subscription. Mollie charges the customer's valid mandate,
+     * so the newest one wins from the next cycle onwards without anything here
+     * having to rewrite the agreement.
+     */
+    public function startMandateUpdate(string $customerReference, array $payload): CheckoutSession
+    {
+        $payment = $this->client->customerPayments->createForId($customerReference, $payload + [
+            'sequenceType' => SequenceType::FIRST,
+        ]);
+
+        return new CheckoutSession(
+            providerId: (string) $payment->id,
+            checkoutUrl: (string) $payment->getCheckoutUrl(),
+        );
+    }
+
+    /**
+     * What the buyer pays to put a new card on file.
+     *
+     * From configuration, because the floor is a property of the payment method
+     * rather than of Mollie: a card accepts a cent, SEPA and some local methods
+     * do not. Clamped to at least one minor unit — Mollie rejects a zero amount,
+     * and a site that set it to zero would get an error on the buyer's screen
+     * instead of a mandate.
+     */
+    public function mandateVerificationCent(): int
+    {
+        return max(1, (int) config('statamic-payments.portal.mandate_verification_cent', 1));
     }
 
     public function supportsSubscriptions(): bool

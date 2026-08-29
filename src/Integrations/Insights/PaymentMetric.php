@@ -131,16 +131,68 @@ abstract class PaymentMetric implements HasFilterOptions, Metric
             : (string) config('statamic-payments.currency', 'EUR');
     }
 
-    /** Every sale in the window, in one currency. The base of almost everything. */
+    /**
+     * Narrow a query to the current brand.
+     *
+     * This is `Goldnead\BrandContext\Scopes\BrandScope::apply()` transcribed
+     * for the query builder, and it must stay a transcription rather than an
+     * improvement: these figures read `payments` through `DB::table()`, so
+     * Eloquent's global scope never fires, and a tile that filtered by its own
+     * rules would disagree with the orders listing beside it on the same
+     * screen. The order of the four questions is theirs — bypass, single-brand,
+     * unresolved, filter.
+     *
+     * `TableMetric` in statamic-insights carries the same transcription for the
+     * metrics that build on it. This class does not build on it — it predates
+     * it and reads two tables and a join — so the code is here as well. Kept
+     * word for word with that one on purpose: two spellings of one rule is how
+     * a suite ends up green while two tiles count different things.
+     *
+     * An unresolved brand fails closed to no rows, never to an absent metric.
+     * `available()` answers whether the thing exists, and a brand nobody has
+     * picked yet is not this addon ceasing to exist. A tile reading zero can be
+     * understood; a tile that vanished cannot.
+     */
+    protected function brandScoped(Builder $rows, string $table = 'payments'): Builder
+    {
+        if (! app()->bound('brand-context')) {
+            return $rows;
+        }
+
+        $manager = app('brand-context');
+
+        if ($manager->scopeIsDisabled() || ! $manager->multiBrandEnabled()) {
+            return $rows;
+        }
+
+        if (! $manager->hasCurrent()) {
+            return $manager->failMode() === 'open'
+                ? $rows
+                : $rows->whereRaw('1 = 0');
+        }
+
+        return $rows->where($table.'.brand_id', $manager->currentId());
+    }
+
+    /** Every sale in the window, in one currency, in the current brand. */
     protected function paidInPeriod(MetricQuery $query): Builder
     {
         $period = $query->period;
 
-        return DB::table('payments')
-            ->where('status', 'paid')
-            ->where('currency', $this->currencyOf($query))
-            ->when($period->from, fn ($q) => $q->where('paid_at', '>=', $period->from))
-            ->when($period->to, fn ($q) => $q->where('paid_at', '<=', $period->to));
+        return $this->brandScoped(
+            DB::table('payments')
+                ->where('status', 'paid')
+                ->where('currency', $this->currencyOf($query))
+                ->whereNotNull('paid_at')
+                ->when($period->from, fn ($q) => $q->where('paid_at', '>=', $period->from))
+                // Half-open: `< midnight`, not `<= 23:59:59.999999`. A binding
+                // formats the upper bound as `Y-m-d H:i:s` and drops the
+                // fraction, so on a column that stores milliseconds every sale
+                // in the last second of the period fell out — silently, and
+                // only on some engines, which is why no green suite ever showed
+                // it. Midnight is the same instant at every precision.
+                ->when($period->toExclusive(), fn ($q) => $q->where('paid_at', '<', $period->toExclusive()))
+        );
     }
 
     /**
@@ -157,12 +209,15 @@ abstract class PaymentMetric implements HasFilterOptions, Metric
     {
         $period = $query->period;
 
-        return DB::table('payments')
-            ->where('status', 'paid')
-            ->where('currency', $this->currencyOf($query))
-            ->where('refunded_cent', '>', 0)
-            ->when($period->from, fn ($q) => $q->where('refunded_at', '>=', $period->from))
-            ->when($period->to, fn ($q) => $q->where('refunded_at', '<=', $period->to));
+        return $this->brandScoped(
+            DB::table('payments')
+                ->where('status', 'paid')
+                ->where('currency', $this->currencyOf($query))
+                ->where('refunded_cent', '>', 0)
+                ->whereNotNull('refunded_at')
+                ->when($period->from, fn ($q) => $q->where('refunded_at', '>=', $period->from))
+                ->when($period->toExclusive(), fn ($q) => $q->where('refunded_at', '<', $period->toExclusive()))
+        );
     }
 
     /**
@@ -372,12 +427,20 @@ abstract class PaymentMetric implements HasFilterOptions, Metric
 
         $period = $query->period;
 
-        $lines = DB::table('payment_items')
-            ->join('payments', 'payments.id', '=', 'payment_items.payment_id')
-            ->where('payments.status', 'paid')
-            ->where('payments.currency', $this->currencyOf($query))
-            ->when($period->from, fn ($q) => $q->where('payments.paid_at', '>=', $period->from))
-            ->when($period->to, fn ($q) => $q->where('payments.paid_at', '<=', $period->to))
+        // The one query in this class that does not go through
+        // `paidInPeriod()`, so every condition it shares has to be repeated
+        // here by hand — the brand among them. A join is exactly the shape that
+        // slips past a filter applied centrally somewhere else, which is why it
+        // is spelled out rather than assumed.
+        $lines = $this->brandScoped(
+            DB::table('payment_items')
+                ->join('payments', 'payments.id', '=', 'payment_items.payment_id')
+                ->where('payments.status', 'paid')
+                ->where('payments.currency', $this->currencyOf($query))
+                ->whereNotNull('payments.paid_at')
+                ->when($period->from, fn ($q) => $q->where('payments.paid_at', '>=', $period->from))
+                ->when($period->toExclusive(), fn ($q) => $q->where('payments.paid_at', '<', $period->toExclusive()))
+        )
             ->selectRaw('payment_items.product as handle, count(distinct payments.id) as orders, sum(payment_items.amount_cent * payment_items.quantity - payment_items.discount_cent) as gross_cent, sum(payment_items.quantity) as quantity')
             ->groupBy('payment_items.product')
             ->get();

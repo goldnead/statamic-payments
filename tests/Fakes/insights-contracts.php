@@ -112,6 +112,12 @@ namespace Goldnead\StatamicInsights\Support {
                 public readonly string $preset,
             ) {}
 
+            /** The first moment after the period, for a half-open comparison. */
+            public function toExclusive(): ?Carbon
+            {
+                return $this->to?->copy()->addSecond()->startOfSecond();
+            }
+
             public static function fromPreset(?string $preset): self
             {
                 $preset = in_array($preset, self::PRESETS, true) ? $preset : '30d';

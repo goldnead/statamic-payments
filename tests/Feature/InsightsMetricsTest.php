@@ -220,6 +220,71 @@ class InsightsMetricsTest extends TestCase
         );
     }
 
+    /**
+     * Bind a stand-in for statamic-brand-context's manager.
+     *
+     * No more permissive than the real one: it answers exactly the four
+     * questions `BrandScope::apply()` asks and nothing else, so a metric that
+     * invented a fifth would fail here rather than pass against a mock that
+     * says yes to everything.
+     */
+    protected function marke(bool $multi = true, ?int $current = 1, string $failMode = 'closed', bool $disabled = false): void
+    {
+        $this->app->instance('brand-context', new class($multi, $current, $failMode, $disabled)
+        {
+            public function __construct(
+                protected bool $multi,
+                protected ?int $current,
+                protected string $mode,
+                protected bool $disabled,
+            ) {}
+
+            public function scopeIsDisabled(): bool
+            {
+                return $this->disabled;
+            }
+
+            public function multiBrandEnabled(): bool
+            {
+                return $this->multi;
+            }
+
+            public function hasCurrent(): bool
+            {
+                return $this->current !== null;
+            }
+
+            public function currentId(): ?int
+            {
+                return $this->current;
+            }
+
+            public function failMode(): string
+            {
+                return $this->mode;
+            }
+        });
+    }
+
+    /** A paid row written straight to the table, so the brand and the instant are exactly as stated. */
+    protected function verkauf(string $paidAt, int $brand, int $cent = 1000, string $product = 'noten-paket'): int
+    {
+        return DB::table('payments')->insertGetId([
+            'provider' => 'mollie',
+            'provider_id' => 'tr_'.uniqid(),
+            'product' => $product,
+            'amount_cent' => $cent,
+            'currency' => 'EUR',
+            'status' => Payment::STATUS_PAID,
+            'email' => 'kaeufer@example.com',
+            'name' => 'Maria Schneider',
+            'brand_id' => $brand,
+            'paid_at' => $paidAt,
+            'created_at' => $paidAt,
+            'updated_at' => $paidAt,
+        ]);
+    }
+
     /** @return array<string|int, int|float> */
     protected function keyed(array $rows): array
     {
@@ -954,5 +1019,125 @@ class InsightsMetricsTest extends TestCase
             'payments.buyers' => Buyers::class,
             'payments.average_order' => AverageOrder::class,
         ], $this->insights->registered);
+    }
+
+    // -- The brand ----------------------------------------------------------
+
+    /**
+     * The defect this was built for, in the smallest form that shows it.
+     *
+     * A tile summed four brands while the switcher said one, so the figure was
+     * not merely wrong: it disclosed one customer's turnover on another's
+     * screen. Checked on all three queries this class runs — the figure, the
+     * split over `payments`, and the product split, which reaches the table
+     * through a join and is therefore the one that slips past a filter applied
+     * anywhere else.
+     */
+    #[Test]
+    public function every_query_stops_at_the_brand_boundary(): void
+    {
+        $this->marke(current: 2);
+
+        $meins = $this->verkauf('2026-08-12 10:00:00', brand: 2, cent: 1000, product: 'noten-paket');
+        $this->verkauf('2026-08-13 10:00:00', brand: 3, cent: 5000, product: 'fremd-paket');
+        $this->verkauf('2026-08-14 10:00:00', brand: 4, cent: 7000, product: 'fremd-paket');
+
+        DB::table('payment_items')->insert([
+            'payment_id' => $meins,
+            'product' => 'noten-paket',
+            'name' => 'Notenpaket',
+            'amount_cent' => 1000,
+            'quantity' => 1,
+            'discount_cent' => 0,
+            'kind' => PaymentItem::KIND_PRIMARY,
+            'created_at' => '2026-08-12 10:00:00',
+            'updated_at' => '2026-08-12 10:00:00',
+        ]);
+
+        $this->assertSame(1000, (new RevenueGross)->value($this->query()));
+        $this->assertSame(1, (new Orders)->value($this->query()));
+        $this->assertSame(
+            ['noten-paket' => 1000],
+            $this->keyed((new RevenueGross)->breakdown($this->query(), 'product')),
+        );
+    }
+
+    /**
+     * Fail closed reads zero; it does not make the metric disappear.
+     *
+     * Two sibling addons had answered this in `available()`, which removed
+     * twelve tiles from the screen the moment a brand went unresolved. A reader
+     * can understand a zero. An absence he cannot even notice.
+     */
+    #[Test]
+    public function an_unresolved_brand_reads_zero_and_the_metric_stays(): void
+    {
+        $this->marke(current: null);
+        $this->verkauf('2026-08-12 10:00:00', brand: 1);
+
+        $metrik = new RevenueGross;
+
+        $this->assertSame(0, $metrik->value($this->query()));
+        $this->assertTrue($metrik->available());
+    }
+
+    #[Test]
+    public function a_single_brand_install_never_sees_a_filter(): void
+    {
+        $this->marke(multi: false, current: null);
+        $this->verkauf('2026-08-12 10:00:00', brand: 0);
+        $this->verkauf('2026-08-13 10:00:00', brand: 0);
+
+        $this->assertSame(2, (new Orders)->value($this->query()));
+    }
+
+    #[Test]
+    public function a_deliberately_bypassed_scope_is_not_reapplied_here(): void
+    {
+        $this->marke(current: 2, disabled: true);
+        $this->verkauf('2026-08-12 10:00:00', brand: 2);
+        $this->verkauf('2026-08-13 10:00:00', brand: 3);
+
+        $this->assertSame(2, (new Orders)->value($this->query()));
+    }
+
+    #[Test]
+    public function without_brand_context_nothing_is_filtered(): void
+    {
+        $this->assertFalse($this->app->bound('brand-context'));
+
+        $this->verkauf('2026-08-12 10:00:00', brand: 2);
+        $this->verkauf('2026-08-13 10:00:00', brand: 3);
+
+        $this->assertSame(2, (new Orders)->value($this->query()));
+    }
+
+    // -- The edge of the window ---------------------------------------------
+
+    /**
+     * The last second of the period is inside the period.
+     *
+     * `Period::to` is 23:59:59.999999, and a binding formats it as
+     * `Y-m-d H:i:s` — the fraction is dropped. Against `<=` on a column that
+     * stores milliseconds, every sale in the final second therefore vanished:
+     * wrong on SQLite always, accidentally right on a plain MySQL timestamp
+     * column, and invisible in both. No green suite could have shown it,
+     * because no test wrote a fractional second. This one does.
+     */
+    #[Test]
+    public function a_sale_in_the_last_fraction_of_the_period_still_counts(): void
+    {
+        $this->verkauf('2026-08-20 23:59:59.500', brand: 0);
+        $this->verkauf('2026-08-20 12:00:00', brand: 0);
+
+        $this->assertSame(2, (new Orders)->value($this->query()));
+    }
+
+    #[Test]
+    public function a_sale_one_moment_after_the_period_does_not(): void
+    {
+        $this->verkauf('2026-08-21 00:00:00', brand: 0);
+
+        $this->assertSame(0, (new Orders)->value($this->query()));
     }
 }

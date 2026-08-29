@@ -1,5 +1,36 @@
 # Changelog
 
+## Unveröffentlicht
+
+### Neu: `Catalogue::contribute()` — der Katalog kann jetzt aufzählen
+
+`Catalogue::extend()` beantwortet „was kostet dieser Handle". Es kann nicht beantworten „was gibt
+es überhaupt", weil ein Resolver immer nur einen einzelnen Handle zu sehen bekommt. Jeder
+Bildschirm, der eine Produktliste anbietet, war damit blind für alles, was nicht in der
+Config-Datei steht: die Produktauswahl im Angebotsformular zeigte drei von sechs Produkten und wies
+das Speichern anschließend mit 422 ab, weil die `Rule::in()` aus derselben blinden Liste gebaut war.
+
+```php
+Catalogue::contribute(fn () => [
+    'atemkurs' => ['name' => 'Atemkurs', 'amount_cent' => 4900],
+]);
+```
+
+**Zwei Nähte, nicht eine, und das ist Absicht.** `contribute()` zählt auf, `extend()` bepreist.
+`find()` bleibt damit eine Config-Suche plus ein paar billige Resolver und läuft nie durch eine
+Datenbank, weil jemand nach einem Handle gefragt hat, den es nicht gibt — `find()` erreicht alles,
+was ein Browser schickt. Der Preis dieser Trennung ist eine Regel: **wer beisteuert, muss auch
+auflösen.** Ein Addon, das einen Handle aufzählt, den es nicht bepreisen kann, legt eine
+unverkäufliche Zeile in die Auswahl.
+
+**Config gewinnt bei Gleichstand.** Ein Preis in einer Datei steht in der Versionsverwaltung und
+wurde absichtlich hingeschrieben; eine Tabellenzeile darf einen Deploy nicht still überstimmen.
+
+Beigesteuerte Einträge ohne ganzzahligen `amount_cent` >= 0 werden nicht gelistet. Config-Einträge
+werden weiterhin ungeprüft gelistet — sie jetzt zu prüfen hieße, dass der vertippte Preis einer
+laufenden Installation beim Upgrade aus ihrer eigenen Auswahl *verschwindet*, und das liest sich
+wie „nichts zu verkaufen".
+
 ## 1.14.0 — 2026-08-29
 
 ### Behoben: Umsatzzahlen zählten jede Marke, und verloren die letzte Sekunde

@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\PaymentItem;
 use Goldnead\StatamicPayments\Support\Checkout;
 use Goldnead\StatamicPayments\Support\FollowUp;
+use Goldnead\StatamicPayments\Support\Fulfilment;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use PHPUnit\Framework\Attributes\Test;
 
@@ -229,5 +230,104 @@ class FollowUpTest extends TestCase
         $this->gateway->mandates[] = 'cst_maria';
 
         $this->assertNotNull(app(FollowUp::class)->accept($original, 'begleit-cd'));
+    }
+
+    #[Test]
+    public function somebody_else_at_the_same_screen_is_not_charged_on_the_first_buyers_card(): void
+    {
+        $original = $this->paidPayment();
+        $this->gateway->mandates[] = 'cst_maria';
+
+        // Derselbe Rechner, andere Person. Ein Mandat gehoert dem Menschen,
+        // nicht dem Geraet — wer das verwechselt, bucht bei der zweiten Person
+        // die Karte der ersten ab und liefert an deren Adresse.
+        $this->assertFalse(
+            app(FollowUp::class)->eligible($original, 'jemand-anderes@example.com')
+        );
+
+        $this->assertNull(
+            app(FollowUp::class)->accept($original, 'begleit-cd', [], [], 'jemand-anderes@example.com')
+        );
+
+        // Keine Zeile, kein Anbieter-Aufruf: die Ablehnung faellt, bevor
+        // irgendetwas angelegt wird.
+        $this->assertSame(1, Payment::count());
+    }
+
+    #[Test]
+    public function the_same_buyer_is_recognised_regardless_of_case_and_spaces(): void
+    {
+        $original = $this->paidPayment();
+        $this->gateway->mandates[] = 'cst_maria';
+
+        // Ein Mensch, der seine Adresse beim zweiten Mal anders tippt, ist
+        // derselbe Mensch. Ein Vergleich, der daran scheitert, schickt
+        // Wiederkaeufer grundlos noch einmal durch die Karteneingabe.
+        $this->assertTrue(
+            app(FollowUp::class)->eligible($original, '  KAEUFER@Example.COM ')
+        );
+
+        $this->assertNotNull(
+            app(FollowUp::class)->accept($original, 'begleit-cd', [], [], '  KAEUFER@Example.COM ')
+        );
+    }
+
+    #[Test]
+    public function a_caller_that_knows_no_address_gets_the_old_behaviour(): void
+    {
+        $original = $this->paidPayment();
+        $this->gateway->mandates[] = 'cst_maria';
+
+        // Es gibt Strecken, die ihren Kaeufer aus einer signierten Sitzung
+        // kennen und keine Adresse zur Hand haben. Denen wird nichts
+        // weggenommen — sie bekommen nur auch keinen zusaetzlichen Schutz.
+        $this->assertTrue(app(FollowUp::class)->eligible($original));
+        $this->assertTrue(app(FollowUp::class)->eligible($original, null));
+    }
+
+    #[Test]
+    public function a_payment_without_an_address_cannot_contradict_anybody(): void
+    {
+        $original = $this->paidPayment(['email' => null]);
+        $this->gateway->mandates[] = 'cst_maria';
+
+        // Steht an der ersten Zahlung keine Adresse, gibt es nichts zu
+        // vergleichen. Dann bleibt es bei den uebrigen Bedingungen, statt
+        // jeden Wiederkauf pauschal abzulehnen.
+        $this->assertTrue(app(FollowUp::class)->eligible($original, 'kaeufer@example.com'));
+    }
+
+    #[Test]
+    public function the_card_the_buyer_would_recognise_is_kept_from_the_first_payment(): void
+    {
+        $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com'])->payment;
+
+        $this->gateway->markPaid($payment->provider_id, 'kaeufer@example.com', '9996', 'Mastercard');
+
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        // Gebraucht wird es auf der Seite des Nachfassangebots: die darf nicht
+        // abbuchen, ohne vorher zu sagen, womit. Zu holen ist es nur jetzt —
+        // spaeter kostet es einen Anbieter-Aufruf beim Rendern einer Seite.
+        $payment->refresh();
+        $this->assertSame('9996', $payment->card_last4);
+        $this->assertSame('Mastercard', $payment->card_label);
+    }
+
+    #[Test]
+    public function a_payment_method_without_a_card_leaves_no_hint_behind(): void
+    {
+        $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com'])->payment;
+
+        // Ueberweisung, Lastschrift, Gutschein: es gibt keine vier Ziffern.
+        // Dann steht dort nichts, und die Seite muss das aushalten, statt sich
+        // etwas auszudenken.
+        $this->gateway->markPaid($payment->provider_id, 'kaeufer@example.com');
+
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $payment->refresh();
+        $this->assertNull($payment->card_last4);
+        $this->assertNull($payment->card_label);
     }
 }

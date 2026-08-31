@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.16.0 — 2026-08-31
+
+### Ein Mandat gehört dem Menschen, nicht dem Gerät
+
+`FollowUp::eligible()` nimmt jetzt zusätzlich die Adresse des Käufers, der gerade vor dem
+Bildschirm sitzt, und lehnt ab, wenn sie nicht zu der Zahlung passt, gegen die abgebucht werden
+soll. Dasselbe gilt für `accept()`, das die Adresse als fünftes Argument entgegennimmt und an die
+Prüfung weiterreicht. Wer nichts übergibt, bekommt das bisherige Verhalten — es gibt Aufrufer, die
+ihren Käufer aus einer signierten Sitzung kennen und keine Adresse zur Hand haben.
+
+Der Anlass war ein reproduzierter Fall in `statamic-funnels`: dort hing die Frage „wer ist das"
+an einem Besuchs-Cookie mit dreißig Tagen Laufzeit. Wer als Zweiter am selben Rechner durch
+denselben Funnel ging, bekam kein Kartenformular mehr. Mollie buchte per gespeichertem Mandat
+`sequenceType: recurring` auf den Kunden des ersten Kaufs ab, und Zugang wie Rechnung liefen auf
+dessen Adresse — die frisch eingegebene wurde von `FollowUp` schlicht überschrieben. Auf einem
+Familienrechner, im Büro oder in einer Bibliothek ist das kein Randfall.
+
+Diese Fassung entfernt die Möglichkeit nicht, sie verlangt nur einen Beleg. Steht an einer der
+beiden Seiten keine Adresse, gibt es nichts zu widersprechen, und es bleibt bei den übrigen
+Bedingungen.
+
+### Woran der Käufer seine Karte wiedererkennt
+
+Neue Spalten `payments.card_last4` und `payments.card_label`, gefüllt aus dem, was der Anbieter
+bei der Zahlung ohnehin mitliefert (`RemotePayment::$cardLast4` / `$cardLabel`). Gebraucht werden
+sie auf der Seite eines Nachfassangebots: die darf nicht abbuchen, ohne vorher zu sagen, womit —
+§ 312j Abs. 3 BGB verlangt die wesentlichen Angaben unmittelbar über dem Knopf, die Zahlungsart
+eingeschlossen. Zu holen sind sie nur im Moment der Zahlung; später kostet es einen
+Anbieter-Aufruf beim Rendern einer Seite.
+
+Vier Ziffern und ein Name wie „Mastercard" sind keine Kartennummer und fallen nicht unter PCI-DSS.
+Mehr wird nicht gespeichert. Bestandszeilen bleiben null, und jede Seite muss das aushalten.
+
+### Migration
+
+`2026_08_31_220000_add_card_hint_to_payments_table` — zwei nullbare Spalten auf `payments`.
+
 ## 1.15.0 — 2026-08-30
 
 ### Neu: `Brands::readerId()` — die fehlende Hälfte von `Brands::only()`

@@ -233,10 +233,15 @@ class FakeGateway implements SubscriptionGateway
     }
 
     /** Let the provider say the payment is paid. Only the provider may. */
-    public function markPaid(string $providerId, ?string $email = null): void
+    public function markPaid(string $providerId, ?string $email = null, ?string $cardLast4 = null, ?string $cardLabel = null): void
     {
         $this->remote[$providerId] = new RemotePayment(
-            $providerId, Payment::STATUS_PAID, $this->metadata[$providerId] ?? [], $email
+            providerId: $providerId,
+            status: Payment::STATUS_PAID,
+            metadata: $this->metadata[$providerId] ?? [],
+            email: $email,
+            cardLast4: $cardLast4,
+            cardLabel: $cardLabel,
         );
     }
 

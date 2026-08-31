@@ -43,15 +43,48 @@ class FollowUp
     /**
      * Whether this particular payment can carry a follow-up.
      *
-     * Three conditions, and all three are refusals of the same kind: no
+     * Four conditions, and all four are refusals of the same kind: no
      * agreement, no charge.
+     *
+     * `$buyerEmail` is who the caller currently has in front of it. Pass it
+     * whenever you know — it is the difference between „derselbe Mensch kauft
+     * noch etwas" and „auf demselben Rechner sitzt jetzt jemand anderes". A
+     * caller that cannot know may omit it; then only the first three hold.
      */
-    public function eligible(Payment $payment): bool
+    public function eligible(Payment $payment, ?string $buyerEmail = null): bool
     {
         return $this->available()
             && $payment->isPaid()
             && is_string($payment->customer_reference)
-            && $payment->customer_reference !== '';
+            && $payment->customer_reference !== ''
+            && $this->sameBuyer($payment, $buyerEmail);
+    }
+
+    /**
+     * Ob die Person vor dem Bildschirm dieselbe ist wie bei der ersten Zahlung.
+     *
+     * Ohne diese Frage wird ein Mandat zu einer Eigenschaft des Geraets statt
+     * des Menschen: wer als Zweiter am selben Rechner kauft, wuerde auf die
+     * Karte des Ersten abgebucht, und Zugang wie Rechnung gingen an dessen
+     * Adresse. Auf einem Familienrechner, im Buero oder in einer Bibliothek ist
+     * das kein Randfall.
+     *
+     * Wer nichts uebergibt, bekommt das alte Verhalten — es gibt Aufrufer, die
+     * ihren Kaeufer aus einer signierten Sitzung kennen und keine Adresse zur
+     * Hand haben. Wer etwas uebergibt, bekommt eine Ablehnung, sobald es nicht
+     * passt. Steht an der Zahlung noch keine Adresse, ist nichts zu
+     * widersprechen: dann bleibt es beim Ja.
+     */
+    public function sameBuyer(Payment $payment, ?string $buyerEmail): bool
+    {
+        $known = is_string($payment->email) ? trim($payment->email) : '';
+        $current = is_string($buyerEmail) ? trim($buyerEmail) : '';
+
+        if ($known === '' || $current === '') {
+            return true;
+        }
+
+        return mb_strtolower($known) === mb_strtolower($current);
     }
 
     /**
@@ -82,17 +115,20 @@ class FollowUp
      *                                                        Strecke an *diese* Zahlung heften will: `meta`, `country`. Siehe
      *                                                        {@see PaymentDetails}. Wird geschrieben, bevor der Anbieter gerufen
      *                                                        wird, weil ein Nachtragen ein Rennen gegen den Webhook wäre.
+     * @param  string|null  $buyerEmail  Wer gerade vor dem Bildschirm sitzt,
+     *                                   soweit die Strecke es weiß. Passt es nicht zur Adresse der ersten
+     *                                   Zahlung, wird nicht abgebucht. Siehe {@see sameBuyer()}.
      *
      * @throws \InvalidArgumentException wenn $details etwas enthält, das dem Paket gehört
      */
-    public function accept(Payment $original, string $productHandle, array $context = [], array|PaymentDetails $details = []): ?Payment
+    public function accept(Payment $original, string $productHandle, array $context = [], array|PaymentDetails $details = [], ?string $buyerEmail = null): ?Payment
     {
         // Zuerst, und vor jeder Prüfung, die vom Zustand abhängt: ein Aufrufer,
         // der etwas Unerlaubtes mitgibt, soll das immer erfahren und nicht nur
         // dann, wenn dieses Angebot gerade zulässig ist.
         $details = PaymentDetails::from($details);
 
-        if (! $this->eligible($original)) {
+        if (! $this->eligible($original, $buyerEmail)) {
             return null;
         }
 

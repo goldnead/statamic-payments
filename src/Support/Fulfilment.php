@@ -358,6 +358,21 @@ class Fulfilment
             $payment = $payment->fresh() ?? $payment;
         }
 
+        // Woran der Kaeufer seine Karte wiedererkennt, aber nur wenn noch
+        // nichts da ist.
+        //
+        // Gebraucht wird es erst spaeter, auf der Seite eines
+        // Nachfassangebots: die darf nicht abbuchen, ohne vorher zu sagen,
+        // womit. Zu holen ist es aber nur jetzt, waehrend der Anbieter die
+        // Zahlung noch beschreibt.
+        if ($remote->cardLast4 && ! $payment->card_last4) {
+            $payment->forceFill([
+                'card_last4' => $remote->cardLast4,
+                'card_label' => $remote->cardLabel,
+            ])->save();
+            $payment = $payment->fresh() ?? $payment;
+        }
+
         if (! $payment->email) {
             // Paid, and nowhere to deliver to. Not a reason to refuse the
             // money, but a listener that delivers by mail is about to have

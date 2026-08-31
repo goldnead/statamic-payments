@@ -195,6 +195,8 @@ class MollieGateway implements MandateGateway, SubscriptionGateway
             metadata: json_decode(json_encode($payment->metadata) ?: '{}', true) ?: [],
             email: $this->email($payment),
             country: $this->country($payment),
+            cardLast4: $this->cardLast4($payment),
+            cardLabel: $this->cardLabel($payment),
         );
     }
 
@@ -225,6 +227,8 @@ class MollieGateway implements MandateGateway, SubscriptionGateway
             metadata: json_decode(json_encode($payment->metadata) ?: '{}', true) ?: [],
             email: $this->email($payment),
             country: $this->country($payment),
+            cardLast4: $this->cardLast4($payment),
+            cardLabel: $this->cardLabel($payment),
             // Present only on a payment Mollie made on its own, on a rhythm.
             subscriptionId: isset($payment->subscriptionId) && $payment->subscriptionId
                 ? (string) $payment->subscriptionId
@@ -299,5 +303,32 @@ class MollieGateway implements MandateGateway, SubscriptionGateway
         }
 
         return null;
+    }
+
+    /**
+     * Die letzten vier Stellen der Karte, wenn es eine Karte war.
+     *
+     * Mollie liefert unter `details.cardNumber` bereits nur die letzten vier
+     * Stellen — hier wird trotzdem gefiltert statt vertraut: was nicht wie vier
+     * Ziffern aussieht, wird verworfen, damit auf keiner Seite etwas landet,
+     * das nach einer Kartennummer aussehen koennte.
+     */
+    protected function cardLast4(mixed $payment): ?string
+    {
+        $kandidat = $payment->details->cardNumber ?? null;
+
+        return is_string($kandidat) && preg_match('/^\d{4}$/', $kandidat) === 1
+            ? $kandidat
+            : null;
+    }
+
+    /** Die Marke der Karte („Mastercard"), soweit der Anbieter sie nennt. */
+    protected function cardLabel(mixed $payment): ?string
+    {
+        $kandidat = $payment->details->cardLabel ?? null;
+
+        return is_string($kandidat) && $kandidat !== ''
+            ? mb_substr($kandidat, 0, 32)
+            : null;
     }
 }

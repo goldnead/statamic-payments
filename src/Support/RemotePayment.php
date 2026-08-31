@@ -40,6 +40,17 @@ final readonly class RemotePayment
          * is not overwritten, because an invoice must not change after the fact.
          */
         public ?string $country = null,
+        /**
+         * Die letzten vier Stellen der Karte, mit der bezahlt wurde.
+         *
+         * Nur ein Wiedererkennungszeichen fuer den Kaeufer, kein Zahlungsmittel:
+         * eine Seite, die gleich ohne erneute Karteneingabe abbucht, muss sagen
+         * koennen, welche Karte sie meint. Fehlt bei jeder Zahlungsart, die
+         * keine Karte ist — dann sagt die Seite eben nichts Genaueres.
+         */
+        public ?string $cardLast4 = null,
+        /** Die Marke der Karte, wie der Anbieter sie nennt („Mastercard"). */
+        public ?string $cardLabel = null,
     ) {}
 
     public function isPaid(): bool

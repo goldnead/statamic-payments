@@ -24,6 +24,8 @@ use Illuminate\Support\Carbon;
  * @property string|null $name
  * @property string|null $country
  * @property string|null $country_source
+ * @property string|null $card_last4
+ * @property string|null $card_label
  * @property string|null $utm_source
  * @property string|null $utm_medium
  * @property string|null $utm_campaign

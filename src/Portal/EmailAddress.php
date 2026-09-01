@@ -2,6 +2,8 @@
 
 namespace Goldnead\StatamicPayments\Portal;
 
+use Closure;
+
 /**
  * One spelling of an address, so that a link and a row can be compared.
  *
@@ -39,5 +41,21 @@ final class EmailAddress
     public static function looksDeliverable(string $email): bool
     {
         return preg_match('/^[^@\s]+@[^@\s]+\.[^@\s]+$/u', $email) === 1;
+    }
+
+    /**
+     * Dieselbe Prüfung als Validierungsregel, für die Formulare, die eine
+     * Adresse entgegennehmen und ablehnen dürfen (Widerruf, Kündigung). Der
+     * Fehlertext ist Laravels eigener für `email`, damit er übersetzt ist.
+     *
+     * @return Closure(string, mixed, Closure(string): void): void
+     */
+    public static function rule(): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail): void {
+            if (! is_string($value) || ! self::looksDeliverable(trim($value))) {
+                $fail((string) __('validation.email', ['attribute' => $attribute]));
+            }
+        };
     }
 }

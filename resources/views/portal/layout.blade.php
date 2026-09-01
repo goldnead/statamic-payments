@@ -55,7 +55,22 @@
         .btn { margin-top: 22px; width: 100%; padding: 11px 16px; border: 0; border-radius: 8px; background: #18181b; color: #fff; font-size: 15px; cursor: pointer; font-family: inherit; text-align: center; text-decoration: none; display: block; box-sizing: border-box; }
         .btn-quiet { background: transparent; color: #b91c1c; border: 1px solid #e4e4e7; }
         .btn-plain { background: transparent; color: #18181b; border: 1px solid #e4e4e7; }
-        input[type=email] { width: 100%; box-sizing: border-box; padding: 11px 12px; border: 1px solid #d4d4d8; border-radius: 8px; font-size: 15px; font-family: inherit; }
+        input[type=email], input[type=text], input[type=date], textarea, select { width: 100%; box-sizing: border-box; padding: 11px 12px; border: 1px solid #d4d4d8; border-radius: 8px; font-size: 15px; font-family: inherit; background: #fff; color: #18181b; }
+        textarea { min-height: 96px; resize: vertical; }
+        /* The withdrawal and cancellation forms have several fields where the
+           portal has one. A field is a label above an input, with room below;
+           the label is the same muted line the portal already uses. */
+        .field { margin-top: 16px; }
+        .field label.muted { display: block; margin: 0 0 6px; }
+        .field .help { font-size: 13px; color: #a1a1aa; line-height: 1.5; margin: 6px 0 0; }
+        .field .error { font-size: 13px; color: #b91c1c; margin: 6px 0 0; }
+        .choice { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; font-size: 15px; }
+        .choice input { margin: 4px 0 0; flex: none; }
+        .choice .desc { margin-top: 2px; }
+        /* The acknowledgement's one fact a person needs to write down. */
+        .ticket { margin: 20px 0 0; padding: 16px; background: #f4f4f5; border-radius: 8px; text-align: center; }
+        .ticket .id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 24px; letter-spacing: .08em; color: #18181b; }
+        .ticket .when { font-size: 14px; color: #52525b; margin: 6px 0 0; }
         a { color: #18181b; }
         .foot { margin-top: 28px; font-size: 12px; color: #a1a1aa; line-height: 1.6; }
         .foot form { display: inline; }

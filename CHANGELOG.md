@@ -2,6 +2,55 @@
 
 ## Unreleased
 
+### Zahlungs-Detailseite mit Kommunikationsprotokoll
+
+Utilities → Zahlungen → Klick auf eine Zeile (oder „Details" im Zeilenmenü) öffnet
+`cp/utilities/payments/{id}`: Kopf mit Betrag, Status und Zeitpunkten; Panels für Positionen (Art,
+Menge, Einzelpreis, Angebot), Käufer (E-Mail, Name, Land, Anschrift aus `meta.address`, USt-IdNr. aus
+`meta.vat_id`), Einwilligung nach § 356 Abs. 5 BGB (Zeitpunkt, Wortlaut, Fassung der Belehrung),
+Zugangsfenster (`meta.access`), Herkunft (UTM, Verweis, Einstiegsseite), Zahlungsmittel, Erstattungen,
+Verknüpfungen (Erstbestellung, Nachfassangebote, Abo, Rechnung, Widerrufe, Kündigungen) und
+**Kommunikation**. Ist `statamic-webhook-manager` installiert, ein Panel „Webhook-Zustellungen"
+(`WebhookLog::forSubject('payment', id)`). Dasselbe Recht wie das Listing; auf Mehrmarken-Installationen
+mit gesetzter Marke ist eine fremde Zahlung eine 404. Register S·8.
+
+Neu: Tabelle `payment_communications` und die Fassade `PaymentLog` — `PaymentLog::mail($payment,
+'invoice', $to, $subject)`, `::note()`, `::record()`, `::for()`. Ein Fehler beim Schreiben wird geloggt
+und bricht nie einen Kaufpfad. Das Addon trägt selbst ein: Portal-Link (an der jüngsten Bestellung der
+Adresse), Eingangsbestätigung Widerruf (bei zugeordneter Zahlung), Eingangsbestätigung Kündigung und
+Kündigungsbestätigung aus dem Portal (an der jüngsten Zahlung des Abos), Abbruch-Erinnerung.
+`statamic-invoices` trägt seine Rechnungs-Mail ein. Ereignis `PaymentCommunicationLogged`.
+
+### Warenkorbabbruch-Mail
+
+`abandoned.mail.enabled` schickt je angekündigtem Checkout eine Erinnerung an die Adresse darauf —
+nicht, wenn `statamic-suppression` die Adresse führt (dann eine Notiz im Protokoll). `template` nimmt
+einen email-templates-Slug mit den Variablen `buyer.email`, `buyer.name`, `order.lines`,
+`order.total`, `order.currency`, `resume_url`; ohne Vorlage geht eine eingebaute, veröffentlichbare
+Blade-Mail (de/en). `resume_url` ist ein signierter Link (`abandoned.mail.resume_days`, Vorgabe 14),
+der über `Checkout::resume()` denselben Warenkorb neu startet — gleiche Positionen, Käufer, Herkunft,
+Rabatt und Zustimmung, `meta.resumed_from` zeigt zurück; oder eine eigene Adresse mit `{payment}`.
+Neue Spalte `payments.recovered_at`: gesetzt, wenn eine erinnerte Zahlung doch bezahlt wird, auch über
+den neu gestarteten Checkout. Register K·8.
+
+### Zahlungsarten
+
+`methods` (Liste von Mollie-Kennungen oder `STATAMIC_PAYMENTS_METHODS` mit Kommas) geht als `method`
+in die Mollie-Anfrage; ohne Angabe kein Schlüssel. Der Käufer wird nur dann zum Merken angemeldet
+(`customerId`, `sequenceType: first`), wenn mindestens eine der Methoden ein Mandat hinterlassen kann.
+`Support\PaymentMethods` hält die zwei Listen, das README die Tabelle. Register K·18.
+
+### Nachzügler
+
+- `EntitlementsBridge::grantFor()` gibt `meta.access` (`starts_at`, `days`, aus `Offer::accessWindow()`)
+  als `startsAt`/`expiresAt` an `Entitlements::grant()` weiter. Register K·5.
+- `payment_items.offer`: das Angebot, über das eine Position verkauft wurde — aus
+  `PaymentDetails::offer_handles` (Produkt-Handle → Angebots-Handle) oder aus dem `offer`-Schlüssel,
+  den der Katalog an die Zeile heftet; sonst null.
+- `payments:prune-legal-drafts` löscht unbestätigte Widerrufs- und Kündigungserklärungen nach sieben
+  Tagen (`--days`, `--dry-run`).
+- Kein `email:filter` mehr im Addon; die Formulare nutzen `EmailAddress::rule()` (war schon so).
+
 ### Widerrufsbutton nach § 356a BGB
 
 Seit 19.06.2026 Pflicht, bis hierher nicht vorhanden. Neu: ein öffentlicher, zweistufiger Weg

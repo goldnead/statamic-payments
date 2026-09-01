@@ -142,7 +142,57 @@ return [
     'abandoned' => [
         'enabled' => env('STATAMIC_PAYMENTS_ABANDONED', false),
         'after_minutes' => env('STATAMIC_PAYMENTS_ABANDONED_AFTER', 60),
+
+        /*
+        | The reminder itself. Its own switch, because announcing an abandoned
+        | checkout (an event a sequence may pick up) and mailing the person are
+        | two decisions. With `enabled` here the addon sends one mail per
+        | announced checkout, to the address on it, unless statamic-suppression
+        | is installed and lists that address.
+        |
+        | `template` is an email-templates slug; with the sibling installed and
+        | the slug resolving, that template is sent with the variables
+        | `buyer.email`, `buyer.name`, `order.lines`, `order.total`,
+        | `order.currency`, `resume_url`. Without it, a plain built-in mail goes
+        | out (`resources/views/abandoned/mail`, publishable).
+        |
+        | `resume_url` is where the button points. Null builds a signed link that
+        | starts the checkout again with the same lines; a string of your own
+        | may carry `{payment}` for the id. `resume_days` is how long that
+        | signed link works.
+        |
+        | The consent question above applies here twice over.
+        */
+        'mail' => [
+            'enabled' => env('STATAMIC_PAYMENTS_ABANDONED_MAIL', false),
+            'template' => env('STATAMIC_PAYMENTS_ABANDONED_TEMPLATE'),
+            'subject' => null,
+            'resume_url' => null,
+            'resume_days' => 14,
+        ],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Payment methods
+    |--------------------------------------------------------------------------
+    |
+    | Which Mollie methods the hosted checkout offers. `null` sends no `method`
+    | and Mollie shows what the account has switched on, which is right for
+    | most sites. A list restricts it: `['creditcard', 'paypal', 'ideal']`.
+    | The environment variable takes a comma-separated list.
+    |
+    | This matters for subscriptions and payment plans. Only cards, SEPA direct
+    | debit, PayPal, Apple Pay and Google Pay let the provider charge again
+    | without the buyer; Klarna, bank transfer, invoice, TWINT and the rest do
+    | not, and a first payment with those cannot leave a mandate. The checkout
+    | therefore asks Mollie to remember the buyer only when at least one listed
+    | method can hold one. `Support\PaymentMethods` has the two lists and the
+    | README has the table.
+    |
+    */
+
+    'methods' => env('STATAMIC_PAYMENTS_METHODS'),
 
     'rate_limit' => 60,
 

@@ -116,6 +116,51 @@ is.
 Access is the `access payments utility` permission, which appears in Statamic's own permission list
 once the addon is installed.
 
+### One payment, whole
+
+Clicking a row (or **Details** in its menu) opens `cp/utilities/payments/{id}`: the amount, status
+and timestamps at the top, then panels the way a publish form groups its fields — **lines** (kind,
+quantity, unit price, the offer it was sold through), **buyer** (email, name, country, the address
+from `meta.address`, the VAT ID from `meta.vat_id`), **consent** under § 356 (5) BGB (when, the exact
+wording, the version of the instruction), the **access window** from `meta.access`, **origin** (UTM,
+referrer, landing page), **payment method**, **refunds**, **related** (original order, follow-up
+offers, subscription, invoice, withdrawals, cancellations) and **communication** — see below. With
+`statamic-webhook-manager` installed, a panel lists that payment's webhook deliveries.
+
+Same permission as the listing. On a multi-brand install with a brand selected, a payment of another
+brand is a 404, not a 403: "does not exist" gives away less than "exists, not yours".
+
+### The communication log
+
+What went out for an order — the invoice mail, the welcome mail, a note from support — is otherwise
+in nobody's memory once the mail log has rotated. `payment_communications` keeps one line per event,
+append-only, and the detail page shows them newest first ("Nothing sent yet" until there is one).
+
+The addon writes its own: the portal link (on the address's latest order), the withdrawal
+acknowledgement (where a payment matched), the cancellation acknowledgement and the portal's
+cancellation confirmation (on the subscription's latest payment), the abandoned-checkout reminder.
+`statamic-invoices` writes its invoice mail. Your site and other addons write theirs through the
+facade:
+
+```php
+use Goldnead\StatamicPayments\Facades\PaymentLog;
+
+PaymentLog::mail($payment, 'purchase_confirmation', $to, $subject);        // $payment or its id
+PaymentLog::mail($payment, 'access', $to, $subject, 'failed', ['error' => $e->getMessage()]);
+PaymentLog::note($payment, 'support', 'Zugang von Hand verlängert bis 31.12.');
+PaymentLog::record($payment, 'export', 'datev', ['reference' => $batchId]);
+PaymentLog::for($payment);                                                  // newest first
+```
+
+`kind` is yours (64 characters); the screen translates the ones it knows (`invoice`,
+`purchase_confirmation`, `access`, `receipt`, `portal_link`, …) and shows the rest as written.
+Channels are `mail`, `webhook`, `export`, `note`; statuses `sent`, `failed`, `queued`. Every write
+dispatches `PaymentCommunicationLogged`.
+
+**A write that fails never throws.** A missing table, a lost connection — the mail is out either way,
+and a checkout must not fail because its diary did. The failure is logged as a warning, loudly, so a
+gap in the log is never mistaken for "nothing was sent".
+
 ### Subscriptions
 
 Utilities → **Subscriptions**, next to it: the agreements rather than the money. Product, whether it
@@ -566,6 +611,44 @@ needs no code at all.
 > consent, not of configuration — and the suppression list belongs in front of the send either way.
 > That is why this ships switched off.
 
+### The reminder mail
+
+If the consent question is answered, the addon can send the reminder itself:
+
+```php
+'abandoned' => [
+    'enabled' => true,
+    'after_minutes' => 60,
+    'mail' => [
+        'enabled' => true,
+        'template' => 'warenkorb-erinnerung',   // an email-templates slug, or null
+        'subject' => null,                       // null: the built-in subject
+        'resume_url' => null,                    // null: a signed link that restarts the checkout
+        'resume_days' => 14,
+    ],
+],
+```
+
+One mail per announced checkout, to the address on it. With `statamic-suppression` installed the
+address is checked first; a suppressed one gets no mail and a note in the communication log instead.
+Without that addon there is no list to ask — put your own in front, or leave this off.
+
+With `statamic-email-templates` installed and `template` resolving, that template is sent exactly as
+its preview shows, with the variables `{{ buyer.email }}`, `{{ buyer.name }}`, `{{ order.lines }}`
+(an HTML list), `{{ order.total }}`, `{{ order.currency }}` and `{{ resume_url }}`. Without it, a
+plain built-in mail goes out — German and English, no images, publishable under
+`views/vendor/statamic-payments/abandoned/mail`.
+
+`resume_url` is where the button points. Left `null`, it is a signed link
+(`/!/statamic-payments/weiter/{id}`, valid `resume_days`) that runs `Checkout::resume()`: the same
+lines, buyer, origin, discount and consent, as a **new** payment whose `meta.resumed_from` points
+back — the provider's original checkout URL expires within minutes, so it cannot be reused. A paid
+or emptied payment answers with a one-sentence page instead. Your own URL may carry `{payment}`.
+
+**Recovered revenue.** When a reminded payment is paid after all — itself, or through the restarted
+checkout — `payments.recovered_at` is set on the reminded row. `abandoned_notified_at` is cleared as
+before; `recovered_at` is what a report sums.
+
 ## Customer self-service
 
 A buyer with no account can see their orders, download the invoice, cancel a subscription and put a
@@ -715,6 +798,32 @@ every row is `0`, and `0` is right.
 | `return_url` | `/danke` | Where the buyer lands after paying. **Not** where fulfilment happens. |
 | `rate_limit` | `60` | Per minute, per IP, on the webhook. |
 | `entitlements.enabled` | `false` | On, plus a `grants` key on a product, grants that entitlement to the buyer. |
+| `methods` | `null` | A list of Mollie method ids restricts the hosted checkout; `null` lets Mollie decide. See below. |
+| `abandoned.mail.enabled` | `false` | On, the addon mails the reminder itself. Consent first. |
+
+## Payment methods
+
+`methods` names which Mollie methods the hosted checkout offers — `['creditcard', 'paypal', 'ideal']`,
+or `STATAMIC_PAYMENTS_METHODS=creditcard,paypal,ideal`. Nothing configured sends no `method` key and
+Mollie shows what the account has switched on.
+
+What matters is subscriptions and payment plans. Only some methods let the provider charge again
+**without the buyer**; with the others the customer triggers every instalment by hand, which makes
+them no method at all for a recurring agreement. The checkout therefore asks Mollie to remember the
+buyer (`customerId`, `sequenceType: first`) only when at least one listed method can leave a mandate.
+
+| Method (Mollie id) | Charged again automatically? | Note |
+|---|---|---|
+| Card (`creditcard`) | **yes** | card mandate |
+| SEPA direct debit (`directdebit`) | **yes** | the mandate comes from a first payment via iDEAL, Bancontact, SOFORT, EPS, KBC/CBC, Belfius, Przelewy24 or Pay by Bank |
+| PayPal (`paypal`) | **yes** | PayPal billing agreement |
+| Apple Pay (`applepay`), Google Pay (`googlepay`) | **yes** | tokenised card payment; the follow-up runs on the card mandate |
+| iDEAL, Bancontact, SOFORT, EPS, KBC, Belfius, Przelewy24, Pay by Bank | first payment only | leaves a SEPA mandate, is not charged itself again |
+| Klarna, bank transfer, invoice/`billie`, `in3`, TWINT, paysafecard, gift cards, vouchers | **no** | the customer pays each instalment |
+
+Sources: Mollie's recurring-payments guide, and the ablefy note in the suite register (K·18): automatic
+charging works for card, SEPA, Google and Apple Pay; everything else the customer triggers per
+instalment. `Support\PaymentMethods::RECURRING` and `::MANDATE_FIRST` are the two lists in code.
 
 ## Security
 
@@ -752,6 +861,15 @@ timestamps for paid, fulfilled and failure-announced. A row is `initiated` until
 acknowledged it — deliberately not `open`, so a checkout that died mid-flight is not counted as an
 order in flight. An address the buyer typed is never overwritten by the one on
 their Mollie account — those are often different people.
+
+`payment_items` carries one line per thing bought, with `offer` naming the offer it was sold through
+where the caller said (`PaymentDetails` key `offer_handles`, product handle → offer handle) or the
+catalogue entry carried it; otherwise `null`. `payment_communications` is the communication log
+above: payment, brand, channel, kind, recipient, subject, status, reference, `meta`, `happened_at`.
+`payments.recovered_at` marks a reminded checkout that was paid after all.
+
+Declarations under § 356a and § 312k that were begun and never confirmed are deleted by
+`payments:prune-legal-drafts` after seven days (`--days`, `--dry-run`); confirmed ones never are.
 
 ## Multi-site
 

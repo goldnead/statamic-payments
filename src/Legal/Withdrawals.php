@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Legal;
 
+use Goldnead\StatamicPayments\Facades\PaymentLog;
 use Goldnead\StatamicPayments\Legal\Mail\WithdrawalNotice;
 use Goldnead\StatamicPayments\Legal\Mail\WithdrawalReceipt;
 use Goldnead\StatamicPayments\Models\Payment;
@@ -177,9 +178,17 @@ class Withdrawals
     protected function acknowledge(Withdrawal $withdrawal): void
     {
         try {
-            Mail::to($withdrawal->email)->send(new WithdrawalReceipt($withdrawal));
+            $mailable = new WithdrawalReceipt($withdrawal);
+
+            Mail::to($withdrawal->email)->send($mailable);
 
             $withdrawal->forceFill(['receipt_sent_at' => Carbon::now()])->save();
+
+            // Nur bei zugeordneter Zahlung: das Protokoll hängt an der Zahlung,
+            // und ein Widerruf ohne Treffer hat keine, an der es hängen könnte.
+            if ($withdrawal->payment_id !== null) {
+                PaymentLog::mail($withdrawal->payment_id, 'withdrawal_receipt', $withdrawal->email, $mailable->envelope()->subject, meta: ['withdrawal' => $withdrawal->public_id]);
+            }
         } catch (Throwable $e) {
             Log::error('statamic-payments: a withdrawal was received and the acknowledgement could not be sent.', [
                 'withdrawal' => $withdrawal->public_id,

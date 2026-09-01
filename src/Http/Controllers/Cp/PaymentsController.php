@@ -2,8 +2,10 @@
 
 namespace Goldnead\StatamicPayments\Http\Controllers\Cp;
 
+use Goldnead\StatamicPayments\Http\Resources\Cp\PaymentDetail;
 use Goldnead\StatamicPayments\Http\Resources\Cp\PaymentsCollection;
 use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Support\Brands;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
@@ -60,6 +62,54 @@ class PaymentsController extends CpController
             // result, a fruitless search claimed the webhook was misconfigured.
             'hasAny' => Payment::query()->exists(),
         ]);
+    }
+
+    /**
+     * Eine Zahlung, ganz — mit Positionen, Käufer, Herkunft, Verknüpfungen und
+     * dem Kommunikationsprotokoll.
+     *
+     * Dasselbe Recht wie das Listing: wer die Liste sehen darf, darf die Zeile
+     * sehen. Auf einer Mehrmarken-Installation mit gesetzter Marke ist eine
+     * fremde Zahlung eine 404, keine 403 — „gibt es nicht" verrät weniger als
+     * „gibt es, aber nicht für dich".
+     */
+    public function show(string $payPayment)
+    {
+        abort_unless(Gate::allows('access payments utility'), 403);
+
+        $payment = Payment::query()
+            ->with(['items', 'parent', 'children', 'subscription', 'withdrawals'])
+            ->whereKey((int) $payPayment)
+            ->first();
+
+        abort_if($payment === null, 404);
+        abort_if($this->belongsToAnotherBrand($payment), 404);
+
+        return Inertia::render('statamic-payments::Payments/Show', [
+            'payment' => (new PaymentDetail($payment))->resolve(),
+            'listingUrl' => cp_route('utilities.payments'),
+        ]);
+    }
+
+    /**
+     * Auf einer Mehrmarken-Installation mit gesetzter Marke: nur die eigene.
+     *
+     * Ohne gesetzte Marke gilt, was für das Listing gilt — alles. Eine Zahlung
+     * **ohne** Marke (`brand_id` 0: vor der Mehrmarken-Umstellung geschrieben,
+     * oder aus einem Webhook ohne Kontext) gehört keiner fremden Marke und
+     * bleibt sichtbar; das Listing zeigt sie schließlich auch. Nur eine
+     * Zahlung, die ausdrücklich einer anderen Marke gehört, gibt es hier nicht.
+     */
+    protected function belongsToAnotherBrand(Payment $payment): bool
+    {
+        if (! Brands::multiBrand()) {
+            return false;
+        }
+
+        $reader = Brands::readerId();
+        $owner = (int) $payment->brand_id;
+
+        return $reader !== null && $owner !== Brands::NONE && $owner !== $reader;
     }
 
     protected function json(FilteredRequest $request)

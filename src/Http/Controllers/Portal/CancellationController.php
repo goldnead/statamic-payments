@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Http\Controllers\Portal;
 
+use Goldnead\StatamicPayments\Facades\PaymentLog;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Portal\Mail\CancellationConfirmed;
 use Goldnead\StatamicPayments\Support\Subscriptions;
@@ -133,11 +134,19 @@ class CancellationController extends PortalController
     protected function confirmByMail(Subscription $subscription, string $email, Carbon $moment): bool
     {
         try {
-            Mail::to($email)->send(new CancellationConfirmed(
+            $mailable = new CancellationConfirmed(
                 $subscription,
                 $moment,
                 $this->nameOf($subscription->product),
-            ));
+            );
+
+            Mail::to($email)->send($mailable);
+
+            // An die jüngste Zahlung des Abos, damit die Bestätigung nach
+            // § 312k dort steht, wo jemand später nachsieht.
+            if ($payment = $subscription->payments()->orderByDesc('paid_at')->orderByDesc('id')->first()) {
+                PaymentLog::mail($payment, 'cancellation_confirmation', $email, $mailable->envelope()->subject, meta: ['subscription_id' => $subscription->getKey()]);
+            }
 
             return true;
         } catch (Throwable $e) {

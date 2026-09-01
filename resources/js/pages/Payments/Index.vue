@@ -1,6 +1,6 @@
 <script setup>
 import { Head } from '@statamic/cms/inertia';
-import { Header, Badge, Listing, EmptyStateMenu, EmptyStateItem, DocsCallout, CommandPaletteItem } from '@statamic/cms/ui';
+import { Header, Badge, Listing, EmptyStateMenu, EmptyStateItem, DocsCallout, CommandPaletteItem, DropdownItem } from '@statamic/cms/ui';
 
 /**
  * The payments listing.
@@ -66,8 +66,10 @@ const statusColor = (status) => ({
                 <date-time :of="row.created_at" />
             </template>
 
+            <!-- The title cell links to the detail page, the way an entry's
+                 title links to its publish form. -->
             <template #cell-product="{ row }">
-                <span class="font-medium">{{ row.product_name || row.product }}</span>
+                <a :href="row.url" class="font-medium hover:text-primary">{{ row.product_name || row.product }}</a>
                 <span v-if="row.product_name" class="block text-2xs text-gray-500 dark:text-gray-400 font-mono">{{ row.product }}</span>
             </template>
 
@@ -93,6 +95,10 @@ const statusColor = (status) => ({
 
             <template #cell-provider_id="{ row }">
                 <span class="font-mono text-xs">{{ row.provider_id }}</span>
+            </template>
+
+            <template #prepended-row-actions="{ row }">
+                <DropdownItem icon="eye" :text="__('statamic-payments::messages.detail_action')" :href="row.url" />
             </template>
         </Listing>
 

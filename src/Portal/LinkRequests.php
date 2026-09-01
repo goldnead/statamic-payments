@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Portal;
 
+use Goldnead\StatamicPayments\Facades\PaymentLog;
 use Goldnead\StatamicPayments\Portal\Mail\PortalLinkMail;
 use Goldnead\StatamicPayments\Support\Brands;
 use Illuminate\Support\Facades\Log;
@@ -105,8 +106,19 @@ class LinkRequests
 
         foreach ($links as $link) {
             try {
-                Mail::to($email)->send(new PortalLinkMail($link['url']));
+                $mailable = new PortalLinkMail($link['url']);
+
+                Mail::to($email)->send($mailable);
                 $sent++;
+
+                // Ins Protokoll der jüngsten Bestellung dieser Adresse: der
+                // Link ist eine Mail an den Kunden, und „hat der Kunde den
+                // Zugangslink bekommen" ist eine Frage, die an der Bestellung
+                // gestellt wird. Ohne Bestellung (nur ein Abo im Trial) gibt es
+                // keine Zeile, an der sie hängen könnte.
+                if ($payment = $this->orders->latestFor($email, $link['brand'])) {
+                    PaymentLog::mail($payment, 'portal_link', $email, $mailable->envelope()->subject);
+                }
             } catch (Throwable $e) {
                 Log::error('statamic-payments: the portal link could not be sent.', [
                     'brand_id' => $link['brand'],

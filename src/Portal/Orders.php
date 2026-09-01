@@ -73,6 +73,20 @@ class Orders
         return $this->orders($access)->exists() || $this->subscriptions($access)->exists();
     }
 
+    /**
+     * Die jüngste bezahlte Bestellung dieser Adresse in dieser Marke, oder
+     * keine. Für das Kommunikationsprotokoll: ein Portal-Link gehört zu einem
+     * Menschen, das Protokoll hängt an einer Zahlung, und die jüngste ist die,
+     * um die es bei einer Anfrage ans Kundenkonto am ehesten geht.
+     */
+    public function latestFor(string $email, int $brandId): ?Payment
+    {
+        return $this->orders(new PortalAccess($email, $brandId))
+            ->orderByDesc('paid_at')
+            ->orderByDesc('id')
+            ->first();
+    }
+
     /** @return Builder<Payment> */
     protected function orders(PortalAccess $access): Builder
     {

@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Models;
 
 use Goldnead\StatamicPayments\Support\Brands;
 use Goldnead\StatamicPayments\Support\Money;
+use Goldnead\StatamicPayments\Support\PaymentLog;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -42,6 +43,7 @@ use LogicException;
  * @property int $refunded_cent
  * @property Carbon|null $refunded_at
  * @property Carbon|null $abandoned_notified_at
+ * @property Carbon|null $recovered_at
  * @property Carbon|null $paid_at
  * @property Carbon|null $created_at
  * @property string|null $customer_reference
@@ -164,6 +166,7 @@ class Payment extends Model
             'fulfilled_at' => 'datetime',
             'failed_notified_at' => 'datetime',
             'abandoned_notified_at' => 'datetime',
+            'recovered_at' => 'datetime',
             'refunded_at' => 'datetime',
             'paid_at' => 'datetime',
         ];
@@ -179,6 +182,39 @@ class Payment extends Model
     public function items(): HasMany
     {
         return $this->hasMany(PaymentItem::class);
+    }
+
+    /**
+     * Nachfassangebote, die aus dieser Zahlung heraus angenommen wurden.
+     *
+     * @return HasMany<Payment, $this>
+     */
+    public function children(): HasMany
+    {
+        return $this->hasMany(self::class, 'parent_payment_id');
+    }
+
+    /** @return BelongsTo<Subscription, $this> */
+    public function subscription(): BelongsTo
+    {
+        return $this->belongsTo(Subscription::class, 'subscription_id');
+    }
+
+    /** @return HasMany<Withdrawal, $this> */
+    public function withdrawals(): HasMany
+    {
+        return $this->hasMany(Withdrawal::class, 'payment_id');
+    }
+
+    /**
+     * Was zu dieser Zahlung hinausging: Mails, Zustellungen, Notizen.
+     * Neueste zuerst. Siehe {@see PaymentLog}.
+     *
+     * @return HasMany<PaymentCommunication, $this>
+     */
+    public function communications(): HasMany
+    {
+        return $this->hasMany(PaymentCommunication::class)->orderByDesc('happened_at')->orderByDesc('id');
     }
 
     /**

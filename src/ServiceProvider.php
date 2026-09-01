@@ -321,7 +321,16 @@ class ServiceProvider extends AddonServiceProvider
             ->navTitle(__('statamic-payments::messages.utility_nav'))
             ->icon('money-cash-bill')
             ->description(__('statamic-payments::messages.utility_description'))
-            ->docsUrl('https://github.com/goldnead/statamic-payments#readme');
+            ->docsUrl('https://github.com/goldnead/statamic-payments#readme')
+            ->routes(function ($router) {
+                // Die Detailseite. `payPayment`, nicht `payment`: ein
+                // `Route::bind()` eines anderen Addons gilt für jede Route mit
+                // diesem Parameternamen, siehe routes/web.php. Numerisch am
+                // Router, damit „abc" eine 404 ist und keine Zahlung 0.
+                $router->get('{payPayment}', [PaymentsController::class, 'show'])
+                    ->whereNumber('payPayment')
+                    ->name('show');
+            });
     }
 
     /**

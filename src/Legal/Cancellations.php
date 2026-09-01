@@ -2,9 +2,11 @@
 
 namespace Goldnead\StatamicPayments\Legal;
 
+use Goldnead\StatamicPayments\Facades\PaymentLog;
 use Goldnead\StatamicPayments\Legal\Mail\CancellationNotice;
 use Goldnead\StatamicPayments\Legal\Mail\CancellationReceipt;
 use Goldnead\StatamicPayments\Models\Cancellation;
+use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Portal\EmailAddress;
 use Goldnead\StatamicPayments\Support\Brands;
@@ -155,9 +157,18 @@ class Cancellations
     protected function acknowledge(Cancellation $cancellation): void
     {
         try {
-            Mail::to($cancellation->email)->send(new CancellationReceipt($cancellation));
+            $mailable = new CancellationReceipt($cancellation);
+
+            Mail::to($cancellation->email)->send($mailable);
 
             $cancellation->forceFill(['receipt_sent_at' => Carbon::now()])->save();
+
+            // Eine Kündigung hängt an einem Abo, das Protokoll an einer
+            // Zahlung: genommen wird die jüngste Zahlung des zugeordneten Abos.
+            // Ohne Zuordnung keine Zeile.
+            if ($payment = $this->latestPaymentOf($cancellation->subscription_id)) {
+                PaymentLog::mail($payment, 'cancellation_receipt', $cancellation->email, $mailable->envelope()->subject, meta: ['cancellation' => $cancellation->public_id]);
+            }
         } catch (Throwable $e) {
             Log::error('statamic-payments: a cancellation was received and the acknowledgement could not be sent.', [
                 'cancellation' => $cancellation->public_id,
@@ -188,6 +199,19 @@ class Cancellations
                 'exception' => $e->getMessage(),
             ]);
         }
+    }
+
+    protected function latestPaymentOf(?int $subscriptionId): ?Payment
+    {
+        if ($subscriptionId === null) {
+            return null;
+        }
+
+        return Payment::query()
+            ->where('subscription_id', $subscriptionId)
+            ->orderByDesc('paid_at')
+            ->orderByDesc('id')
+            ->first();
     }
 
     private static function optional(mixed $value): ?string

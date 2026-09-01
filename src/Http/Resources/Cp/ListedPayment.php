@@ -33,6 +33,7 @@ class ListedPayment extends JsonResource
             'email' => $this->email,
             'name' => $this->name,
             'provider_id' => $this->provider_id,
+            'url' => cp_route('utilities.payments.show', ['payPayment' => $this->id]),
         ];
     }
 }

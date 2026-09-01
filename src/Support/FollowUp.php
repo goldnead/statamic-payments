@@ -178,6 +178,15 @@ class FollowUp
                 // create — counts towards no campaign at all, and the report
                 // credits the funnel for less than it earned. `onto()` means a
                 // caller that hands its own attribution in still wins.
+                //
+                // Was **nicht** geerbt wird: `consent_at` und `consent_text`.
+                // Die Zustimmung nach § 356 Abs. 5 BGB gilt für den Kauf, bei
+                // dem sie erklärt wurde, und für keinen zweiten. Ein Nachfass-
+                // angebot ist ein eigener Vertrag mit eigener Bestellschalt-
+                // fläche, also kommt seine Zustimmung aus `$details` — oder
+                // gar nicht, und dann bleiben die Spalten ehrlich leer.
+                // (Rechtliche Entscheidung 01.09.2026, von Adrian zu prüfen.
+                // Keine Rechtsberatung.)
                 ...self::inheritedAttribution($original),
             ]));
 

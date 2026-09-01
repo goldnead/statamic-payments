@@ -160,6 +160,53 @@ default and has its own page: [docs/follow-up-offers.md](docs/follow-up-offers.m
 Read it before switching it on — the technical part is small, the part that
 decides whether you may ship it is not.
 
+## Consent, withdrawal and cancellation
+
+Three things German consumer law wants from a shop that sells digital goods to
+consumers, and what this addon does about each. **None of this is legal
+advice**; the wording and the decisions below are documented so a lawyer can
+check them, not so you can skip the lawyer.
+
+### Recording the consent (§ 356 Abs. 5 BGB)
+
+For digital content delivered at once, the right of withdrawal ends only if the
+buyer expressly agreed to immediate delivery and acknowledged losing the right.
+A checkbox that is validated and forgotten proves nothing afterwards, so the
+payment row carries two columns, written in the same INSERT as everything else:
+
+| Column | What it is |
+|---|---|
+| `consent_at` | when the buyer agreed |
+| `consent_text` | the exact wording that stood next to the checkbox, in full |
+
+The text itself is stored and not a version key: the wording will change, and
+"agreed" without the version agreed to is worthless. **Both columns are
+immutable** once set — a later save that changes or erases either throws a
+`LogicException`. Rows that predate the column stay `null`, which is the honest
+state.
+
+Hand both in through the details, together or not at all:
+
+```php
+app(Checkout::class)->start('noten-paket', $buyer, null, null, [
+    'consent_at' => now(),
+    'consent_text' => __('statamic-payments::messages.order_consent'),
+]);
+```
+
+`consent_at` takes a Carbon, a `DateTimeInterface` or an ISO-8601 string and
+must not lie in the future; `consent_text` must be non-empty and at most 4000
+characters. A follow-up offer accepted through `POST /!/statamic-payments/offer`
+records its own consent — the wording arrives in a hidden `consent_text` field,
+falling back to `messages.order_consent` — and **does not inherit** the
+original order's: every purchase is its own contract.
+
+**If you use `statamic-payments` without `statamic-funnels`, you build the
+order summary, the button label and the consent text yourself** and pass
+`consent_at`/`consent_text` when starting the checkout. This addon renders no
+checkout page; the Button-Lösung of § 312j BGB is the host's to satisfy, and
+the row can only record what the host hands it.
+
 ## Extending the catalogue
 
 Another addon can contribute priced things:

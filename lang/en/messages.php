@@ -76,6 +76,15 @@ return [
 
     'offer_refused' => 'This offer is no longer available.',
 
+    /*
+    | § 356 (5) BGB: the consent that ends the right of withdrawal for digital
+    | content delivered at once. This is the wording written onto a payment
+    | when a form sends none of its own. The form MUST show exactly this
+    | sentence, or the row proves something other than what the buyer read.
+    | Wording belongs in front of a lawyer; this is not legal advice.
+    */
+    'order_consent' => 'I place a binding order and agree that delivery begins immediately. I understand that I thereby lose my right of withdrawal.',
+
     'timeline_purchase' => 'Bought: :product for :amount',
     'timeline_refund_full' => 'Fully refunded: :amount',
     'timeline_refund_partial' => 'Partially refunded: :amount',

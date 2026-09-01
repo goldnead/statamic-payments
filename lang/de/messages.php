@@ -76,6 +76,16 @@ return [
 
     'offer_refused' => 'Dieses Angebot ist nicht mehr verfügbar.',
 
+    /*
+    | § 356 Abs. 5 BGB: die Zustimmung, mit der bei digitalen Inhalten das
+    | Widerrufsrecht erlischt. Das ist der Wortlaut, der an eine Zahlung
+    | geschrieben wird, wenn ein Formular keinen eigenen mitschickt. Das
+    | Formular MUSS genau diesen Satz zeigen, sonst belegt die Zeile etwas
+    | anderes, als der Käufer gelesen hat. Wortlaut vor einen Anwalt; dies ist
+    | keine Rechtsberatung.
+    */
+    'order_consent' => 'Ich bestelle kostenpflichtig und stimme zu, dass die Lieferung sofort beginnt. Damit erlischt mein Widerrufsrecht.',
+
     'timeline_purchase' => 'Gekauft: :product für :amount',
     'timeline_refund_full' => 'Vollständig erstattet: :amount',
     'timeline_refund_partial' => 'Teilweise erstattet: :amount',

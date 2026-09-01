@@ -2,7 +2,10 @@
 
 namespace Goldnead\StatamicPayments\Support;
 
+use DateTimeInterface;
+use Illuminate\Support\Carbon;
 use InvalidArgumentException;
+use Throwable;
 
 /**
  * Was die aufrufende Strecke an eine Zahlung heften darf, bevor der Anbieter
@@ -35,6 +38,22 @@ use InvalidArgumentException;
  *   und „der Kartenherausgeber sagt es" wiegt schwerer als „jemand hat es
  *   getippt". Diese Spalte ist die Stelle, an der das steht.
  *
+ * Dazu die **Zustimmung nach § 356 Abs. 5 BGB**, als Paar:
+ *
+ * - `consent_at` — wann der Käufer zugestimmt hat, dass die Lieferung sofort
+ *   beginnt und sein Widerrufsrecht damit erlischt. Carbon, DateTimeInterface
+ *   oder ISO-8601-Text; wird zu Carbon. Ein Zeitpunkt in der Zukunft ist ein
+ *   Programmierfehler und fliegt.
+ * - `consent_text` — der Wortlaut, der dabei auf dem Bildschirm stand, im
+ *   Ganzen. Nicht ein Schlüssel und nicht eine Versionsnummer: der Text kann
+ *   sich ändern, und dann ist „hat zugestimmt" ohne die Fassung wertlos.
+ *
+ * Beide oder keines. Ein Zeitpunkt ohne Wortlaut ist ein Haken ohne Aussage,
+ * ein Wortlaut ohne Zeitpunkt ein Zitat ohne Ereignis; keines von beiden ist
+ * ein Beleg, und keines wird stillschweigend zu einem gemacht. Wer die
+ * Zustimmung nicht erhoben hat — ein Kauf physischer Ware, ein B2B-Geschäft —
+ * lässt beide weg, und die Spalten bleiben ehrlich leer.
+ *
  * Alles andere gehört dem Paket: Betrag, Produkt, Status, die Kennungen des
  * Anbieters, die Verbindung zur Eltern-Zahlung. Wer sie mitschickt, bekommt
  * eine Ausnahme statt eines stillen Verwerfens. Ein still verworfener Betrag
@@ -47,7 +66,19 @@ final class PaymentDetails
         'meta', 'country', 'country_source',
         'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
         'referrer', 'landing_page',
+        'consent_at', 'consent_text',
     ];
+
+    /**
+     * Wie lang der Wortlaut einer Zustimmung höchstens sein darf.
+     *
+     * Ein Satz nach § 356 Abs. 5 BGB ist zwei Zeilen lang. Viertausend Zeichen
+     * lassen Platz für eine Belehrung darüber; was länger ist, ist kein
+     * Einwilligungstext mehr, sondern ein Dokument, das an eine andere Stelle
+     * gehört. Abgelehnt und nicht gekürzt: ein gekürzter Beleg ist ein
+     * anderer Beleg.
+     */
+    public const CONSENT_TEXT_MAX = 4000;
 
     /**
      * Herkunftsangaben und die Breite ihrer Spalte.
@@ -96,6 +127,8 @@ final class PaymentDetails
         private ?string $country,
         private ?string $countrySource,
         private array $attribution = [],
+        private ?Carbon $consentAt = null,
+        private ?string $consentText = null,
     ) {}
 
     /**
@@ -136,11 +169,15 @@ final class PaymentDetails
             );
         }
 
+        [$consentAt, $consentText] = self::consent($details['consent_at'] ?? null, $details['consent_text'] ?? null);
+
         return new self(
             self::meta($details['meta'] ?? []),
             $country,
             $source,
             self::attribution($details),
+            $consentAt,
+            $consentText,
         );
     }
 
@@ -151,7 +188,14 @@ final class PaymentDetails
      */
     public function plus(array $own): self
     {
-        return new self(array_merge($this->meta, $own), $this->country, $this->countrySource, $this->attribution);
+        return new self(
+            array_merge($this->meta, $own),
+            $this->country,
+            $this->countrySource,
+            $this->attribution,
+            $this->consentAt,
+            $this->consentText,
+        );
     }
 
     /**
@@ -196,7 +240,85 @@ final class PaymentDetails
             $columns[$key] = $value;
         }
 
+        if ($this->consentAt !== null && $this->consentText !== null) {
+            $columns['consent_at'] = $this->consentAt;
+            $columns['consent_text'] = $this->consentText;
+        }
+
         return $columns;
+    }
+
+    /**
+     * Die Zustimmung nach § 356 Abs. 5 BGB, geprüft.
+     *
+     * Rechtliche Entscheidungen (01.09.2026, von Adrian zu prüfen): beide
+     * Angaben oder keine; der Zeitpunkt darf nicht in der Zukunft liegen; der
+     * Wortlaut darf nicht leer sein und wird nicht gekürzt. Dies ist keine
+     * Rechtsberatung.
+     *
+     * @return array{0: Carbon|null, 1: string|null}
+     */
+    private static function consent(mixed $at, mixed $text): array
+    {
+        if ($at === null && $text === null) {
+            return [null, null];
+        }
+
+        if ($at === null || $text === null) {
+            throw new InvalidArgumentException(
+                'statamic-payments: `consent_at` und `consent_text` gehören zusammen — ein Zeitpunkt ohne Wortlaut oder ein Wortlaut ohne Zeitpunkt ist kein Beleg.'
+            );
+        }
+
+        if (! is_string($text)) {
+            throw new InvalidArgumentException('statamic-payments: `consent_text` muss ein Text sein.');
+        }
+
+        $text = trim($text);
+
+        if ($text === '') {
+            throw new InvalidArgumentException('statamic-payments: `consent_text` darf nicht leer sein — der Wortlaut ist der Beleg.');
+        }
+
+        if (mb_strlen($text) > self::CONSENT_TEXT_MAX) {
+            throw new InvalidArgumentException(sprintf(
+                'statamic-payments: `consent_text` ist länger als %d Zeichen. Ein Einwilligungstext dieser Länge gehört in ein Dokument, nicht in diese Spalte.',
+                self::CONSENT_TEXT_MAX,
+            ));
+        }
+
+        $moment = self::moment($at);
+
+        if ($moment->isFuture()) {
+            throw new InvalidArgumentException(
+                'statamic-payments: `consent_at` liegt in der Zukunft. Niemand hat noch nicht zugestimmt.'
+            );
+        }
+
+        return [$moment, $text];
+    }
+
+    private static function moment(mixed $value): Carbon
+    {
+        if ($value instanceof Carbon) {
+            return $value->copy();
+        }
+
+        if ($value instanceof DateTimeInterface) {
+            return Carbon::instance($value);
+        }
+
+        if (is_string($value) && trim($value) !== '') {
+            try {
+                return Carbon::parse(trim($value));
+            } catch (Throwable) {
+                // Fällt durch zur Ausnahme unten.
+            }
+        }
+
+        throw new InvalidArgumentException(
+            'statamic-payments: `consent_at` muss ein Carbon, ein DateTimeInterface oder ein ISO-8601-Text sein.'
+        );
     }
 
     private static function source(mixed $value): ?string

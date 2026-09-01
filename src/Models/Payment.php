@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
+use LogicException;
 
 /**
  * One payment, as the provider reports it.
@@ -22,6 +23,8 @@ use Illuminate\Support\Carbon;
  * @property string $status
  * @property string|null $email
  * @property string|null $name
+ * @property Carbon|null $consent_at
+ * @property string|null $consent_text
  * @property string|null $country
  * @property string|null $country_source
  * @property string|null $card_last4
@@ -63,6 +66,15 @@ class Payment extends Model
     public const STATUS_CANCELED = 'canceled';
 
     protected $guarded = [];
+
+    /**
+     * Die Spalten, die den Beleg nach § 356 Abs. 5 BGB tragen.
+     *
+     * Einmal geschrieben, nie geändert. Siehe {@see self::booted()}.
+     *
+     * @var list<string>
+     */
+    public const CONSENT_COLUMNS = ['consent_at', 'consent_text'];
 
     /**
      * Every status this package writes.
@@ -108,6 +120,39 @@ class Payment extends Model
                 $payment->setAttribute('brand_id', Brands::stampId());
             }
         });
+
+        // Die Zustimmung nach § 356 Abs. 5 BGB ist ein Beleg, und ein Beleg,
+        // den ein späterer Schreibvorgang umformulieren kann, ist keiner. Ein
+        // einmal gesetzter Wert bleibt: weder ein anderer Zeitpunkt noch ein
+        // anderer Wortlaut noch ein Löschen gehen durch. Von null auf einen
+        // Wert darf es genau einmal gehen — für den Fall, dass ein Host die
+        // Zustimmung nachträglich aus einem eigenen Formular übernimmt.
+        //
+        // Eine Ausnahme, kein stilles Verwerfen: der Aufrufer, der das
+        // versucht, hat einen Fehler in seiner Strecke, und der soll ihm
+        // auffallen und nicht dem Anwalt.
+        //
+        // Rechtliche Entscheidung 01.09.2026, von Adrian zu prüfen. Dies ist
+        // keine Rechtsberatung.
+        static::updating(function (self $payment) {
+            foreach (self::CONSENT_COLUMNS as $column) {
+                if (! $payment->isDirty($column)) {
+                    continue;
+                }
+
+                $before = $payment->getOriginal($column);
+
+                if ($before === null) {
+                    continue;
+                }
+
+                throw new LogicException(sprintf(
+                    'statamic-payments: `%s` an Zahlung %s ist bereits gesetzt und kann nicht geändert werden — die Zustimmung nach § 356 Abs. 5 BGB ist ein Beleg.',
+                    $column,
+                    (string) $payment->getKey(),
+                ));
+            }
+        });
     }
 
     protected function casts(): array
@@ -115,6 +160,7 @@ class Payment extends Model
         return [
             'amount_cent' => 'integer',
             'meta' => 'array',
+            'consent_at' => 'datetime',
             'fulfilled_at' => 'datetime',
             'failed_notified_at' => 'datetime',
             'abandoned_notified_at' => 'datetime',

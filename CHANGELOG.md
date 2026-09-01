@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Die Einwilligung wird festgehalten statt verworfen (§ 356 Abs. 5 BGB)
+
+`payments` bekommt zwei Spalten, `consent_at` und `consent_text`. Bis hierher wurde
+`confirmed => accepted` geprüft und dann vergessen; der Kommentar im Code nannte das „the
+record", es gab keines. Jetzt gehen Zeitpunkt und der **vollständige Wortlaut**, der neben dem
+Haken stand, mit dem ersten INSERT in die Zeile — über `PaymentDetails`, wie `country`. Der Text
+selbst und keine Versionsnummer, weil der Wortlaut sich ändert und „hat zugestimmt" ohne die
+Fassung nichts belegt.
+
+Beide Spalten sind unveränderlich: ein späteres Umschreiben oder Löschen wirft eine
+`LogicException`. Von null auf einen Wert geht es genau einmal. Bestandszeilen bleiben null.
+
+`OfferController` schreibt die Zustimmung an die Folgezahlung (Wortlaut aus dem versteckten
+Feld `consent_text`, sonst der neue Sprachstring `messages.order_consent`); `FollowUp::accept()`
+erbt sie **nicht** von der Erstbestellung.
+
+Rechtliche Entscheidungen dieser Fassung, von Adrian zu prüfen, keine Rechtsberatung:
+beide Angaben oder keine; Zeitpunkt nie in der Zukunft; Wortlaut nicht leer und höchstens
+4000 Zeichen, abgelehnt statt gekürzt; jeder Kauf trägt seine eigene Zustimmung; der Zeitpunkt
+ist der Eingang des Formulars beim Server, nicht der Klick im Browser. Wer das Addon ohne
+`statamic-funnels` einsetzt, baut Bestellzusammenfassung, Schaltfläche und Einwilligungstext
+selbst und übergibt `consent_at`/`consent_text` — das Addon rendert keine Kasse.
+
 ## 1.16.0 — 2026-08-31
 
 ### Ein Mandat gehört dem Menschen, nicht dem Gerät

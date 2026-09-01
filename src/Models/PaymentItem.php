@@ -12,6 +12,7 @@ use Illuminate\Support\Carbon;
  * @property int $id
  * @property int $payment_id
  * @property string $product
+ * @property string|null $offer
  * @property string $name
  * @property int $amount_cent
  * @property int $quantity

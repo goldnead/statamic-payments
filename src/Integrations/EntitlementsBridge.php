@@ -389,6 +389,47 @@ class EntitlementsBridge
         return new $klasse('email', mb_strtolower(trim($email)));
     }
 
+    /**
+     * `meta.access` = `['starts_at' => 'Y-m-d'|null, 'days' => int|null]`.
+     *
+     * Der Beginn ist der Tagesanfang des genannten Datums in der Zeitzone der
+     * Anwendung; das Ende liegt `days` Tage nach dem Beginn — oder nach jetzt,
+     * wenn kein Beginn genannt ist. Ein unlesbares Datum wird ignoriert und
+     * gemeldet, statt einen Zugang zu verhindern: der Kunde hat bezahlt.
+     *
+     * @return array{0: Carbon|null, 1: Carbon|null}
+     */
+    protected static function accessWindow(Payment $payment): array
+    {
+        $access = data_get($payment->meta, 'access');
+
+        if (! is_array($access)) {
+            return [null, null];
+        }
+
+        $startsAt = null;
+
+        if (is_string($access['starts_at'] ?? null) && trim($access['starts_at']) !== '') {
+            try {
+                $startsAt = Carbon::parse(trim($access['starts_at']))->startOfDay();
+            } catch (Throwable) {
+                Log::warning('statamic-payments: meta.access.starts_at on a payment is not a date; access starts at once.', [
+                    'payment_id' => $payment->getKey(),
+                    'starts_at' => $access['starts_at'],
+                ]);
+            }
+        }
+
+        $days = $access['days'] ?? null;
+        $days = is_numeric($days) ? (int) $days : null;
+
+        $expiresAt = $days !== null && $days > 0
+            ? ($startsAt?->copy() ?? Carbon::now())->addDays($days)
+            : null;
+
+        return [$startsAt, $expiresAt];
+    }
+
     protected function grantLine(Payment $payment, ?string $handle, string $subject): void
     {
         if (! is_string($handle) || $handle === '') {
@@ -403,6 +444,11 @@ class EntitlementsBridge
         // Je Slug ein eigener Versuch. Scheitert der zweite von drei, sind die
         // anderen beiden trotzdem vergeben — und die Zeile im Log nennt genau
         // den, der fehlt, statt „das Buendel".
+        // Das Zugangsfenster des Angebots, wenn der Funnel eines mitgegeben hat
+        // (`meta.access`, aus `Offer::accessWindow()`): ab wann, wie lange.
+        // Ohne Angabe bleibt es beim Sofort-und-unbefristet, das immer galt.
+        [$startsAt, $expiresAt] = self::accessWindow($payment);
+
         foreach ($slugs as $slug) {
             try {
                 $facade = self::FACADE;
@@ -411,6 +457,8 @@ class EntitlementsBridge
                     $slug,
                     'statamic-payments',
                     (string) $payment->provider_id,
+                    startsAt: $startsAt,
+                    expiresAt: $expiresAt,
                 );
             } catch (Throwable $e) {
                 Log::error('statamic-payments: the entitlements bridge failed; the payment stands, the grant does not.', [

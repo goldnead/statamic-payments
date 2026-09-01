@@ -1,5 +1,7 @@
 <?php
 
+use Goldnead\StatamicPayments\Http\Controllers\Legal\CancellationController as LegalCancellationController;
+use Goldnead\StatamicPayments\Http\Controllers\Legal\WithdrawalController;
 use Goldnead\StatamicPayments\Http\Controllers\OfferController;
 use Goldnead\StatamicPayments\Http\Controllers\Portal\CancellationController;
 use Goldnead\StatamicPayments\Http\Controllers\Portal\InvoiceController;
@@ -153,4 +155,47 @@ Route::prefix(config('statamic-payments.portal.prefix', '!/statamic-payments/kon
 
             Route::get('/zahlungsmittel/zurueck', [PaymentMethodController::class, 'returned'])->name('method.return');
         });
+    });
+
+/*
+|--------------------------------------------------------------------------
+| Widerruf (§ 356a BGB) und Kündigung ohne Login (§ 312k BGB)
+|--------------------------------------------------------------------------
+|
+| Deliberately **outside** the portal group: neither needs a mailed link, and
+| the statute is the reason. § 356a allows a login only where the contract
+| itself requires an account; § 312k names a button, a confirmation page and an
+| acknowledgement, with no identification step in between. So both flows are
+| public, two steps each, and say nothing about whether an order exists.
+|
+| Same parameter-name discipline as the portal: `payWithdrawal` and
+| `payCancellation`, never `{id}` or `{withdrawal}`, because a `Route::bind()`
+| from another addon applies to every route with that parameter name.
+|
+| Throttled on the POSTs only. The GETs are what a person refreshes.
+|
+*/
+
+Route::prefix(config('statamic-payments.withdrawal.prefix', '!/statamic-payments/widerruf'))
+    ->middleware(['web'])
+    ->name('statamic-payments.withdrawal.')
+    ->group(function () {
+        $throttle = ThrottleRequests::class.':'.(string) config('statamic-payments.withdrawal.throttle', '6,10');
+
+        Route::get('/', [WithdrawalController::class, 'form'])->name('form');
+        Route::post('/', [WithdrawalController::class, 'declare'])->middleware($throttle)->name('declare');
+        Route::get('/{payWithdrawal}', [WithdrawalController::class, 'show'])->name('show');
+        Route::post('/{payWithdrawal}/bestaetigen', [WithdrawalController::class, 'confirm'])->middleware($throttle)->name('confirm');
+    });
+
+Route::prefix(config('statamic-payments.cancellation.prefix', '!/statamic-payments/kuendigung'))
+    ->middleware(['web'])
+    ->name('statamic-payments.cancellation.')
+    ->group(function () {
+        $throttle = ThrottleRequests::class.':'.(string) config('statamic-payments.cancellation.throttle', '6,10');
+
+        Route::get('/', [LegalCancellationController::class, 'form'])->name('form');
+        Route::post('/', [LegalCancellationController::class, 'declare'])->middleware($throttle)->name('declare');
+        Route::get('/{payCancellation}', [LegalCancellationController::class, 'show'])->name('show');
+        Route::post('/{payCancellation}/bestaetigen', [LegalCancellationController::class, 'confirm'])->middleware($throttle)->name('confirm');
     });

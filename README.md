@@ -207,6 +207,102 @@ order summary, the button label and the consent text yourself** and pass
 checkout page; the Button-Lösung of § 312j BGB is the host's to satisfy, and
 the row can only record what the host hands it.
 
+### The withdrawal button (§ 356a BGB, since 19 June 2026)
+
+A shop that concludes distance contracts with consumers through a website has
+to offer an electronic withdrawal function. The addon ships it, **public and
+without a login**, in two steps:
+
+```
+GET  /!/statamic-payments/widerruf                       step 1: name, email, order reference, contact, message
+POST /!/statamic-payments/widerruf                       …creates the declaration, leads to step 2
+GET  /!/statamic-payments/widerruf/{W-…}                 step 2 (this browser only) / step 3 (anyone with the reference)
+POST /!/statamic-payments/widerruf/{W-…}/bestaetigen     „Widerruf bestätigen" — the withdrawal itself
+```
+
+Step 2 shows the entered details above a single button reading „Widerruf
+bestätigen" (§ 356a Abs. 3). Pressing it sets `confirmed_at`, mails the consumer
+an acknowledgement at once (§ 356a Abs. 4: reference `W-XXXXXXXX`, date, time
+and time zone, the order reference they typed) and notifies you at
+`withdrawal.notify` (falling back to `portal.from`, then `mail.from`). Step 3
+shows the reference and the time, nothing else, and stays readable for anyone
+who has the reference — the mail says the same. A second press is one
+withdrawal, one mail, one time.
+
+**The form says nothing about whether an order exists.** Matching to a payment
+happens after confirmation, on the server, on an unambiguous hit only (address,
+case-insensitively, plus our id or the provider's id), and the result reaches
+you and not the consumer. An unmatched declaration is still a declaration and
+still acknowledged. A recorded consent under § 356 Abs. 5 on the matched
+payment is passed to you as a **hint** (`right_expired_hint`), never asserted
+to the consumer beforehand; so is a declaration arriving after
+`withdrawal.days` (default 14) from the payment. Whether the right has run is a
+question for a person with the file in front of them.
+
+**Put the link in the footer, on every page, labelled „Vertrag widerrufen".**
+§ 356a Abs. 1 wants the button „während des Laufs der Widerrufsfrist auf der
+Online-Benutzeroberfläche ständig verfügbar, hervorgehoben platziert und für
+den Verbraucher leicht zugänglich". The wording is in
+`withdrawal.button`; the address comes from
+
+```
+{{ payments:withdrawal_url }}                       Antlers
+Goldnead\StatamicPayments\Legal\Links::withdrawal()  PHP, null when switched off
+route('statamic-payments.withdrawal.form')
+```
+
+Your withdrawal instruction (Widerrufsbelehrung) is not part of this addon; put
+its URL in `withdrawal.policy_url` and the form links to it.
+
+Withdrawals appear in the Control Panel under Utilities → Withdrawals
+(permission `access withdrawals utility`), with the matched payment, the hints
+and a „Mark as handled" action that takes a note (permission `handle payment
+withdrawals`). The screen lists confirmed declarations only.
+
+### The cancellation button without a login (§ 312k BGB)
+
+The customer portal already cancels a subscription behind a mailed link. Under
+the prevailing reading of § 312k the *declaration* must be possible without an
+identification step, so there is a second way in, built like the withdrawal:
+
+```
+GET  /!/statamic-payments/kuendigung                     „Verträge hier kündigen": name, email, contract reference, type, reason, date
+POST /!/statamic-payments/kuendigung
+GET  /!/statamic-payments/kuendigung/{K-…}               confirmation page / acknowledgement
+POST /!/statamic-payments/kuendigung/{K-…}/bestaetigen   „jetzt kündigen"
+```
+
+The confirmation page carries what § 312k Abs. 2 Nr. 1 names — type of
+cancellation (ordinary or extraordinary, the latter with its reason), the
+identification, the requested date — under a button reading „jetzt kündigen".
+Both button labels are statutory and live in `cancellation.button` and
+`cancellation.confirm_button`. Confirming acknowledges by mail and on the page
+with date, time and the requested date, and notifies you.
+
+Where the declaration names **one running** subscription unambiguously
+(address plus `subscriptions.id` or the provider's id), it is cancelled at the
+provider immediately through `Subscriptions::cancel()` — provider first, row
+second, exactly as the portal does — and `provider_cancelled_at` is set. Where
+it does not, or the provider will not confirm, nothing is written to the
+subscription and your notification says so. The consumer receives the
+acknowledgement either way: the declaration has reached you.
+
+A requested date in the future does **not** hold the provider-side cancellation
+back. What the provider cancels is the next charge, and a charge after a
+received cancellation is the harm the button exists to prevent; the date is
+recorded and reported so you can carry the service to it where it is owed.
+(Decision of 1 September 2026, documented for review.)
+
+Footer link: `{{ payments:cancellation_url }}`, `Legal\Links::cancellation()`,
+`route('statamic-payments.cancellation.form')`. Control Panel: Utilities →
+Cancellations, permissions `access cancellations utility` and `handle payment
+cancellations`.
+
+Both flows are on by default and under `statamic-payments.withdrawal` and
+`statamic-payments.cancellation` (`enabled`, `prefix`, `throttle`, `notify`,
+`policy_url`, and `days` for the withdrawal). Every word the consumer reads is in
+`lang/*/withdrawal.php` and `lang/*/cancellation.php`.
+
 ## Extending the catalogue
 
 Another addon can contribute priced things:

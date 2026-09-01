@@ -2,6 +2,58 @@
 
 ## Unreleased
 
+### Widerrufsbutton nach § 356a BGB
+
+Seit 19.06.2026 Pflicht, bis hierher nicht vorhanden. Neu: ein öffentlicher, zweistufiger Weg
+ohne Login unter `!/statamic-payments/widerruf` (Config `withdrawal.prefix`). Schritt 1 nimmt
+Name, E-Mail, Bestellkennung, Kontaktmittel und Nachricht; Schritt 2 zeigt die Angaben und die
+Schaltfläche „Widerruf bestätigen"; danach geht sofort die Eingangsbestätigung mit Kennung
+(`W-` plus acht Zeichen ohne 0/O/1/I), Datum, Uhrzeit und Zeitzone an den Verbraucher und eine
+Meldung an `withdrawal.notify` (sonst `portal.from`, sonst `mail.from`). Schritt 3 zeigt Kennung
+und Zeit, sonst nichts, und bleibt für jeden mit der Kennung lesbar; Schritt 2 nur für den
+Browser, der erklärt hat. Idempotent: ein zweiter Klick ist ein Widerruf, eine Mail, eine Zeit.
+
+Tabelle `payment_withdrawals`. Die Zuordnung zur Zahlung passiert nach der Bestätigung,
+serverseitig, nur bei eindeutigem Treffer (Adresse plus unsere Id oder die des Anbieters);
+das Formular verrät nie, ob eine Bestellung existiert. Eine Zustimmung nach § 356 Abs. 5 am
+Treffer wird dem Händler als `right_expired_hint` mitgegeben, nicht dem Verbraucher vorgehalten;
+ebenso, ob die Erklärung nach `withdrawal.days` (Vorgabe 14) einging.
+
+Footer: `{{ payments:withdrawal_url }}`, `Legal\Links::withdrawal()`, Beschriftung aus
+`withdrawal.button` („Vertrag widerrufen"). Control Panel: Utility „Widerrufe" mit Zuordnung,
+Hinweisen, Filter offen/erledigt und der Action „Als erledigt markieren" (Notiz); Rechte
+`access withdrawals utility` und `handle payment withdrawals`.
+
+Rechtliche Entscheidungen dieser Fassung, von Adrian zu prüfen, keine Rechtsberatung: ohne
+Login; kein Bestandsorakel; unzugeordnet ist zulässig und wird gemeldet; erloschenes Recht ist
+Hinweis, keine Ablehnung; IP nur als gesalzener Hash; Musterbelehrung bleibt Host-Sache
+(`withdrawal.policy_url`). Das Lese-Recht ist core's Utility-Recht, nicht ein zweites
+`view payment withdrawals` — ein Schalter je Tür.
+
+### Kündigungsbutton nach § 312k BGB, ohne Login
+
+Der Portal-Weg (`/konto/kuendigen` → Magic-Link) bleibt als Komfortweg. Neu daneben, in
+derselben Mechanik wie der Widerruf: `!/statamic-payments/kuendigung` (Config
+`cancellation.prefix`), Schaltfläche „Verträge hier kündigen", Bestätigungsseite mit Art der
+Kündigung (ordentlich/außerordentlich, letztere mit Pflicht-Grund), Identifikation und
+gewünschtem Zeitpunkt unter „jetzt kündigen", danach Bestätigung per Mail und auf der Seite mit
+Datum, Uhrzeit und genanntem Zeitpunkt. Tabelle `payment_cancellations`.
+
+Ein eindeutig zugeordnetes **laufendes** Abo wird sofort über `Subscriptions::cancel()` beim
+Anbieter gekündigt (Anbieter zuerst, Zeile danach; `provider_cancelled_at`). Mehrdeutig, nicht
+laufend oder vom Anbieter verweigert: nichts am Abo geändert, Händler gemeldet, Verbraucher
+bekommt die Eingangsbestätigung trotzdem. Footer: `{{ payments:cancellation_url }}`. Control
+Panel: Utility „Kündigungen", Rechte `access cancellations utility` und
+`handle payment cancellations`.
+
+Rechtliche Entscheidung dieser Fassung, von Adrian zu prüfen: ein genannter Zeitpunkt in der
+Zukunft hält die Kündigung beim Anbieter nicht auf — gekündigt wird die nächste Abbuchung, der
+Zeitpunkt steht in Zeile und Meldung. Keine Rechtsberatung.
+
+Nebenbei: `Tags\Offer` heißt jetzt `Tags\Payments` (Handle unverändert `payments`), und
+`Portal\EmailAddress::rule()` ist die Adressprüfung als Validierungsregel — `email:filter`
+hätte jede Adresse mit Umlaut abgelehnt.
+
 ### Die Einwilligung wird festgehalten statt verworfen (§ 356 Abs. 5 BGB)
 
 `payments` bekommt zwei Spalten, `consent_at` und `consent_text`. Bis hierher wurde

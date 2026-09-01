@@ -4,9 +4,13 @@ namespace Goldnead\StatamicPayments;
 
 use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Gateways\MollieGateway;
+use Goldnead\StatamicPayments\Http\Controllers\Cp\CancellationActionsController;
+use Goldnead\StatamicPayments\Http\Controllers\Cp\CancellationsController;
 use Goldnead\StatamicPayments\Http\Controllers\Cp\PaymentsController;
 use Goldnead\StatamicPayments\Http\Controllers\Cp\SubscriptionActionsController;
 use Goldnead\StatamicPayments\Http\Controllers\Cp\SubscriptionsController;
+use Goldnead\StatamicPayments\Http\Controllers\Cp\WithdrawalActionsController;
+use Goldnead\StatamicPayments\Http\Controllers\Cp\WithdrawalsController;
 use Goldnead\StatamicPayments\Integrations\Insights\AverageOrder;
 use Goldnead\StatamicPayments\Integrations\Insights\Buyers;
 use Goldnead\StatamicPayments\Integrations\Insights\Orders;
@@ -19,6 +23,7 @@ use Goldnead\StatamicPayments\Support\Invoices;
 use Illuminate\Support\Facades\Log;
 use Mollie\Api\MollieApiClient;
 use Statamic\Actions\Action;
+use Statamic\Facades\Permission;
 use Statamic\Facades\Utility;
 use Statamic\Providers\AddonServiceProvider;
 use Throwable;
@@ -89,7 +94,8 @@ class ServiceProvider extends AddonServiceProvider
         // would fail exactly where nobody looks.
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'statamic-payments');
 
-        $this->bootUtilities();
+        $this->bootUtilities()
+            ->bootPermissions();
         $this->registerInsightsMetrics();
         $this->registerInvoiceSource();
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
@@ -234,9 +240,77 @@ class ServiceProvider extends AddonServiceProvider
         Utility::extend(function () {
             $this->registerPaymentsUtility();
             $this->registerSubscriptionsUtility();
+            $this->registerWithdrawalsUtility();
+            $this->registerCancellationsUtility();
         });
 
         return $this;
+    }
+
+    /**
+     * Die zwei Rechte, die über das Lesen hinausgehen.
+     *
+     * `Utility::register` bringt je Bildschirm ein `access … utility` mit, und
+     * das ist das Lese-Recht: wer es hat, sieht Namen und Adressen von Leuten,
+     * die einen Vertrag lösen wollen. Ob jemand einen Vorgang **abschließen**
+     * darf, ist ein zweites Recht — sonst hätte jeder Leser der Liste den Knopf,
+     * der einen Widerruf aus der Arbeitsliste nimmt.
+     *
+     * Ein eigenes `view payment withdrawals` neben dem Utility-Recht wäre ein
+     * zweiter Schalter für dieselbe Tür gewesen; deshalb bleibt core's Recht das
+     * Lese-Recht und hier steht nur, was fehlt.
+     */
+    protected function bootPermissions(): self
+    {
+        Permission::extend(function () {
+            Permission::group('statamic-payments', __('statamic-payments::messages.permission_group'), function () {
+                Permission::register('handle payment withdrawals')
+                    ->label(__('statamic-payments::messages.permission_handle_withdrawals'));
+                Permission::register('handle payment cancellations')
+                    ->label(__('statamic-payments::messages.permission_handle_cancellations'));
+            });
+        });
+
+        return $this;
+    }
+
+    /**
+     * Widerrufe nach § 356a BGB, und ihre Actions.
+     *
+     * Eine eigene Utility, nicht ein Reiter der Zahlungen: das Recht, Zahlungen
+     * zu sehen, ist nicht das Recht, zu sehen, wer davon zurücktreten will —
+     * und umgekehrt kann der Kundendienst Widerrufe bearbeiten, ohne die Kasse
+     * zu sehen.
+     */
+    protected function registerWithdrawalsUtility(): void
+    {
+        Utility::register('withdrawals')
+            ->action([WithdrawalsController::class, 'index'])
+            ->title(__('statamic-payments::messages.withdrawals_utility_title'))
+            ->navTitle(__('statamic-payments::messages.withdrawals_utility_nav'))
+            ->icon('return-square')
+            ->description(__('statamic-payments::messages.withdrawals_utility_description'))
+            ->docsUrl('https://github.com/goldnead/statamic-payments#readme')
+            ->routes(function ($router) {
+                $router->post('actions', [WithdrawalActionsController::class, 'run'])->name('actions');
+                $router->post('actions/list', [WithdrawalActionsController::class, 'bulkActions'])->name('actions.list');
+            });
+    }
+
+    /** Kündigungen nach § 312k BGB, ohne Login erklärt. */
+    protected function registerCancellationsUtility(): void
+    {
+        Utility::register('cancellations')
+            ->action([CancellationsController::class, 'index'])
+            ->title(__('statamic-payments::messages.cancellations_utility_title'))
+            ->navTitle(__('statamic-payments::messages.cancellations_utility_nav'))
+            ->icon('x-square')
+            ->description(__('statamic-payments::messages.cancellations_utility_description'))
+            ->docsUrl('https://github.com/goldnead/statamic-payments#readme')
+            ->routes(function ($router) {
+                $router->post('actions', [CancellationActionsController::class, 'run'])->name('actions');
+                $router->post('actions/list', [CancellationActionsController::class, 'bulkActions'])->name('actions.list');
+            });
     }
 
     protected function registerPaymentsUtility(): void

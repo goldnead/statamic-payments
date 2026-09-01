@@ -342,4 +342,128 @@ return [
         */
         'mandate_verification_cent' => 1,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Widerrufsbutton — § 356a BGB
+    |--------------------------------------------------------------------------
+    |
+    | Since 19 June 2026 a shop that concludes distance contracts with consumers
+    | through a website has to offer an electronic withdrawal function: a button
+    | reading „Vertrag widerrufen", permanently available, prominently placed and
+    | easy to reach during the withdrawal period; a form for name, contract and
+    | contact details; a confirming button reading „Widerruf bestätigen"; and an
+    | immediate acknowledgement of receipt stating the time.
+    |
+    | This addon ships that shape, **public and without a login**. A login step
+    | is allowed by the statute only where the contract itself requires an
+    | account, and a shop that sells a download to a guest cannot claim that.
+    |
+    | What the form does *not* do is tell the visitor whether an order exists.
+    | Any address plus any reference goes through; matching to a payment happens
+    | on the server afterwards, on an unambiguous hit only, and an unmatched
+    | declaration is still a declaration — it is reported to you rather than
+    | refused. Otherwise the form would be an oracle for "has this address bought
+    | here". The same goes for a right of withdrawal that has already expired
+    | (digital content with recorded consent, `payments.consent_at`): the form
+    | does not assert that beforehand, the consumer always receives the
+    | acknowledgement, and you get the expiry as a hint on the row.
+    |
+    | On by default, for the same reason the portal is: an addon that ships a
+    | statutory requirement switched off ships it to nobody. B2B-only shops may
+    | turn it off.
+    |
+    | The link belongs in your footer during the whole withdrawal period:
+    | `{{ payments:withdrawal_url }}` in Antlers, `Legal\Links::withdrawal()` in
+    | PHP, labelled „Vertrag widerrufen". The model withdrawal instruction is not
+    | part of this addon; put its URL in `policy_url` and the form links to it.
+    |
+    | These are legal decisions taken on 1 September 2026 and documented for
+    | review, not legal advice.
+    |
+    */
+
+    'withdrawal' => [
+
+        'enabled' => env('STATAMIC_PAYMENTS_WITHDRAWAL', true),
+
+        'prefix' => env('STATAMIC_PAYMENTS_WITHDRAWAL_PREFIX', '!/statamic-payments/widerruf'),
+
+        /*
+        | Laravel's `throttle` argument for the two POST routes: requests per
+        | decay minutes, per IP. Six in ten minutes is one full flow (declare,
+        | confirm) three times over — generous for a person, tight for a
+        | script.
+        */
+        'throttle' => '6,10',
+
+        /*
+        | Who is told about a withdrawal. Left empty, `portal.from.address`
+        | is used, and after that the application's own `mail.from.address`.
+        | The consumer's acknowledgement goes out either way; this is the
+        | merchant's copy, with the matched payment and the hints.
+        */
+        'notify' => env('STATAMIC_PAYMENTS_WITHDRAWAL_NOTIFY'),
+
+        /*
+        | Where your withdrawal instruction (Widerrufsbelehrung) lives. Optional.
+        | Linked from the form page when set; the instruction itself is the
+        | host's document, not this addon's.
+        */
+        'policy_url' => env('STATAMIC_PAYMENTS_WITHDRAWAL_POLICY_URL'),
+
+        /*
+        | The statutory period in days, counted from the purchase. Used only to
+        | tell you whether a declaration arrived inside it — the consumer is
+        | never refused on the strength of this number, because whether the
+        | period has run is a legal question the row cannot settle by itself.
+        */
+        'days' => 14,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Kündigungsbutton — § 312k BGB, ohne Login
+    |--------------------------------------------------------------------------
+    |
+    | The customer portal above already offers cancellation, behind a mailed
+    | link. Under the prevailing reading of § 312k the *declaration* has to be
+    | possible without logging in — the statute names a button, a confirmation
+    | page and an immediate acknowledgement, and none of them may sit behind an
+    | identification step the consumer has to pass first. So this is a second
+    | way in, built like the withdrawal flow: public, two steps, acknowledged at
+    | once. The portal's cancellation stays as the convenient way for somebody
+    | who is already looking at their contract.
+    |
+    | Where the declaration names one running agreement unambiguously (address
+    | plus the contract or subscription id), that agreement is cancelled at the
+    | provider immediately, through the same `Subscriptions::cancel()` the
+    | portal uses — provider first, row second. Where it does not, nothing is
+    | cancelled automatically and you are told; the consumer still receives the
+    | acknowledgement, because the declaration has reached you either way.
+    |
+    | Both button labels („Verträge hier kündigen", „jetzt kündigen") are the
+    | statutory ones and live in `lang/de/cancellation.php` (and `en`).
+    |
+    | Legal decisions taken on 1 September 2026, documented for review, not
+    | legal advice.
+    |
+    */
+
+    'cancellation' => [
+
+        'enabled' => env('STATAMIC_PAYMENTS_CANCELLATION', true),
+
+        'prefix' => env('STATAMIC_PAYMENTS_CANCELLATION_PREFIX', '!/statamic-payments/kuendigung'),
+
+        'throttle' => '6,10',
+
+        'notify' => env('STATAMIC_PAYMENTS_CANCELLATION_NOTIFY'),
+
+        /*
+        | Optional. A page of yours that explains notice periods and the like;
+        | linked from the form when set.
+        */
+        'policy_url' => env('STATAMIC_PAYMENTS_CANCELLATION_POLICY_URL'),
+    ],
 ];

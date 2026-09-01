@@ -345,6 +345,41 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Einwilligung — § 356 Abs. 5 BGB
+    |--------------------------------------------------------------------------
+    |
+    | `accepted_texts`: the consent sentences your pages actually show, on top
+    | of this addon's own `messages.order_consent` (German and English). The
+    | follow-up offer endpoint writes a submitted `consent_text` onto the row
+    | only if it is one of these; anything else is replaced by the addon's
+    | wording and logged, because a hidden field is a field anybody can edit,
+    | and a record whose text the buyer chose proves nothing.
+    |
+    | Empty by default. Add the exact strings of your own checkout here.
+    |
+    */
+
+    'consent' => [
+        'accepted_texts' => [],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Zeitzone der Belege
+    |--------------------------------------------------------------------------
+    |
+    | The zone the date and time in an acknowledgement are stated in. Null uses
+    | `app.timezone`. Set it where the application runs in UTC and the shop
+    | does not: the time on a receipt should be the merchant's.
+    |
+    */
+
+    'legal' => [
+        'timezone' => env('STATAMIC_PAYMENTS_LEGAL_TIMEZONE'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Widerrufsbutton — § 356a BGB
     |--------------------------------------------------------------------------
     |
@@ -390,10 +425,11 @@ return [
         'prefix' => env('STATAMIC_PAYMENTS_WITHDRAWAL_PREFIX', '!/statamic-payments/widerruf'),
 
         /*
-        | Laravel's `throttle` argument for the two POST routes: requests per
-        | decay minutes, per IP. Six in ten minutes is one full flow (declare,
-        | confirm) three times over — generous for a person, tight for a
-        | script.
+        | The two POST routes, per IP: requests per decay minutes, behind the
+        | named limiter `statamic-payments.withdrawal` (which a host may
+        | redefine with `RateLimiter::for()`). Six in ten minutes is one full
+        | flow (declare, confirm) three times over — generous for a person,
+        | tight for a script.
         */
         'throttle' => '6,10',
 

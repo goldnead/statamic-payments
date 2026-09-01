@@ -263,10 +263,13 @@ class WithdrawalTest extends TestCase
         $withdrawal = Withdrawal::first();
 
         // Ein anderer Browser, der die Kennung kennt: keine Zusammenfassung
-        // mit Name und Adresse, und kein Bestätigen einer fremden Erklärung.
+        // mit Name und Adresse — zurück zum Formular mit einem Satz — und kein
+        // Bestätigen einer fremden Erklärung.
         $this->flushSession();
 
-        $this->get(route('statamic-payments.withdrawal.show', ['payWithdrawal' => $withdrawal->public_id]))->assertNotFound();
+        $this->get(route('statamic-payments.withdrawal.show', ['payWithdrawal' => $withdrawal->public_id]))
+            ->assertRedirect(route('statamic-payments.withdrawal.form'))
+            ->assertSessionHas('statamic-payments.portal.status', __('statamic-payments::withdrawal.restart'));
         $this->post(route('statamic-payments.withdrawal.confirm', ['payWithdrawal' => $withdrawal->public_id]))->assertNotFound();
 
         $this->assertNull($withdrawal->fresh()->confirmed_at);

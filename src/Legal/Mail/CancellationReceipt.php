@@ -43,6 +43,9 @@ class CancellationReceipt extends Mailable
                 'id' => $this->cancellation->public_id,
                 'identification' => $this->cancellation->identification,
                 'kind' => __('statamic-payments::cancellation.kind_'.$this->cancellation->kind),
+                // § 312k Abs. 2 S. 4: die Bestätigung nennt den Inhalt der
+                // Erklärung, und bei der außerordentlichen gehört der Grund dazu.
+                'reason' => $this->cancellation->isExtraordinary() ? $this->cancellation->reason : null,
                 'effective' => $this->cancellation->effective_at?->translatedFormat((string) __('statamic-payments::portal.date_format')),
                 'date' => $moment['date'],
                 'time' => $moment['time'],

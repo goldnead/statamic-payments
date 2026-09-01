@@ -73,7 +73,11 @@ class CancellationController extends Controller
             return $this->done($cancellation);
         }
 
-        abort_unless($this->declaredHere($request, $cancellation), 404);
+        if (! $this->declaredHere($request, $cancellation)) {
+            return redirect()
+                ->route('statamic-payments.cancellation.form')
+                ->with('statamic-payments.portal.status', __('statamic-payments::cancellation.restart'));
+        }
 
         return response()->view('statamic-payments::cancellation.confirm', [
             'cancellation' => $cancellation,

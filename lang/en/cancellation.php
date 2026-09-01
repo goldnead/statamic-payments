@@ -70,6 +70,8 @@ return [
     'mail_merchant_subject' => 'Cancellation received: :id',
     'mail_merchant_body' => 'A cancellation with reference :id was received on :date at :time (:zone).',
     'mail_merchant_cancelled' => 'Subscription #:id (:provider_id, :product) was matched unambiguously and cancelled at the payment provider. No further charge will follow.',
+    'mail_merchant_matched_by_number' => 'Subscription #:id (:provider_id, :product, status :status) was matched by customer number, not by the provider reference — so it was not cancelled automatically. Please check and cancel it in the Control Panel.',
+    'restart' => 'This page is no longer available. Please start again.',
     'mail_merchant_matched_not_cancelled' => 'Subscription #:id (:provider_id, :product, status :status) was matched but not cancelled at the provider — it is no longer running or the provider did not confirm. Please check.',
     'mail_merchant_unmatched' => 'No unambiguous subscription could be matched. The cancellation has been received all the same and needs handling by hand.',
     'mail_merchant_cp' => 'Open in the Control Panel',

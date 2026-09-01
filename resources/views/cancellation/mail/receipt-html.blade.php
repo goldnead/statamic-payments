@@ -29,6 +29,12 @@
             <td style="padding:4px 16px 4px 0; color:#71717a;">{{ __('statamic-payments::cancellation.field_kind') }}</td>
             <td style="padding:4px 0;">{{ $kind }}</td>
         </tr>
+        @if ($reason)
+            <tr>
+                <td style="padding:4px 16px 4px 0; color:#71717a; vertical-align:top;">{{ __('statamic-payments::cancellation.field_reason') }}</td>
+                <td style="padding:4px 0;">{{ $reason }}</td>
+            </tr>
+        @endif
         <tr>
             <td style="padding:4px 16px 4px 0; color:#71717a;">{{ __('statamic-payments::cancellation.field_effective') }}</td>
             <td style="padding:4px 0;">{{ $effective ?? __('statamic-payments::cancellation.effective_earliest') }}</td>

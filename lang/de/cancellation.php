@@ -86,6 +86,8 @@ return [
     'mail_merchant_subject' => 'Kündigung eingegangen: :id',
     'mail_merchant_body' => 'Eine Kündigung mit der Kennung :id ist am :date um :time Uhr (:zone) eingegangen.',
     'mail_merchant_cancelled' => 'Das Abo #:id (:provider_id, :product) wurde eindeutig zugeordnet und beim Zahlungsdienstleister gekündigt. Es folgt keine weitere Abbuchung.',
+    'mail_merchant_matched_by_number' => 'Das Abo #:id (:provider_id, :product, Status :status) wurde über die Kundennummer zugeordnet, nicht über die Anbieter-Kennung — deshalb nicht automatisch gekündigt. Bitte prüfen und im Control Panel kündigen.',
+    'restart' => 'Diese Seite ist nicht mehr erreichbar. Bitte beginnen Sie erneut.',
     'mail_merchant_matched_not_cancelled' => 'Das Abo #:id (:provider_id, :product, Status :status) wurde zugeordnet, aber nicht beim Zahlungsdienstleister gekündigt — es läuft nicht mehr oder der Anbieter hat nicht bestätigt. Bitte prüfen.',
     'mail_merchant_unmatched' => 'Kein eindeutiges Abo zugeordnet. Die Kündigung ist trotzdem zugegangen und muss von Hand bearbeitet werden.',
     'mail_merchant_cp' => 'Im Control Panel öffnen',

@@ -5,6 +5,9 @@
 {{ __('statamic-payments::cancellation.mail_receipt_id') }}: {{ $id }}
 {{ __('statamic-payments::cancellation.field_identification') }}: {{ $identification }}
 {{ __('statamic-payments::cancellation.field_kind') }}: {{ $kind }}
+@if ($reason)
+{{ __('statamic-payments::cancellation.field_reason') }}: {{ $reason }}
+@endif
 {{ __('statamic-payments::cancellation.field_effective') }}: {{ $effective ?? __('statamic-payments::cancellation.effective_earliest') }}
 
 {{ __('statamic-payments::cancellation.mail_receipt_next') }}

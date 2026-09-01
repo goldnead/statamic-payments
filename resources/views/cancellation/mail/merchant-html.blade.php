@@ -12,6 +12,8 @@
 
     @if ($subscription && $cancellation->provider_cancelled_at)
         <p style="margin:0 0 16px;">{{ __('statamic-payments::cancellation.mail_merchant_cancelled', ['id' => $subscription->getKey(), 'provider_id' => $subscription->provider_id, 'product' => $subscription->product]) }}</p>
+    @elseif ($subscription && $byNumber)
+        <p style="margin:0 0 16px; color:#854d0e;">{{ __('statamic-payments::cancellation.mail_merchant_matched_by_number', ['id' => $subscription->getKey(), 'provider_id' => $subscription->provider_id, 'product' => $subscription->product, 'status' => $subscription->status]) }}</p>
     @elseif ($subscription)
         <p style="margin:0 0 16px; color:#854d0e;">{{ __('statamic-payments::cancellation.mail_merchant_matched_not_cancelled', ['id' => $subscription->getKey(), 'provider_id' => $subscription->provider_id, 'product' => $subscription->product, 'status' => $subscription->status]) }}</p>
     @else

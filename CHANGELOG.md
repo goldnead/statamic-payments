@@ -50,6 +50,18 @@ Rechtliche Entscheidung dieser Fassung, von Adrian zu prüfen: ein genannter Zei
 Zukunft hält die Kündigung beim Anbieter nicht auf — gekündigt wird die nächste Abbuchung, der
 Zeitpunkt steht in Zeile und Meldung. Keine Rechtsberatung.
 
+Nach Kritik (02.09.2026) geändert: Beim Anbieter gekündigt wird nur, was über die
+**Anbieter-Kennung** getroffen wurde; ein Treffer über unsere laufende Nummer wird zugeordnet,
+aber nicht gekündigt, und der Händler bekommt „über Kundennummer zugeordnet, bitte prüfen"
+(die Nummer ist erratbar, die Kennung nicht). `OfferController` schreibt einen eingereichten
+`consent_text` nur, wenn er `messages.order_consent` (de/en) oder einem Eintrag in
+`consent.accepted_texts` entspricht — sonst Server-Wortlaut plus `Log::warning('consent text
+mismatch')`. Dazu: benannte Limiter `statamic-payments.withdrawal` / `.cancellation` statt
+anonymem `throttle:`, `legal.timezone` für die Zeit auf Belegen, der Grund einer
+außerordentlichen Kündigung steht in der Bestätigungsmail, eine abgelaufene Session führt
+zurück aufs Formular statt auf eine 404, `MerchantAddress` warnt im Log beim Rückfall auf
+`mail.from`, und die Kündigungsliste blendet „Art" und „Gewünscht zum" per Vorgabe aus.
+
 Nebenbei: `Tags\Offer` heißt jetzt `Tags\Payments` (Handle unverändert `payments`), und
 `Portal\EmailAddress::rule()` ist die Adressprüfung als Validierungsregel — `email:filter`
 hätte jede Adresse mit Umlaut abgelehnt.

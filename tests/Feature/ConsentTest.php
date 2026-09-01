@@ -7,6 +7,7 @@ use Goldnead\StatamicPayments\Support\Checkout;
 use Goldnead\StatamicPayments\Support\FollowUp;
 use Goldnead\StatamicPayments\Support\PaymentDetails;
 use Goldnead\StatamicPayments\Tests\TestCase;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use LogicException;
 use PHPUnit\Framework\Attributes\Test;
@@ -217,6 +218,11 @@ class ConsentTest extends TestCase
     #[Test]
     public function the_offer_endpoint_writes_the_consent_onto_the_follow_up_payment(): void
     {
+        // Der Host hat diesen Satz auf seiner Seite und hier eingetragen.
+        config()->set('statamic-payments.consent.accepted_texts', [
+            'Formular-Wortlaut: sofortige Lieferung, Widerrufsrecht erlischt.',
+        ]);
+
         $original = $this->paidWithConsent();
         $this->gateway->mandates[] = 'cst_maria';
 
@@ -234,6 +240,50 @@ class ConsentTest extends TestCase
         $this->assertNotNull($follow);
         $this->assertSame('Formular-Wortlaut: sofortige Lieferung, Widerrufsrecht erlischt.', $follow->consent_text);
         $this->assertTrue(now()->equalTo($follow->consent_at));
+    }
+
+    #[Test]
+    public function a_tampered_consent_text_is_replaced_by_the_servers_wording_and_logged(): void
+    {
+        // Ein verstecktes Feld kann jeder umschreiben. Ein Beleg, dessen Text
+        // der Käufer bestimmt hat, belegt nichts — also steht der Server-
+        // Wortlaut in der Zeile, und das Log sagt, dass etwas anderes kam.
+        Log::shouldReceive('warning')
+            ->once()
+            ->withArgs(fn (string $message, array $context) => $message === 'consent text mismatch' && $context['submitted'] === 'Ich stimme nicht zu.');
+        Log::shouldReceive('warning')->zeroOrMoreTimes();
+
+        $original = $this->paidWithConsent();
+        $this->gateway->mandates[] = 'cst_maria';
+
+        $this->post(route('statamic-payments.offer.accept'), [
+            'payment' => $original->getKey(),
+            'product' => 'begleit-cd',
+            'confirmed' => '1',
+            'consent_text' => 'Ich stimme nicht zu.',
+        ])->assertRedirect();
+
+        $follow = Payment::query()->where('parent_payment_id', $original->getKey())->first();
+
+        $this->assertSame(__('statamic-payments::messages.order_consent'), $follow->consent_text);
+    }
+
+    #[Test]
+    public function the_english_wording_is_an_accepted_text_on_a_german_site(): void
+    {
+        $original = $this->paidWithConsent();
+        $this->gateway->mandates[] = 'cst_maria';
+
+        $english = trans('statamic-payments::messages.order_consent', [], 'en');
+
+        $this->post(route('statamic-payments.offer.accept'), [
+            'payment' => $original->getKey(),
+            'product' => 'begleit-cd',
+            'confirmed' => '1',
+            'consent_text' => $english,
+        ])->assertRedirect();
+
+        $this->assertSame($english, Payment::query()->where('parent_payment_id', $original->getKey())->first()->consent_text);
     }
 
     #[Test]

@@ -50,14 +50,12 @@ class OfferController
         // ist der Eingang des Formulars, nicht der Klick im Browser, weil nur
         // der eine belegbar ist. (Rechtliche Entscheidung 01.09.2026, von
         // Adrian zu prüfen. Keine Rechtsberatung.)
-        $consentText = trim((string) ($data['consent_text'] ?? ''));
-
         $follow = $followUp->accept($original, $data['product'], [
             'accepted_at' => now()->toIso8601String(),
             'from' => (string) $request->headers->get('referer'),
         ], [
             'consent_at' => now(),
-            'consent_text' => $consentText !== '' ? $consentText : (string) __('statamic-payments::messages.order_consent'),
+            'consent_text' => $this->consentText($data['consent_text'] ?? null, $original),
         ]);
 
         if (! $follow) {
@@ -75,5 +73,65 @@ class OfferController
             'payment' => $follow->getKey(),
             'status' => $follow->status,
         ]);
+    }
+
+    /**
+     * Der Wortlaut, der in die Zeile kommt.
+     *
+     * Was das Formular schickt, ist ein verstecktes Feld, und ein verstecktes
+     * Feld kann jeder umschreiben. Ein Beleg, dessen Text der Käufer selbst
+     * bestimmt hat, belegt nichts — er könnte „ich stimme nicht zu" lauten.
+     * Deshalb wird der eingereichte Text nur dann geschrieben, wenn er eine
+     * der Fassungen ist, die die Seite tatsächlich zeigt: der Satz aus der
+     * Sprachdatei (de und en) und was der Host in `consent.accepted_texts`
+     * eingetragen hat. Alles andere wird durch den Server-Wortlaut ersetzt und
+     * ins Log geschrieben — nicht abgelehnt, weil der Haken gesetzt war und
+     * der Kauf gewollt ist.
+     *
+     * (Entscheidung 02.09.2026 nach Kritik, von Adrian zu prüfen. Keine
+     * Rechtsberatung.)
+     */
+    protected function consentText(mixed $submitted, Payment $original): string
+    {
+        $server = (string) __('statamic-payments::messages.order_consent');
+        $submitted = is_string($submitted) ? trim($submitted) : '';
+
+        if ($submitted === '') {
+            return $server;
+        }
+
+        if (in_array($submitted, $this->acceptedConsentTexts(), true)) {
+            return $submitted;
+        }
+
+        Log::warning('consent text mismatch', [
+            'parent_payment_id' => $original->getKey(),
+            'submitted' => mb_substr($submitted, 0, 500),
+            'written' => $server,
+        ]);
+
+        return $server;
+    }
+
+    /**
+     * Jede Fassung, die auf einer Seite dieses Systems stehen darf.
+     *
+     * @return list<string>
+     */
+    protected function acceptedConsentTexts(): array
+    {
+        $texts = [];
+
+        foreach (['de', 'en'] as $locale) {
+            $texts[] = (string) trans('statamic-payments::messages.order_consent', [], $locale);
+        }
+
+        foreach ((array) config('statamic-payments.consent.accepted_texts', []) as $text) {
+            if (is_string($text) && trim($text) !== '') {
+                $texts[] = trim($text);
+            }
+        }
+
+        return array_values(array_unique($texts));
     }
 }

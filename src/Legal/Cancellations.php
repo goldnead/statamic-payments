@@ -123,6 +123,17 @@ class Cancellations
             return;
         }
 
+        // Beim Anbieter gekündigt wird nur, was über die **Anbieter-Kennung**
+        // getroffen wurde. Die ist lang und zufällig; unsere laufende Nummer
+        // ist es nicht. Wer eine fremde Adresse und die Zahl 105 kennt, darf
+        // damit kein Abo beenden — die Erklärung wird zugeordnet, der Händler
+        // bekommt „über Kundennummer getroffen, bitte prüfen", und kündigt im
+        // Control Panel, wenn es stimmt. (Entscheidung 02.09.2026 nach
+        // Kritik, von Adrian zu prüfen. Keine Rechtsberatung.)
+        if (! self::matchedByProviderId($cancellation, $subscription)) {
+            return;
+        }
+
         // Anbieter zuerst. `Subscriptions::cancel()` schreibt nichts, wenn der
         // Anbieter nicht bestätigt hat, und meldet das selbst ins Log. Hier
         // bleibt dann `provider_cancelled_at` leer, und der Händler sieht in
@@ -130,6 +141,15 @@ class Cancellations
         if ($this->subscriptions->cancel($subscription)) {
             $cancellation->forceFill(['provider_cancelled_at' => Carbon::now()])->save();
         }
+    }
+
+    /**
+     * Ob die Erklärung das Abo über die Kennung des Anbieters benannt hat —
+     * und nicht nur über unsere laufende Nummer.
+     */
+    public static function matchedByProviderId(Cancellation $cancellation, Subscription $subscription): bool
+    {
+        return ltrim(trim($cancellation->identification), '#') === $subscription->provider_id;
     }
 
     protected function acknowledge(Cancellation $cancellation): void

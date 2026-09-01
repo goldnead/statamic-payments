@@ -46,6 +46,7 @@ return [
 
     'confirm_button' => 'Widerruf bestätigen',
     'confirm_back' => 'Change details',
+    'restart' => 'This page is no longer available. Please start again.',
 
     'done_title' => 'Your withdrawal has been received',
     'done_received' => 'The withdrawal reached us on :date at :time (:zone).',

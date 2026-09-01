@@ -182,6 +182,73 @@ class CancellationButtonTest extends TestCase
     }
 
     #[Test]
+    public function a_match_by_our_running_number_is_attached_but_not_cancelled_at_the_provider(): void
+    {
+        // Die laufende Nummer ist erratbar, die Anbieter-Kennung nicht. Wer
+        // Adresse und „105" kennt, darf damit kein Abo beenden: zugeordnet,
+        // gemeldet, nicht gekündigt.
+        $subscription = $this->subscription(['provider_id' => 'sub_lang_und_zufaellig']);
+
+        $this->post(route('statamic-payments.cancellation.declare'), $this->input(['identification' => '#'.$subscription->getKey()]));
+        $cancellation = Cancellation::first();
+
+        $this->post(route('statamic-payments.cancellation.confirm', ['payCancellation' => $cancellation->public_id]));
+
+        $fresh = $cancellation->fresh();
+
+        $this->assertSame($subscription->getKey(), $fresh->subscription_id);
+        $this->assertNull($fresh->provider_cancelled_at);
+        $this->assertSame([], $this->gateway->cancelled);
+        $this->assertSame(Subscription::STATUS_ACTIVE, $subscription->fresh()->status);
+
+        Mail::assertSent(CancellationNotice::class, fn (CancellationNotice $m) => str_contains($m->render(), 'über die Kundennummer zugeordnet'));
+        Mail::assertSent(CancellationReceipt::class, 1);
+    }
+
+    #[Test]
+    public function the_receipt_for_an_extraordinary_cancellation_names_the_reason(): void
+    {
+        $this->post(route('statamic-payments.cancellation.declare'), $this->input(['kind' => 'extraordinary', 'reason' => 'Der Kurs wurde seit drei Monaten nicht aktualisiert.']));
+        $cancellation = Cancellation::first();
+
+        $this->post(route('statamic-payments.cancellation.confirm', ['payCancellation' => $cancellation->public_id]));
+
+        Mail::assertSent(CancellationReceipt::class, fn (CancellationReceipt $m) => str_contains($m->render(), 'Der Kurs wurde seit drei Monaten nicht aktualisiert.')
+            && str_contains($m->render(), 'Außerordentliche Kündigung'));
+    }
+
+    #[Test]
+    public function the_posts_are_rate_limited(): void
+    {
+        for ($i = 0; $i < 6; $i++) {
+            $this->post(route('statamic-payments.cancellation.declare'), $this->input())->assertRedirect();
+        }
+
+        $this->post(route('statamic-payments.cancellation.declare'), $this->input())->assertStatus(429);
+
+        // Ein eigener Zähler je Weg: die Bremse hier hat die des Widerrufs
+        // nicht mitverbraucht.
+        $this->post(route('statamic-payments.withdrawal.declare'), [
+            'name' => 'Anna', 'email' => 'anna@example.de', 'order_reference' => 'x',
+        ])->assertRedirect();
+
+        $this->assertSame(6, Cancellation::count());
+    }
+
+    #[Test]
+    public function a_stale_session_is_sent_back_to_the_form_with_a_hint(): void
+    {
+        $this->post(route('statamic-payments.cancellation.declare'), $this->input());
+        $cancellation = Cancellation::first();
+
+        $this->flushSession();
+
+        $this->get(route('statamic-payments.cancellation.show', ['payCancellation' => $cancellation->public_id]))
+            ->assertRedirect(route('statamic-payments.cancellation.form'))
+            ->assertSessionHas('statamic-payments.portal.status', __('statamic-payments::cancellation.restart'));
+    }
+
+    #[Test]
     public function a_provider_that_will_not_cancel_leaves_the_row_honest(): void
     {
         $this->subscription(['provider_id' => 'sub_1']);

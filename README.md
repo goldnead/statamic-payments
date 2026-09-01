@@ -199,7 +199,11 @@ must not lie in the future; `consent_text` must be non-empty and at most 4000
 characters. A follow-up offer accepted through `POST /!/statamic-payments/offer`
 records its own consent — the wording arrives in a hidden `consent_text` field,
 falling back to `messages.order_consent` — and **does not inherit** the
-original order's: every purchase is its own contract.
+original order's: every purchase is its own contract. A hidden field is a
+field anybody can edit, so the submitted text is written only if it is one of
+the sentences your pages actually show: `messages.order_consent` (German and
+English) plus whatever you list in `consent.accepted_texts`. Anything else is
+replaced by the addon's wording and logged as `consent text mismatch`.
 
 **If you use `statamic-payments` without `statamic-funnels`, you build the
 order summary, the button label and the consent text yourself** and pass
@@ -279,13 +283,18 @@ Both button labels are statutory and live in `cancellation.button` and
 `cancellation.confirm_button`. Confirming acknowledges by mail and on the page
 with date, time and the requested date, and notifies you.
 
-Where the declaration names **one running** subscription unambiguously
-(address plus `subscriptions.id` or the provider's id), it is cancelled at the
+Where the declaration names **one running** subscription unambiguously **by
+the provider's id** (address plus e.g. `sub_…`), it is cancelled at the
 provider immediately through `Subscriptions::cancel()` — provider first, row
-second, exactly as the portal does — and `provider_cancelled_at` is set. Where
-it does not, or the provider will not confirm, nothing is written to the
-subscription and your notification says so. The consumer receives the
-acknowledgement either way: the declaration has reached you.
+second, exactly as the portal does — and `provider_cancelled_at` is set. A
+match by our own running number (`subscriptions.id`) is attached to the row
+but **not** cancelled automatically: that number is guessable, the provider's
+is not, and an address plus "105" must not be enough to end somebody's
+contract. Your notification says "matched by customer number, please check and
+cancel in the Control Panel". Where nothing matches, or the provider will not
+confirm, nothing is written to the subscription and your notification says so.
+The consumer receives the acknowledgement either way: the declaration has
+reached you.
 
 A requested date in the future does **not** hold the provider-side cancellation
 back. What the provider cancels is the next charge, and a charge after a

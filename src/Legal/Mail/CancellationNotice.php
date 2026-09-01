@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Legal\Mail;
 
+use Goldnead\StatamicPayments\Legal\Cancellations;
 use Goldnead\StatamicPayments\Legal\Moment;
 use Goldnead\StatamicPayments\Models\Cancellation;
 use Goldnead\StatamicPayments\Portal\Mail\SendsAsTheConfiguredSender;
@@ -39,7 +40,10 @@ class CancellationNotice extends Mailable
             text: 'statamic-payments::cancellation.mail.merchant',
             with: [
                 'cancellation' => $this->cancellation,
-                'subscription' => $this->cancellation->subscription,
+                'subscription' => $subscription = $this->cancellation->subscription,
+                // Über die laufende Nummer getroffen: zugeordnet, nicht
+                // gekündigt, und der Händler soll wissen, warum.
+                'byNumber' => $subscription !== null && ! Cancellations::matchedByProviderId($this->cancellation, $subscription),
                 'kind' => __('statamic-payments::cancellation.kind_'.$this->cancellation->kind),
                 'effective' => $this->cancellation->effective_at?->translatedFormat((string) __('statamic-payments::portal.date_format')),
                 'date' => $moment['date'],

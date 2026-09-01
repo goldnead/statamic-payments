@@ -18,7 +18,12 @@ final class Moment
     /** @return array{date: string, time: string, zone: string} */
     public static function parts(Carbon $moment): array
     {
-        $local = $moment->copy()->setTimezone((string) config('app.timezone', 'UTC'));
+        // `legal.timezone`, wenn gesetzt: ein Server in UTC, ein Händler in
+        // Berlin, und die Zeit auf einem Beleg soll die des Händlers sein.
+        $zone = config('statamic-payments.legal.timezone');
+        $zone = is_string($zone) && trim($zone) !== '' ? trim($zone) : (string) config('app.timezone', 'UTC');
+
+        $local = $moment->copy()->setTimezone($zone);
 
         return [
             'date' => $local->translatedFormat((string) __('statamic-payments::portal.date_format')),

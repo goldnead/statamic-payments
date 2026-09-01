@@ -2,6 +2,8 @@
 
 namespace Goldnead\StatamicPayments\Legal;
 
+use Illuminate\Support\Facades\Log;
+
 /**
  * Wer im Haus von einem Widerruf oder einer Kündigung erfährt.
  *
@@ -17,13 +19,24 @@ final class MerchantAddress
     public static function for(string $flow): ?string
     {
         foreach ([
-            config('statamic-payments.'.$flow.'.notify'),
-            data_get(config('statamic-payments.portal.from', []), 'address'),
-            config('mail.from.address'),
-        ] as $candidate) {
-            if (is_string($candidate) && trim($candidate) !== '') {
-                return trim($candidate);
+            'notify' => config('statamic-payments.'.$flow.'.notify'),
+            'portal' => data_get(config('statamic-payments.portal.from', []), 'address'),
+            'mail' => config('mail.from.address'),
+        ] as $source => $candidate) {
+            if (! is_string($candidate) || trim($candidate) === '') {
+                continue;
             }
+
+            if ($source === 'mail') {
+                // Der Absender der Anwendung ist ein Postfach, aus dem gesendet
+                // wird — nicht eines, das jemand liest. Laut, damit das vor der
+                // ersten echten Kündigung auffällt und nicht danach.
+                Log::warning('statamic-payments: no merchant address for '.$flow.' notifications; falling back to mail.from. Set statamic-payments.'.$flow.'.notify.', [
+                    'address' => trim($candidate),
+                ]);
+            }
+
+            return trim($candidate);
         }
 
         return null;

@@ -80,7 +80,14 @@ class WithdrawalController extends Controller
             return $this->done($withdrawal);
         }
 
-        abort_unless($this->declaredHere($request, $withdrawal), 404);
+        // Kein Blick in eine fremde Zusammenfassung — aber auch keine nackte
+        // 404 für den, dessen Session abgelaufen ist: zurück zum Formular, mit
+        // einem Satz, der sagt, was zu tun ist.
+        if (! $this->declaredHere($request, $withdrawal)) {
+            return redirect()
+                ->route('statamic-payments.withdrawal.form')
+                ->with('statamic-payments.portal.status', __('statamic-payments::withdrawal.restart'));
+        }
 
         return response()->view('statamic-payments::withdrawal.confirm', [
             'withdrawal' => $withdrawal,

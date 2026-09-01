@@ -59,6 +59,7 @@ return [
     */
     'confirm_button' => 'Widerruf bestätigen',
     'confirm_back' => 'Angaben ändern',
+    'restart' => 'Diese Seite ist nicht mehr erreichbar. Bitte beginnen Sie erneut.',
 
     // Schritt 3
     'done_title' => 'Ihr Widerruf ist eingegangen',

@@ -11,9 +11,12 @@ use Goldnead\StatamicPayments\Http\Controllers\Portal\PaymentMethodController;
 use Goldnead\StatamicPayments\Http\Controllers\WebhookController;
 use Goldnead\StatamicPayments\Http\Middleware\SetBrandFromPortalSession;
 use Goldnead\StatamicPayments\Portal\TrackingParameters;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
+use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Routing\Middleware\ValidateSignature;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -172,30 +175,38 @@ Route::prefix(config('statamic-payments.portal.prefix', '!/statamic-payments/kon
 | `payCancellation`, never `{id}` or `{withdrawal}`, because a `Route::bind()`
 | from another addon applies to every route with that parameter name.
 |
-| Throttled on the POSTs only. The GETs are what a person refreshes.
+| Throttled on the POSTs only, through one **named** limiter per flow. A name
+| is what lets a host redefine the brake (`RateLimiter::for('statamic-payments.
+| withdrawal', …)` in its own provider, after this one) and what keeps the
+| withdrawal's budget apart from the cancellation's — an anonymous `throttle:6,10`
+| would key both on the same route-less signature.
 |
 */
+
+foreach (['withdrawal', 'cancellation'] as $flow) {
+    RateLimiter::for('statamic-payments.'.$flow, function (Request $request) use ($flow) {
+        [$max, $decay] = array_map('intval', explode(',', (string) config('statamic-payments.'.$flow.'.throttle', '6,10')) + [1 => 1]);
+
+        return Limit::perMinutes(max(1, $decay), max(1, $max))->by($flow.'|'.(string) $request->ip());
+    });
+}
 
 Route::prefix(config('statamic-payments.withdrawal.prefix', '!/statamic-payments/widerruf'))
     ->middleware(['web'])
     ->name('statamic-payments.withdrawal.')
     ->group(function () {
-        $throttle = ThrottleRequests::class.':'.(string) config('statamic-payments.withdrawal.throttle', '6,10');
-
         Route::get('/', [WithdrawalController::class, 'form'])->name('form');
-        Route::post('/', [WithdrawalController::class, 'declare'])->middleware($throttle)->name('declare');
+        Route::post('/', [WithdrawalController::class, 'declare'])->middleware('throttle:statamic-payments.withdrawal')->name('declare');
         Route::get('/{payWithdrawal}', [WithdrawalController::class, 'show'])->name('show');
-        Route::post('/{payWithdrawal}/bestaetigen', [WithdrawalController::class, 'confirm'])->middleware($throttle)->name('confirm');
+        Route::post('/{payWithdrawal}/bestaetigen', [WithdrawalController::class, 'confirm'])->middleware('throttle:statamic-payments.withdrawal')->name('confirm');
     });
 
 Route::prefix(config('statamic-payments.cancellation.prefix', '!/statamic-payments/kuendigung'))
     ->middleware(['web'])
     ->name('statamic-payments.cancellation.')
     ->group(function () {
-        $throttle = ThrottleRequests::class.':'.(string) config('statamic-payments.cancellation.throttle', '6,10');
-
         Route::get('/', [LegalCancellationController::class, 'form'])->name('form');
-        Route::post('/', [LegalCancellationController::class, 'declare'])->middleware($throttle)->name('declare');
+        Route::post('/', [LegalCancellationController::class, 'declare'])->middleware('throttle:statamic-payments.cancellation')->name('declare');
         Route::get('/{payCancellation}', [LegalCancellationController::class, 'show'])->name('show');
-        Route::post('/{payCancellation}/bestaetigen', [LegalCancellationController::class, 'confirm'])->middleware($throttle)->name('confirm');
+        Route::post('/{payCancellation}/bestaetigen', [LegalCancellationController::class, 'confirm'])->middleware('throttle:statamic-payments.cancellation')->name('confirm');
     });

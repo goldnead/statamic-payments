@@ -8,6 +8,7 @@ use Goldnead\StatamicPayments\Http\Controllers\Portal\InvoiceController;
 use Goldnead\StatamicPayments\Http\Controllers\Portal\MagicLinkController as PortalMagicLinkController;
 use Goldnead\StatamicPayments\Http\Controllers\Portal\OrdersController;
 use Goldnead\StatamicPayments\Http\Controllers\Portal\PaymentMethodController;
+use Goldnead\StatamicPayments\Http\Controllers\ResumeController;
 use Goldnead\StatamicPayments\Http\Controllers\WebhookController;
 use Goldnead\StatamicPayments\Http\Middleware\SetBrandFromPortalSession;
 use Goldnead\StatamicPayments\Portal\TrackingParameters;
@@ -210,3 +211,15 @@ Route::prefix(config('statamic-payments.cancellation.prefix', '!/statamic-paymen
         Route::get('/{payCancellation}', [LegalCancellationController::class, 'show'])->name('show');
         Route::post('/{payCancellation}/bestaetigen', [LegalCancellationController::class, 'confirm'])->middleware('throttle:statamic-payments.cancellation')->name('confirm');
     });
+
+/*
+ * The link in the abandoned-checkout reminder: start the checkout again with
+ * the same lines. Signed and expiring (`abandoned.mail.resume_days`), so the
+ * link is the proof that the mail reached the address; `payPayment` for the
+ * same reason as every parameter above. A GET that redirects to the provider
+ * — nothing is charged by following it, the provider's page still asks.
+ */
+Route::get('/!/statamic-payments/weiter/{payPayment}', ResumeController::class)
+    ->whereNumber('payPayment')
+    ->middleware(['web', ValidateSignature::class, ThrottleRequests::class.':10,1'])
+    ->name('statamic-payments.resume');

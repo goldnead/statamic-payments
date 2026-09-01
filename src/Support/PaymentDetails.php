@@ -67,6 +67,7 @@ final class PaymentDetails
         'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
         'referrer', 'landing_page',
         'consent_at', 'consent_text',
+        'offer_handles',
     ];
 
     /**
@@ -116,11 +117,13 @@ final class PaymentDetails
         'subscription_start_error',
         'refunds',
         'cycle_of',
+        'resumed_from',
     ];
 
     /**
      * @param  array<string, mixed>  $meta
      * @param  array<string, string>  $attribution
+     * @param  array<string, string>  $offerHandles  Produkt-Handle → Angebots-Handle
      */
     private function __construct(
         private array $meta,
@@ -129,7 +132,18 @@ final class PaymentDetails
         private array $attribution = [],
         private ?Carbon $consentAt = null,
         private ?string $consentText = null,
+        private array $offerHandles = [],
     ) {}
+
+    /**
+     * Über welches Angebot eine Position verkauft wurde, wenn der Aufrufer es
+     * gesagt hat. Für `payment_items.offer`; ohne Angabe null, und das ist die
+     * ehrliche Lücke — geraten wird hier nichts.
+     */
+    public function offerFor(string $productHandle): ?string
+    {
+        return $this->offerHandles[$productHandle] ?? null;
+    }
 
     /**
      * Prüfen, was der Aufrufer mitgibt.
@@ -178,7 +192,37 @@ final class PaymentDetails
             self::attribution($details),
             $consentAt,
             $consentText,
+            self::offerHandles($details['offer_handles'] ?? null),
         );
+    }
+
+    /**
+     * Produkt-Handle → Angebots-Handle, geprüft. Beides kurze Texte; ein
+     * falscher Typ ist ein Programmierfehler und fliegt.
+     *
+     * @return array<string, string>
+     */
+    private static function offerHandles(mixed $value): array
+    {
+        if ($value === null || $value === []) {
+            return [];
+        }
+
+        if (! is_array($value)) {
+            throw new InvalidArgumentException('statamic-payments: `offer_handles` muss ein Array Produkt-Handle => Angebots-Handle sein.');
+        }
+
+        $handles = [];
+
+        foreach ($value as $product => $offer) {
+            if (! is_string($product) || $product === '' || ! is_string($offer) || trim($offer) === '') {
+                throw new InvalidArgumentException('statamic-payments: `offer_handles` muss ein Array Produkt-Handle => Angebots-Handle sein.');
+            }
+
+            $handles[$product] = mb_substr(trim($offer), 0, 191);
+        }
+
+        return $handles;
     }
 
     /**
@@ -195,6 +239,7 @@ final class PaymentDetails
             $this->attribution,
             $this->consentAt,
             $this->consentText,
+            $this->offerHandles,
         );
     }
 

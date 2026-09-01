@@ -109,6 +109,11 @@ class Checkout
                 PaymentItem::create([
                     'payment_id' => $payment->id,
                     'product' => $line['handle'],
+                    // Über welches Angebot: was der Aufrufer sagt, sonst was
+                    // der Katalog an die Zeile geheftet hat (statamic-offers
+                    // liefert `offer` mit), sonst null. Nie geraten.
+                    'offer' => $details->offerFor((string) $line['handle'])
+                        ?? (is_string($line['offer'] ?? null) && $line['offer'] !== '' ? $line['offer'] : null),
                     // The name as it is today. A product renamed next year must
                     // not change what an old order says was bought.
                     'name' => $line['name'],
@@ -151,11 +156,25 @@ class Checkout
             $payload['webhookUrl'] = $webhook;
         }
 
+        // Which methods the hosted checkout offers. Nothing configured means no
+        // key at all, and Mollie shows what the account has switched on. One
+        // method goes as a string, several as a list — both shapes are the
+        // API's own.
+        $methods = PaymentMethods::configured();
+
+        if ($methods !== []) {
+            $payload['method'] = count($methods) === 1 ? $methods[0] : $methods;
+        }
+
         // Only if the site asked for it. Asking the provider to remember
         // somebody's payment method is a thing that buyer has to be told about
         // on the checkout page; doing it by default would decide that for every
         // site that installed this addon.
-        if ($reference = $this->rememberBuyer($buyer)) {
+        //
+        // And only where the offered methods can leave a mandate behind: a
+        // `sequenceType: first` on Klarna or a bank transfer is refused by the
+        // provider, and the buyer would see an error instead of a checkout.
+        if (PaymentMethods::canHoldMandate($methods) && ($reference = $this->rememberBuyer($buyer))) {
             $payload['customerId'] = $reference;
             $payload['sequenceType'] = 'first';
             $payment->forceFill(['customer_reference' => $reference])->save();
@@ -169,6 +188,83 @@ class Checkout
         ])->save();
 
         return new CheckoutResult($payment->fresh() ?? $payment, $session->checkoutUrl);
+    }
+
+    /**
+     * Start an abandoned checkout again, as a new payment.
+     *
+     * The provider's checkout URL of the original expires — cards within
+     * minutes — so a reminder cannot point back at it. What it can do is start
+     * over with the same lines, the same buyer and the same facts, and remember
+     * where it came from (`meta.resumed_from`) so that the original is counted
+     * as recovered when this one is paid.
+     *
+     * The consent under § 356 (5) BGB is carried over: the same person declared
+     * it for the same goods on the same order, and the restart changes the
+     * payment, not the declaration. (Legal decision 02.09.2026, for Adrian to
+     * review. Not legal advice.)
+     *
+     * Null when there is nothing to resume: a paid or fulfilled payment, one
+     * without lines, or one whose lines no longer resolve in the catalogue.
+     */
+    public function resume(Payment $original, ?string $returnUrl = null): ?CheckoutResult
+    {
+        if ($original->isPaid() || $original->isFulfilled() || $original->items->isEmpty()) {
+            return null;
+        }
+
+        $products = [];
+        $offers = [];
+
+        // Das Hauptprodukt zuerst: `lines()` macht aus der ersten Position das,
+        // was der Käufer kam zu kaufen, und die Relation sortiert von sich aus
+        // nicht. Ein Zusatz an erster Stelle würde zur Hauptzeile der neuen
+        // Zahlung — und zu ihrem `product`, nach dem Berichte gruppieren.
+        $items = $original->items->sortBy(fn (PaymentItem $item) => [$item->kind === PaymentItem::KIND_PRIMARY ? 0 : 1, $item->id]);
+
+        foreach ($items as $item) {
+            $products[$item->product] = ($products[$item->product] ?? 0) + max(1, (int) $item->quantity);
+
+            if (is_string($item->getAttribute('offer')) && $item->getAttribute('offer') !== '') {
+                $offers[$item->product] = $item->getAttribute('offer');
+            }
+        }
+
+        $buyer = array_filter([
+            'email' => $original->email,
+            'name' => $original->name,
+            'country' => $original->country_source === 'checkout' ? $original->country : null,
+        ], fn ($v) => $v !== null);
+
+        $meta = array_diff_key((array) ($original->meta ?? []), array_flip(PaymentDetails::RESERVED_META));
+
+        $details = array_filter([
+            'meta' => $meta,
+            'country' => $original->country_source !== 'checkout' ? $original->country : null,
+            'country_source' => $original->country_source !== 'checkout' && $original->country !== null ? $original->country_source : null,
+            'utm_source' => $original->utm_source,
+            'utm_medium' => $original->utm_medium,
+            'utm_campaign' => $original->utm_campaign,
+            'utm_term' => $original->utm_term,
+            'utm_content' => $original->utm_content,
+            'referrer' => $original->referrer,
+            'landing_page' => $original->landing_page,
+            'consent_at' => $original->consent_at,
+            'consent_text' => $original->consent_text,
+            'offer_handles' => $offers,
+        ], fn ($v) => $v !== null && $v !== []);
+
+        $discount = $original->discount_code !== null && (int) $original->discount_cent > 0
+            ? new Discount($original->discount_code, (int) $original->discount_cent)
+            : null;
+
+        return $this->start(
+            $products,
+            $buyer,
+            $returnUrl,
+            $discount,
+            PaymentDetails::from($details)->plus(['resumed_from' => (int) $original->getKey()]),
+        );
     }
 
     /**

@@ -99,13 +99,29 @@ class Abandonment
      */
     public function settled(Payment $zahlung): void
     {
-        if ($zahlung->abandoned_notified_at === null) {
-            return;
+        $jetzt = Carbon::now();
+
+        // Die eigene Zeile: erinnert und doch bezahlt. `recovered_at` bleibt
+        // stehen, wenn der Stempel geht — das ist der zurückgeholte Umsatz.
+        if ($zahlung->abandoned_notified_at !== null) {
+            Payment::query()
+                ->whereKey($zahlung->getKey())
+                ->update(['abandoned_notified_at' => null, 'recovered_at' => $jetzt, 'updated_at' => $jetzt]);
         }
 
-        Payment::query()
-            ->whereKey($zahlung->getKey())
-            ->update(['abandoned_notified_at' => null, 'updated_at' => Carbon::now()]);
+        // Ein neu gestarteter Checkout (`Checkout::resume()`) bezahlt eine
+        // andere Zeile als die erinnerte. Zurückgeholt ist trotzdem die
+        // erinnerte; sie bekommt den Stempel, bleibt aber, was sie ist — ein
+        // offener Checkout, den die Bereinigung später wegräumt.
+        $original = data_get($zahlung->meta, 'resumed_from');
+
+        if (is_int($original) || (is_string($original) && ctype_digit($original))) {
+            Payment::query()
+                ->whereKey((int) $original)
+                ->whereNotNull('abandoned_notified_at')
+                ->whereNull('recovered_at')
+                ->update(['recovered_at' => $jetzt, 'updated_at' => $jetzt]);
+        }
     }
 
     public function enabled(): bool

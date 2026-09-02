@@ -365,11 +365,27 @@ class Fulfilment
         // Nachfassangebots: die darf nicht abbuchen, ohne vorher zu sagen,
         // womit. Zu holen ist es aber nur jetzt, waehrend der Anbieter die
         // Zahlung noch beschreibt.
-        if ($remote->cardLast4 && ! $payment->card_last4) {
-            $payment->forceFill([
-                'card_last4' => $remote->cardLast4,
-                'card_label' => $remote->cardLabel,
-            ])->save();
+        //
+        // **Jedes Feld für sich, und nur was der Anbieter für genau diese
+        // Zahlung belegt.** Vorher hingen beide an den vier Ziffern: nennt der
+        // Anbieter die Kartenmarke ohne Nummer — bei Wallet-Zahlungen der
+        // Normalfall —, ging die Marke verloren; und nannte er die Nummer ohne
+        // Marke, wurde eine bereits eingetragene Marke mit `null`
+        // überschrieben. Auf der Seite eines Nachfassangebots steht dann
+        // entweder nichts oder etwas, das aus zwei Antworten
+        // zusammengesetzt ist. Beides ist eine Behauptung, keine Auskunft.
+        //
+        // Eingefroren bleibt eingefroren: was einmal steht, wird von einer
+        // späteren Antwort nicht mehr geändert. Der Anbieter beschreibt bei
+        // einer Folgeabbuchung die Karte des Mandats, nicht die der
+        // Erstzahlung — die beiden dürfen sich nicht gegenseitig überschreiben.
+        $karte = array_filter([
+            'card_last4' => $payment->card_last4 === null ? $remote->cardLast4 : null,
+            'card_label' => $payment->card_label === null ? $remote->cardLabel : null,
+        ], static fn (?string $wert): bool => $wert !== null && $wert !== '');
+
+        if ($karte !== []) {
+            $payment->forceFill($karte)->save();
             $payment = $payment->fresh() ?? $payment;
         }
 

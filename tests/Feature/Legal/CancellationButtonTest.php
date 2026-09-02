@@ -2,9 +2,11 @@
 
 namespace Goldnead\StatamicPayments\Tests\Feature\Legal;
 
+use Goldnead\StatamicPayments\Facades\PaymentLog;
 use Goldnead\StatamicPayments\Legal\Mail\CancellationNotice;
 use Goldnead\StatamicPayments\Legal\Mail\CancellationReceipt;
 use Goldnead\StatamicPayments\Models\Cancellation;
+use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use Illuminate\Support\Facades\Mail;
@@ -324,5 +326,38 @@ class CancellationButtonTest extends TestCase
     {
         $this->assertSame('Verträge hier kündigen', __('statamic-payments::cancellation.button'));
         $this->assertSame('jetzt kündigen', __('statamic-payments::cancellation.confirm_button'));
+    }
+
+    #[Test]
+    public function both_mails_land_in_the_payments_communication_log(): void
+    {
+        $subscription = $this->subscription(['provider_id' => 'sub_1']);
+
+        $payment = Payment::create([
+            'provider' => 'fake',
+            'provider_id' => 'tr_zyklus_1',
+            'product' => 'noten-paket',
+            'amount_cent' => 1900,
+            'currency' => 'EUR',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => now()->subDay(),
+            'email' => 'anna@example.de',
+            'subscription_id' => $subscription->getKey(),
+        ]);
+
+        $this->post(route('statamic-payments.cancellation.declare'), $this->input());
+        $cancellation = Cancellation::first();
+        $this->post(route('statamic-payments.cancellation.confirm', ['payCancellation' => $cancellation->public_id]));
+
+        // Beide, nicht nur die an den Verbraucher. Die Meldung an den Händler
+        // fehlte im Protokoll bis 1.17.1 — und sie ist die, die man später
+        // sucht, wenn jemand fragt, ob die Kündigung angekommen ist.
+        $arten = PaymentLog::for($payment)->pluck('kind')->all();
+        $this->assertContains('cancellation_receipt', $arten);
+        $this->assertContains('cancellation_notice', $arten);
+
+        $meldung = PaymentLog::for($payment)->firstWhere('kind', 'cancellation_notice');
+        $this->assertSame('shop@example.com', $meldung->recipient);
+        $this->assertSame($cancellation->fresh()->public_id, $meldung->meta['cancellation']);
     }
 }

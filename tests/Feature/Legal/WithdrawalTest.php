@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Tests\Feature\Legal;
 
+use Goldnead\StatamicPayments\Facades\PaymentLog;
 use Goldnead\StatamicPayments\Legal\Links;
 use Goldnead\StatamicPayments\Legal\Mail\WithdrawalNotice;
 use Goldnead\StatamicPayments\Legal\Mail\WithdrawalReceipt;
@@ -145,6 +146,19 @@ class WithdrawalTest extends TestCase
                 && str_contains($mail->render(), $fresh->public_id)
                 && str_contains($mail->render(), 'Zugeordnete Zahlung');
         });
+
+        // Beide Mails stehen im Kommunikationsprotokoll der Zahlung, auch die
+        // an den Händler. Die Frage, die das Protokoll beantwortet, ist „was
+        // ging zu dieser Zahlung hinaus" — und ein Widerruf, von dem der
+        // Händler nie erfahren hat, ist genau der Fall, den man nachweisen
+        // will. Die Händler-Mail fehlte dort bis 1.17.1.
+        $arten = PaymentLog::for($payment)->pluck('kind')->all();
+        $this->assertContains('withdrawal_receipt', $arten);
+        $this->assertContains('withdrawal_notice', $arten);
+
+        $notiz = PaymentLog::for($payment)->firstWhere('kind', 'withdrawal_notice');
+        $this->assertSame('shop@example.com', $notiz->recipient);
+        $this->assertSame($fresh->public_id, $notiz->meta['withdrawal']);
 
         // Schritt 3: Kennung und Zeit. Nicht Name, nicht Adresse.
         $this->get(route('statamic-payments.withdrawal.show', ['payWithdrawal' => $fresh->public_id]))

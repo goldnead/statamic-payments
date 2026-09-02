@@ -134,13 +134,26 @@ brand is a 404, not a 403: "does not exist" gives away less than "exists, not yo
 
 What went out for an order — the invoice mail, the welcome mail, a note from support — is otherwise
 in nobody's memory once the mail log has rotated. `payment_communications` keeps one line per event,
-append-only, and the detail page shows them newest first ("Nothing sent yet" until there is one).
+append-only, and the detail page shows them newest first.
 
-The addon writes its own: the portal link (on the address's latest order), the withdrawal
-acknowledgement (where a payment matched), the cancellation acknowledgement and the portal's
-cancellation confirmation (on the subscription's latest payment), the abandoned-checkout reminder.
-`statamic-invoices` writes its invoice mail. Your site and other addons write theirs through the
-facade:
+**It is a log, not a listener. Nothing is recorded that nobody records.** This is the one thing to
+understand before you look at an empty panel and call it broken: the addon cannot see mail that
+other code sends, so an order whose confirmation, access details and welcome mail all came from your
+own site shows *no* lines at all. That is not a defect, it is a missing call — and the first real
+purchase is where people find that out. Wire it up when you wire up the mail, not afterwards.
+
+The addon records its own: the portal link (on the address's latest order), the withdrawal
+acknowledgement and the withdrawal reported to the merchant (where a payment matched), the
+cancellation acknowledgement, the cancellation reported to the merchant and the portal's
+cancellation confirmation (on the subscription's latest payment), the abandoned-checkout reminder,
+and a note when a reminder was suppressed. That is all of them, and none of them happens on an
+ordinary purchase.
+
+`statamic-invoices` records its invoice mail — but only when one actually went out. With
+`INVOICES_DELIVER=false` no invoice mail is sent, so there is correctly no line, and the empty panel
+is telling the truth.
+
+Everything your own site sends is yours to record, through the facade:
 
 ```php
 use Goldnead\StatamicPayments\Facades\PaymentLog;
@@ -150,6 +163,23 @@ PaymentLog::mail($payment, 'access', $to, $subject, 'failed', ['error' => $e->ge
 PaymentLog::note($payment, 'support', 'Zugang von Hand verlängert bis 31.12.');
 PaymentLog::record($payment, 'export', 'datev', ['reference' => $batchId]);
 PaymentLog::for($payment);                                                  // newest first
+```
+
+The usual place is the listener that already sends the mail, one line below the send — so a mail that
+was not sent leaves no line saying it was:
+
+```php
+class SendPurchaseConfirmation
+{
+    public function handle(PaymentPaid $event): void
+    {
+        $mailable = new PurchaseConfirmation($event->payment);
+
+        Mail::to($event->payment->email)->send($mailable);
+
+        PaymentLog::mail($event->payment, 'purchase_confirmation', $event->payment->email, $mailable->envelope()->subject);
+    }
+}
 ```
 
 `kind` is yours (64 characters); the screen translates the ones it knows (`invoice`,

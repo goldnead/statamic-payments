@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Tests\Feature;
 
 use Goldnead\StatamicPayments\Events\PaymentCommunicationLogged;
+use Goldnead\StatamicPayments\Events\PaymentPaid;
 use Goldnead\StatamicPayments\Facades\PaymentLog;
 use Goldnead\StatamicPayments\Legal\Withdrawals;
 use Goldnead\StatamicPayments\Models\Payment;
@@ -115,10 +116,38 @@ class PaymentLogTest extends TestCase
         $unmatched = $withdrawals->declare(['name' => 'Wer', 'email' => 'niemand@example.com', 'order_reference' => '4711'], '127.0.0.1');
         $withdrawals->confirm($unmatched);
 
+        // Beide Mails des zugeordneten Widerrufs, und nur die: der Widerruf
+        // ohne Treffer hat keine Zahlung, an der eine Zeile hängen könnte.
         $rows = PaymentLog::for($payment);
-        $this->assertCount(1, $rows);
-        $this->assertSame('withdrawal_receipt', $rows->first()->kind);
-        $this->assertSame($matched->fresh()->public_id, $rows->first()->meta['withdrawal']);
-        $this->assertSame(1, PaymentCommunication::count());
+        $this->assertSame(['withdrawal_notice', 'withdrawal_receipt'], $rows->pluck('kind')->sort()->values()->all());
+        $this->assertSame($matched->fresh()->public_id, $rows->firstWhere('kind', 'withdrawal_receipt')->meta['withdrawal']);
+        $this->assertSame(2, PaymentCommunication::count());
+    }
+
+    #[Test]
+    public function an_ordinary_purchase_records_nothing_by_itself(): void
+    {
+        Mail::fake();
+
+        // Der Feldfund vom 02.09.2026: drei echte Käufe, fünf zugestellte
+        // Mails, null Zeilen. Kein Defekt der Fassade — die schreibt, siehe
+        // oben —, sondern die Bauart. Dieses Paket verschickt bei einem
+        // gewöhnlichen Kauf **gar keine** Mail: Kaufbestätigung, Zugangsdaten
+        // und Willkommensgruß kommen von der Seite, und was das Paket nicht
+        // verschickt, kann es nicht protokollieren.
+        //
+        // Der Test hält das als Zusage fest, damit ein leeres Protokoll nach
+        // einem Kauf nicht wieder als Fehler gelesen wird — und damit
+        // auffällt, falls dieses Paket später doch selbst etwas verschickt und
+        // den Eintrag vergisst. Wer die Zeilen will, trägt sie ein:
+        $payment = $this->payment();
+
+        PaymentPaid::dispatch($payment);
+
+        $this->assertCount(0, PaymentLog::for($payment));
+
+        PaymentLog::mail($payment, 'purchase_confirmation', (string) $payment->email, 'Danke für deinen Kauf');
+
+        $this->assertSame('purchase_confirmation', PaymentLog::for($payment)->first()->kind);
     }
 }

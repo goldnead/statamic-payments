@@ -190,9 +190,20 @@ class Cancellations
         }
 
         try {
-            Mail::to($to)->send(new CancellationNotice($cancellation));
+            $mailable = new CancellationNotice($cancellation);
+
+            Mail::to($to)->send($mailable);
 
             $cancellation->forceFill(['merchant_notified_at' => Carbon::now()])->save();
+
+            // Auch diese Mail gehört ins Protokoll. Sie geht an den Händler
+            // und nicht an den Kunden, aber die Frage, die das Protokoll
+            // beantwortet, ist „was ging zu dieser Zahlung hinaus" — und eine
+            // Kündigung, von der der Händler nie erfahren hat, ist genau der
+            // Fall, den man später nachweisen will.
+            if ($payment = $this->latestPaymentOf($cancellation->subscription_id)) {
+                PaymentLog::mail($payment, 'cancellation_notice', $to, $mailable->envelope()->subject, meta: ['cancellation' => $cancellation->public_id]);
+            }
         } catch (Throwable $e) {
             Log::error('statamic-payments: a cancellation was received and the merchant could not be notified.', [
                 'cancellation' => $cancellation->public_id,

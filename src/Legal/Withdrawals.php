@@ -210,9 +210,18 @@ class Withdrawals
         }
 
         try {
-            Mail::to($to)->send(new WithdrawalNotice($withdrawal, $this->withinPeriod($withdrawal)));
+            $mailable = new WithdrawalNotice($withdrawal, $this->withinPeriod($withdrawal));
+
+            Mail::to($to)->send($mailable);
 
             $withdrawal->forceFill(['merchant_notified_at' => Carbon::now()])->save();
+
+            // Auch diese Mail gehört ins Protokoll — siehe
+            // {@see Cancellations::notify()}. Ohne Zuordnung zu einer Zahlung
+            // gibt es nichts, woran die Zeile hängen könnte.
+            if ($withdrawal->payment_id !== null) {
+                PaymentLog::mail($withdrawal->payment_id, 'withdrawal_notice', $to, $mailable->envelope()->subject, meta: ['withdrawal' => $withdrawal->public_id]);
+            }
         } catch (Throwable $e) {
             Log::error('statamic-payments: a withdrawal was received and the merchant could not be notified.', [
                 'withdrawal' => $withdrawal->public_id,

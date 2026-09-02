@@ -67,6 +67,21 @@ class Payment extends Model
 
     public const STATUS_CANCELED = 'canceled';
 
+    /**
+     * Der Platzhalter in `provider_id`, solange der Anbieter die Zahlung noch
+     * nicht kennt.
+     *
+     * Die Zeile entsteht vor dem Anbieter-Aufruf — sonst geht bei einem Abbruch
+     * dazwischen die Zahlung verloren, für die der Käufer schon belastet wurde.
+     * In dem Fenster steht hier keine Kennung des Anbieters, sondern diese.
+     *
+     * Als Konstante, weil Nachbarpakete die Frage „kennt der Anbieter diese
+     * Zahlung schon?" stellen müssen. Buchstabieren sie das Präfix selbst,
+     * hängt ihr Verhalten an einem Namensdetail dieses Pakets, das sich
+     * jederzeit ändern darf. {@see self::hasProviderId()} ist die Frage.
+     */
+    public const PLACEHOLDER_PROVIDER_PREFIX = 'pending-';
+
     protected $guarded = [];
 
     /**
@@ -238,6 +253,26 @@ class Payment extends Model
     public function isFulfilled(): bool
     {
         return $this->fulfilled_at !== null;
+    }
+
+    /**
+     * Ob der Anbieter diese Zahlung kennt.
+     *
+     * Falsch heißt: die Zeile steht, der Anbieter wurde noch nicht gerufen
+     * oder hat nicht geantwortet. Wer sie mit einer Anbieter-Kennung
+     * nachschlägt, findet nichts — das ist kein Fehler, sondern zu früh.
+     */
+    public function hasProviderId(): bool
+    {
+        $id = trim((string) $this->provider_id);
+
+        return $id !== '' && ! self::isPlaceholderProviderId($id);
+    }
+
+    /** Ob eine Kennung der Platzhalter ist und keine des Anbieters. */
+    public static function isPlaceholderProviderId(?string $providerId): bool
+    {
+        return is_string($providerId) && str_starts_with($providerId, self::PLACEHOLDER_PROVIDER_PREFIX);
     }
 
     /** The amount as a decimal string, for display and for the provider's API. */

@@ -156,7 +156,7 @@ class FollowUp
             // in der Datenbank steht.
             $payment = Payment::create($details->onto([
                 'provider' => $this->gateway->provider(),
-                'provider_id' => 'pending-'.Str::uuid(),
+                'provider_id' => Payment::PLACEHOLDER_PROVIDER_PREFIX.Str::uuid(),
                 // Von der ersten Bestellung geerbt. Ein Nachfassangebot wird
                 // auch aus einem Hintergrundlauf angenommen, wo keine Marke
                 // gesetzt ist — und es gehört derselben Marke wie die

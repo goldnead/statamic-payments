@@ -350,6 +350,41 @@ class FollowUpTest extends TestCase
     }
 
     #[Test]
+    public function an_empty_card_column_counts_as_not_set(): void
+    {
+        $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com'])->payment;
+
+        // Ein `''` aus einer aelteren Fassung oder einem Import sieht belegt
+        // aus und sagt nichts. Zaehlte es als gesetzt, waere die Spalte fuer
+        // immer gesperrt und die Kaufseite koennte nie etwas anzeigen.
+        $payment->forceFill(['card_last4' => '', 'card_label' => ''])->save();
+
+        $this->gateway->markPaid($payment->provider_id, 'kaeufer@example.com', '9996', 'Visa');
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $payment->refresh();
+        $this->assertSame('9996', $payment->card_last4);
+        $this->assertSame('Visa', $payment->card_label);
+    }
+
+    #[Test]
+    public function a_payment_the_provider_does_not_know_yet_says_so(): void
+    {
+        $original = $this->paidPayment();
+        $this->gateway->mandates[] = 'cst_maria';
+
+        // Der Platzhalter hat einen Namen, damit Nachbarpakete die Frage
+        // stellen koennen, ohne das Praefix zu buchstabieren.
+        $frisch = new Payment(['provider_id' => Payment::PLACEHOLDER_PROVIDER_PREFIX.'abc']);
+        $this->assertFalse($frisch->hasProviderId());
+        $this->assertTrue(Payment::isPlaceholderProviderId($frisch->provider_id));
+
+        $follow = app(FollowUp::class)->accept($original, 'begleit-cd');
+        $this->assertNotNull($follow);
+        $this->assertTrue($follow->hasProviderId(), 'Nach der Abbuchung steht die Kennung des Anbieters da.');
+    }
+
+    #[Test]
     public function each_payment_keeps_the_card_its_own_answer_documented(): void
     {
         $original = $this->paidPayment();

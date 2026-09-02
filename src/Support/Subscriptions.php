@@ -267,7 +267,7 @@ class Subscriptions
             'brand_id' => $payment->brand_id,
             'provider' => $this->gateway->provider(),
             // Unique per payment, so a redelivery cannot make a second.
-            'provider_id' => 'pending-'.$payment->getKey(),
+            'provider_id' => Payment::PLACEHOLDER_PROVIDER_PREFIX.$payment->getKey(),
             'customer_reference' => $payment->customer_reference,
             'product' => $product,
             'amount_cent' => (int) ($catalogue['amount_cent'] ?? $payment->amount_cent),
@@ -449,7 +449,7 @@ class Subscriptions
      */
     public function refresh(Subscription $subscription): ?Subscription
     {
-        if (! $this->available() || str_starts_with($subscription->provider_id, 'pending-')) {
+        if (! $this->available() || Payment::isPlaceholderProviderId($subscription->provider_id)) {
             return null;
         }
 

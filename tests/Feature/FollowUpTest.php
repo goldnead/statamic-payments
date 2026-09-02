@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Tests\Feature;
 
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\PaymentItem;
+use Goldnead\StatamicPayments\Support\Catalogue;
 use Goldnead\StatamicPayments\Support\Checkout;
 use Goldnead\StatamicPayments\Support\FollowUp;
 use Goldnead\StatamicPayments\Support\Fulfilment;
@@ -329,5 +330,91 @@ class FollowUpTest extends TestCase
         $payment->refresh();
         $this->assertNull($payment->card_last4);
         $this->assertNull($payment->card_label);
+    }
+
+    #[Test]
+    public function a_provider_that_names_the_brand_without_the_digits_still_leaves_the_brand(): void
+    {
+        $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com'])->payment;
+
+        // Wallet-Zahlungen: die Marke steht da, die vier Ziffern nicht. Vorher
+        // hing die Marke an den Ziffern und ging mit ihnen verloren — die Seite
+        // konnte dann nicht einmal „deine Mastercard" sagen.
+        $this->gateway->markPaid($payment->provider_id, 'kaeufer@example.com', null, 'Mastercard');
+
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $payment->refresh();
+        $this->assertNull($payment->card_last4);
+        $this->assertSame('Mastercard', $payment->card_label);
+    }
+
+    #[Test]
+    public function each_payment_keeps_the_card_its_own_answer_documented(): void
+    {
+        $original = $this->paidPayment();
+        $original->forceFill(['card_last4' => '9996', 'card_label' => 'Visa'])->save();
+        $this->gateway->mandates[] = 'cst_maria';
+
+        $follow = app(FollowUp::class)->accept($original, 'begleit-cd');
+        $this->assertNotNull($follow);
+
+        // Was der Anbieter zur Folgeabbuchung sagt: eine andere Kartennummer —
+        // er beschreibt die Karte des Mandats, nicht die der Erstzahlung — und
+        // keine Marke. Genau so kam es im Testkauf vom 02.09.2026 aus Mollie
+        // zurueck (9996/Visa an der Erstzahlung, 6787 ohne Marke an der
+        // Folgeabbuchung).
+        $this->gateway->markPaid($follow->provider_id, 'kaeufer@example.com', '6787', null);
+        app(Fulfilment::class)->handle($follow->provider_id);
+
+        // Jede Zahlung traegt, was fuer sie belegt ist. Nichts wird geerbt, und
+        // die fehlende Marke wird nicht von der Nachbarzahlung geliehen —
+        // sonst stuende auf einer Kaufseite eine Karte, die aus zwei Antworten
+        // zusammengesetzt ist.
+        $follow->refresh();
+        $this->assertSame('6787', $follow->card_last4);
+        $this->assertNull($follow->card_label);
+
+        $original->refresh();
+        $this->assertSame('9996', $original->card_last4);
+        $this->assertSame('Visa', $original->card_label);
+    }
+
+    #[Test]
+    public function the_follow_up_line_carries_the_offer_it_was_sold_through(): void
+    {
+        $original = $this->paidPayment();
+        $this->gateway->mandates[] = 'cst_maria';
+
+        // Der Aufrufer sagt, ueber welches Angebot verkauft wurde — dieselbe
+        // Form wie an der Kasse. Ohne das war `payment_items.offer` genau bei
+        // der Zeile leer, fuer die die Spalte gebaut wurde, und der
+        // Upsell-Bericht ordnete den Umsatz keinem Angebot zu.
+        $follow = app(FollowUp::class)->accept($original, 'begleit-cd', details: [
+            'offer_handles' => ['begleit-cd' => 'cd-angebot'],
+        ]);
+
+        $this->assertNotNull($follow);
+        $this->assertSame('cd-angebot', $follow->items()->first()->getAttribute('offer'));
+    }
+
+    #[Test]
+    public function an_older_caller_that_names_no_offer_still_gets_the_one_from_the_catalogue(): void
+    {
+        $original = $this->paidPayment();
+        $this->gateway->mandates[] = 'cst_maria';
+
+        // Eine aeltere Fassung des Aufrufers uebergibt nichts. Dann zaehlt, was
+        // der Katalog an das Produkt geheftet hat — `statamic-offers` liefert
+        // `offer` mit. Nur wenn auch dort nichts steht, bleibt die Spalte leer.
+        Catalogue::forgetResolvers();
+        Catalogue::extend(static fn (string $handle): ?array => $handle === 'kurs-angebot:begleit-cd'
+            ? ['name' => 'Begleit-CD', 'amount_cent' => 1200, 'offer' => 'kurs-angebot']
+            : null);
+
+        $follow = app(FollowUp::class)->accept($original, 'kurs-angebot:begleit-cd');
+
+        $this->assertNotNull($follow);
+        $this->assertSame('kurs-angebot', $follow->items()->first()->getAttribute('offer'));
     }
 }

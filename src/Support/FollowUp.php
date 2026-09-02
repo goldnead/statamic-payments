@@ -193,6 +193,18 @@ class FollowUp
             PaymentItem::create([
                 'payment_id' => $payment->id,
                 'product' => $product['handle'],
+                // Über welches Angebot, in derselben Reihenfolge wie an der
+                // Kasse: was der Aufrufer sagt, sonst was der Katalog an das
+                // Produkt geheftet hat, sonst null. Nie geraten.
+                //
+                // Fehlte das hier, war die Spalte genau bei der Zeile leer, für
+                // die sie gebaut wurde: der Umsatz eines Nachfassangebots. Der
+                // Bericht in `statamic-insights` ordnet ihn dann keinem Angebot
+                // zu, und das Angebot, das am meisten einbringt, sieht aus, als
+                // hätte es nichts eingebracht. (Feldfund Testkauf 02.09.2026:
+                // Zahlung über die Kasse mit `offer`, Upsell darüber ohne.)
+                'offer' => $details->offerFor((string) $product['handle'])
+                    ?? (is_string($product['offer'] ?? null) && $product['offer'] !== '' ? $product['offer'] : null),
                 'name' => $product['name'],
                 'amount_cent' => $product['amount_cent'],
                 'quantity' => 1,

@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.17.1 — 2026-09-02
+
+Drei Befunde aus einem echten Kauftest auf staging (Mollie-Testmodus, Zahlungen 29/30/31).
+
+### `payment_items.offer` beim Nachfassangebot
+
+`FollowUp::accept()` schrieb die Spalte nicht — genau bei der Zeile, für die sie gebaut wurde. Der
+Upsell-Bericht in `statamic-insights` ordnete den Umsatz damit keinem Angebot zu. Jetzt in derselben
+Reihenfolge wie an der Kasse: was der Aufrufer über `PaymentDetails` (`offer_handles`) sagt, sonst
+was der Katalog an das Produkt geheftet hat (`statamic-offers` liefert `offer` mit), sonst `null`.
+Aufrufer, die nichts übergeben, laufen unverändert weiter.
+
+### Kartenangabe: jedes Feld für sich, und nur was belegt ist
+
+`card_last4` und `card_label` hingen aneinander: nannte der Anbieter die Kartenmarke ohne Nummer,
+ging die Marke verloren; nannte er die Nummer ohne Marke, wurde eine bereits eingetragene Marke mit
+`null` überschrieben. Auf der Seite eines Nachfassangebots stand dann entweder nichts oder etwas,
+das aus zwei Antworten zusammengesetzt war. Jetzt wird jedes Feld einzeln geschrieben, nur aus einer
+Antwort, die es belegt, und nur solange es leer ist — eingefroren bleibt eingefroren.
+
+Zum Feldfund selbst: Mollie nennt im Testmodus für eine Folgeabbuchung eine andere Kartennummer als
+für die Erstzahlung (6787 statt 9996, beide als „Mastercard", obwohl mit einer VISA-Testkarte
+bezahlt wurde). Das Addon gibt wieder, was der Anbieter für **diese** Zahlung sagt; die Abweichung
+kommt aus Mollies Testdaten, nicht von hier.
+
+### Kommunikationsprotokoll
+
+Die zwei Mails an den Händler — Widerruf gemeldet (`withdrawal_notice`), Kündigung gemeldet
+(`cancellation_notice`) — wurden verschickt, aber nicht eingetragen. Jetzt stehen sie im Protokoll,
+mit Empfänger und Vorgangskennung.
+
+Deutlicher gesagt, im README und im Leerzustand des Panels: **das Protokoll ist ein Protokoll, kein
+Mithörer.** Bei einem gewöhnlichen Kauf verschickt dieses Paket keine einzige Mail — Kaufbestätigung,
+Zugangsdaten und Willkommensgruß kommen von der Seite, und die muss sie mit `PaymentLog::mail(…)`
+selbst eintragen. Ein leeres Panel nach einem Kauf ist deshalb kein Defekt, sondern ein fehlender
+Aufruf. `statamic-invoices` trägt seine Rechnungs-Mail nur ein, wenn eine hinausging; mit
+`INVOICES_DELIVER=false` steht dort korrekt nichts.
+
 ## 1.17.0 — 2026-09-02
 
 ### Zahlungs-Detailseite mit Kommunikationsprotokoll

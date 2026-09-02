@@ -17,4 +17,17 @@ return [
     'log_suppressed' => 'Keine Erinnerung verschickt: :email steht auf der Sperrliste.',
 
     'resume_unavailable' => 'Dieser Kauf lässt sich nicht mehr fortsetzen. Er wurde bereits abgeschlossen, oder die Auswahl ist nicht mehr verfügbar.',
+
+    // Die Bestellseite hinter dem Link (§ 312j Abs. 3 BGB).
+    'resume_title' => 'Kauf fortsetzen',
+    'resume_intro' => 'Das ist Ihre Auswahl. Mit der Schaltfläche unten bestellen Sie verbindlich und werden zur Zahlung weitergeleitet.',
+    'resume_discount' => 'Rabatt',
+    'resume_total' => 'Gesamtbetrag',
+    'resume_price_hint' => 'Alle Preise inklusive Umsatzsteuer.',
+    'resume_withdrawal_heading' => 'Widerrufsrecht',
+    'resume_withdrawal_text' => 'Als Verbraucher haben Sie ein vierzehntägiges Widerrufsrecht.',
+    'resume_policy_link' => 'Widerrufsbelehrung lesen',
+    'resume_button' => 'Zahlungspflichtig bestellen',
+    'resume_button_hint' => 'Sie werden anschließend zur Zahlung weitergeleitet. Abgebucht wird erst dort.',
+    'resume_foot' => 'Diese Seite gehört zu einer Erinnerung an :email.',
 ];

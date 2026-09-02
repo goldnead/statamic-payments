@@ -393,13 +393,18 @@ class EntitlementsBridge
      * `meta.access` = `['starts_at' => 'Y-m-d'|null, 'days' => int|null]`.
      *
      * Der Beginn ist der Tagesanfang des genannten Datums in der Zeitzone der
-     * Anwendung; das Ende liegt `days` Tage nach dem Beginn — oder nach jetzt,
-     * wenn kein Beginn genannt ist. Ein unlesbares Datum wird ignoriert und
-     * gemeldet, statt einen Zugang zu verhindern: der Kunde hat bezahlt.
+     * Anwendung; das Ende liegt `days` Tage nach dem Beginn — oder nach
+     * `$from`, wenn kein Beginn genannt ist: beim Vergeben ist das jetzt, für
+     * eine Anzeige später der Zahlungszeitpunkt. Ein unlesbares Datum wird
+     * ignoriert und gemeldet, statt einen Zugang zu verhindern: der Kunde hat
+     * bezahlt.
+     *
+     * Öffentlich, weil die Detailseite dieselbe Rechnung zeigt und zwei
+     * Rechnungen zwei Antworten wären.
      *
      * @return array{0: Carbon|null, 1: Carbon|null}
      */
-    protected static function accessWindow(Payment $payment): array
+    public static function accessWindow(Payment $payment, ?Carbon $from = null): array
     {
         $access = data_get($payment->meta, 'access');
 
@@ -424,7 +429,7 @@ class EntitlementsBridge
         $days = is_numeric($days) ? (int) $days : null;
 
         $expiresAt = $days !== null && $days > 0
-            ? ($startsAt?->copy() ?? Carbon::now())->addDays($days)
+            ? ($startsAt?->copy() ?? $from?->copy() ?? Carbon::now())->addDays($days)
             : null;
 
         return [$startsAt, $expiresAt];

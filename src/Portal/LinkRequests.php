@@ -105,22 +105,33 @@ class LinkRequests
         $sent = 0;
 
         foreach ($links as $link) {
-            try {
-                $mailable = new PortalLinkMail($link['url']);
+            $mailable = new PortalLinkMail($link['url']);
 
+            try {
                 Mail::to($email)->send($mailable);
                 $sent++;
+            } catch (Throwable $e) {
+                Log::error('statamic-payments: the portal link could not be sent.', [
+                    'brand_id' => $link['brand'],
+                    'exception' => $e->getMessage(),
+                ]);
 
-                // Ins Protokoll der jüngsten Bestellung dieser Adresse: der
-                // Link ist eine Mail an den Kunden, und „hat der Kunde den
-                // Zugangslink bekommen" ist eine Frage, die an der Bestellung
-                // gestellt wird. Ohne Bestellung (nur ein Abo im Trial) gibt es
-                // keine Zeile, an der sie hängen könnte.
+                continue;
+            }
+
+            // Ins Protokoll der jüngsten Bestellung dieser Adresse: der Link
+            // ist eine Mail an den Kunden, und „hat der Kunde den Zugangslink
+            // bekommen" ist eine Frage, die an der Bestellung gestellt wird.
+            // Ohne Bestellung (nur ein Abo im Trial) gibt es keine Zeile, an
+            // der sie hängen könnte. Ein eigener try: die Mail ist raus, und
+            // ein Fehler beim Nachschlagen darf nicht als „nicht gesendet"
+            // im Log stehen.
+            try {
                 if ($payment = $this->orders->latestFor($email, $link['brand'])) {
                     PaymentLog::mail($payment, 'portal_link', $email, $mailable->envelope()->subject);
                 }
             } catch (Throwable $e) {
-                Log::error('statamic-payments: the portal link could not be sent.', [
+                Log::warning('statamic-payments: the portal link was sent but could not be logged on the order.', [
                     'brand_id' => $link['brand'],
                     'exception' => $e->getMessage(),
                 ]);

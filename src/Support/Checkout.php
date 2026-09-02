@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Contracts\FollowUpGateway;
 use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\PaymentItem;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -191,6 +192,12 @@ class Checkout
     }
 
     /**
+     * How long a checkout started from a reminder is reused before a fresh one
+     * is created. Mollie's hosted page for cards expires in about that time.
+     */
+    public const RESUME_REUSE_MINUTES = 60;
+
+    /**
      * Start an abandoned checkout again, as a new payment.
      *
      * The provider's checkout URL of the original expires — cards within
@@ -199,18 +206,30 @@ class Checkout
      * where it came from (`meta.resumed_from`) so that the original is counted
      * as recovered when this one is paid.
      *
-     * The consent under § 356 (5) BGB is carried over: the same person declared
-     * it for the same goods on the same order, and the restart changes the
-     * payment, not the declaration. (Legal decision 02.09.2026, for Adrian to
-     * review. Not legal advice.)
+     * **The consent under § 356 (5) BGB is not carried over.** A restart is a
+     * new order: the button rule of § 312j (3) wants a button pressed for
+     * *this* payment, and a consent is a declaration made on a screen, not a
+     * column to copy. The page behind the reminder link shows the lines, the
+     * price, the instruction and the box; what the person ticked there arrives
+     * here as `$consentText`, stamped with now. Null means the box was not
+     * ticked and the right of withdrawal stands.
+     *
+     * Idempotent within {@see self::RESUME_REUSE_MINUTES}: a second press on
+     * the button — a reload, a second tab — gets the checkout that already
+     * exists rather than a third open payment. The brand is the original's:
+     * this runs on a public route with no brand in context.
      *
      * Null when there is nothing to resume: a paid or fulfilled payment, one
      * without lines, or one whose lines no longer resolve in the catalogue.
      */
-    public function resume(Payment $original, ?string $returnUrl = null): ?CheckoutResult
+    public function resume(Payment $original, ?string $consentText = null, ?string $returnUrl = null): ?CheckoutResult
     {
         if ($original->isPaid() || $original->isFulfilled() || $original->items->isEmpty()) {
             return null;
+        }
+
+        if ($existing = $this->openResumeOf($original)) {
+            return $existing;
         }
 
         $products = [];
@@ -249,22 +268,65 @@ class Checkout
             'utm_content' => $original->utm_content,
             'referrer' => $original->referrer,
             'landing_page' => $original->landing_page,
-            'consent_at' => $original->consent_at,
-            'consent_text' => $original->consent_text,
             'offer_handles' => $offers,
         ], fn ($v) => $v !== null && $v !== []);
+
+        // Frisch, nie kopiert: der Haken wurde eben auf der Seite gesetzt.
+        if (is_string($consentText) && trim($consentText) !== '') {
+            $details['consent_at'] = Carbon::now();
+            $details['consent_text'] = trim($consentText);
+        }
 
         $discount = $original->discount_code !== null && (int) $original->discount_cent > 0
             ? new Discount($original->discount_code, (int) $original->discount_cent)
             : null;
 
-        return $this->start(
+        $result = $this->start(
             $products,
             $buyer,
             $returnUrl,
             $discount,
             PaymentDetails::from($details)->plus(['resumed_from' => (int) $original->getKey()]),
         );
+
+        if ($result === null) {
+            return null;
+        }
+
+        // Die Marke des Originals, und die Adresse des Anbieters, damit ein
+        // zweiter Klick dieselbe Kasse wiederfindet — der Anbieter gibt sie
+        // nur beim Anlegen heraus.
+        $meta = (array) ($result->payment->meta ?? []);
+        $meta['resume_checkout_url'] = $result->checkoutUrl;
+
+        $result->payment->forceFill([
+            'brand_id' => (int) $original->brand_id,
+            'meta' => $meta,
+        ])->save();
+
+        return new CheckoutResult($result->payment->fresh() ?? $result->payment, $result->checkoutUrl);
+    }
+
+    /**
+     * A checkout already started from this reminder and still open.
+     */
+    protected function openResumeOf(Payment $original): ?CheckoutResult
+    {
+        $existing = Payment::query()
+            ->where('meta->resumed_from', (int) $original->getKey())
+            ->whereIn('status', [Payment::STATUS_INITIATED, Payment::STATUS_OPEN])
+            ->whereNull('fulfilled_at')
+            ->where('created_at', '>=', Carbon::now()->subMinutes(self::RESUME_REUSE_MINUTES))
+            ->orderByDesc('id')
+            ->first();
+
+        $url = is_array($existing?->meta) ? ($existing->meta['resume_checkout_url'] ?? null) : null;
+
+        if ($existing === null || ! is_string($url) || $url === '') {
+            return null;
+        }
+
+        return new CheckoutResult($existing, $url);
     }
 
     /**

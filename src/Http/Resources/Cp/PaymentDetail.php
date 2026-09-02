@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Http\Resources\Cp;
 
 use Goldnead\StatamicPayments\Facades\PaymentLog;
 use Goldnead\StatamicPayments\Http\Resources\Cp\Concerns\DescribesProducts;
+use Goldnead\StatamicPayments\Integrations\EntitlementsBridge;
 use Goldnead\StatamicPayments\Models\Cancellation;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\PaymentCommunication;
@@ -88,7 +89,7 @@ class PaymentDetail extends JsonResource
                 'withdrawal_version' => self::string(data_get($meta, 'withdrawal.version') ?? data_get($meta, 'withdrawal')),
             ],
 
-            'access' => self::access($meta['access'] ?? null),
+            'access' => self::access($payment),
 
             'origin' => [
                 'utm_source' => $payment->utm_source,
@@ -284,32 +285,32 @@ class PaymentDetail extends JsonResource
     }
 
     /**
+     * Dieselbe Rechnung wie beim Vergeben ({@see EntitlementsBridge::accessWindow()}),
+     * nur ab dem Zahlungszeitpunkt statt ab jetzt: ein Fenster „30 Tage" ist
+     * ab dem Kauf gelaufen, nicht ab dem Blick auf die Seite.
+     *
      * @return array{starts_at: string|null, days: int|null, expires_at: string|null}|null
      */
-    protected static function access(mixed $access): ?array
+    protected static function access(Payment $payment): ?array
     {
+        $access = data_get($payment->meta, 'access');
+
         if (! is_array($access)) {
             return null;
         }
 
-        $startsAt = self::string($access['starts_at'] ?? null);
         $days = isset($access['days']) && is_numeric($access['days']) ? (int) $access['days'] : null;
+        [$startsAt, $expiresAt] = EntitlementsBridge::accessWindow($payment, $payment->paid_at ?? $payment->created_at);
 
         if ($startsAt === null && $days === null) {
             return null;
         }
 
-        $expiresAt = null;
-
-        if ($days !== null && $days > 0) {
-            try {
-                $expiresAt = ($startsAt !== null ? Carbon::parse($startsAt)->startOfDay() : Carbon::now())->addDays($days)->toIso8601String();
-            } catch (Throwable) {
-                $expiresAt = null;
-            }
-        }
-
-        return ['starts_at' => $startsAt, 'days' => $days, 'expires_at' => $expiresAt];
+        return [
+            'starts_at' => $startsAt?->toDateString(),
+            'days' => $days,
+            'expires_at' => $expiresAt?->toIso8601String(),
+        ];
     }
 
     private static function string(mixed $value): ?string

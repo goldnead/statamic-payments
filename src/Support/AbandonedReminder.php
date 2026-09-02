@@ -164,11 +164,21 @@ class AbandonedReminder
         }
 
         return [
-            'subject' => self::apply($subject, $variables),
+            // Der Betreff ist Text, kein HTML: dort wird nichts escaped.
+            'subject' => self::apply($subject, $variables, escape: false),
             'html' => $html,
             'variables' => $variables,
         ];
     }
+
+    /**
+     * Was beim Einsetzen in HTML roh bleibt: die Liste ist schon aus
+     * escapeten Werten gebaut, die Adresse wird als Attributwert gebraucht und
+     * ist eine URL dieses Pakets, keine Eingabe.
+     *
+     * @var list<string>
+     */
+    public const RAW_VARIABLES = ['order.lines', 'resume_url'];
 
     /**
      * @return array{subject: string, body: string}|null
@@ -211,9 +221,13 @@ class AbandonedReminder
      * Eigene Kopie von zwölf Zeilen statt Abhängigkeit: Unbekanntes bleibt
      * stehen, damit man es in der Vorschau sieht.
      *
+     * Skalare werden beim Einsetzen HTML-escaped: `buyer.name` stammt aus
+     * einem Formular, und ein Name mit `<script>` darin gehört als Text in
+     * die Mail, nicht als Markup. Ausnahmen in {@see self::RAW_VARIABLES}.
+     *
      * @param  array<string, mixed>  $data
      */
-    public static function apply(string $text, array $data): string
+    public static function apply(string $text, array $data, bool $escape = true): string
     {
         if ($text === '') {
             return '';
@@ -235,7 +249,15 @@ class AbandonedReminder
 
         return (string) preg_replace_callback(
             '/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/',
-            fn (array $m) => array_key_exists($m[1], $flat) ? $flat[$m[1]] : $m[0],
+            function (array $m) use ($flat, $escape): string {
+                if (! array_key_exists($m[1], $flat)) {
+                    return $m[0];
+                }
+
+                return $escape && ! in_array($m[1], self::RAW_VARIABLES, true)
+                    ? e($flat[$m[1]])
+                    : $flat[$m[1]];
+            },
             $text,
         );
     }

@@ -170,14 +170,46 @@ class AbandonedMailTest extends TestCase
         $this->assertStringEndsWith('/kasse/weiter?zahlung='.$payment->id, app(AbandonedReminder::class)->resumeUrl($payment));
     }
 
-    #[Test]
-    public function the_signed_link_starts_the_checkout_again_with_the_same_lines(): void
+    private function resumeUrl(Payment $payment): string
     {
-        $payment = $this->offen();
+        return URL::temporarySignedRoute('statamic-payments.resume', Carbon::now()->addDay(), ['payPayment' => $payment->id]);
+    }
 
-        $url = URL::temporarySignedRoute('statamic-payments.resume', Carbon::now()->addDay(), ['payPayment' => $payment->id]);
+    private function orderUrl(Payment $payment): string
+    {
+        return URL::temporarySignedRoute('statamic-payments.resume.start', Carbon::now()->addHour(), ['payPayment' => $payment->id]);
+    }
 
-        $response = $this->get($url);
+    #[Test]
+    public function the_signed_link_shows_the_order_page_and_creates_nothing(): void
+    {
+        $payment = $this->offen(['discount_code' => 'FRUEHLING', 'discount_cent' => 400, 'amount_cent' => 2000]);
+
+        $response = $this->get($this->resumeUrl($payment));
+
+        $response->assertOk();
+        $response->assertSee('Notenpaket');
+        $response->assertSee('Chorheft');
+        $response->assertSee('20.00 EUR');
+        $response->assertSee('4.00 EUR', false);
+        $response->assertSee(__('statamic-payments::abandoned.resume_button'));
+        $response->assertSee(__('statamic-payments::messages.order_consent'));
+        // Die Bestellung ist ein POST auf einen signierten Link, nicht der GET.
+        $response->assertSee('method="POST"', false);
+        $response->assertSee('/!/statamic-payments/weiter/'.$payment->id.'?', false);
+        $response->assertSee('signature=', false);
+
+        $this->assertSame(1, Payment::count(), 'der GET legt nichts an');
+    }
+
+    #[Test]
+    public function the_order_button_starts_the_checkout_with_a_fresh_consent(): void
+    {
+        Carbon::setTestNow('2026-09-02 10:00:00');
+
+        $payment = $this->offen(['brand_id' => 7, 'discount_code' => 'FRUEHLING', 'discount_cent' => 400, 'amount_cent' => 2000]);
+
+        $response = $this->post($this->orderUrl($payment), ['consent' => '1']);
 
         $response->assertRedirect();
         $this->assertStringStartsWith('https://checkout.example/', $response->headers->get('Location'));
@@ -186,30 +218,100 @@ class AbandonedMailTest extends TestCase
 
         $this->assertNotSame($payment->id, $neu->id);
         $this->assertSame($payment->id, $neu->meta['resumed_from']);
-        $this->assertSame(2400, $neu->amount_cent);
+        $this->assertSame(2000, $neu->amount_cent, 'der Rabatt wandert mit');
+        $this->assertSame('FRUEHLING', $neu->discount_code);
         $this->assertSame('wer@example.com', $neu->email);
+        $this->assertSame(7, (int) $neu->brand_id, 'die Marke des Originals');
         $this->assertSame('newsletter', $neu->utm_source, 'die Herkunft wandert mit');
-        $this->assertSame('Ich stimme zu.', $neu->consent_text, 'die Zustimmung wandert mit');
+        // Die Zustimmung ist neu — jetzt, mit dem gezeigten Wortlaut — und
+        // nicht die drei Stunden alte des Originals.
+        $this->assertSame('2026-09-02 10:00:00', $neu->consent_at->format('Y-m-d H:i:s'));
+        $this->assertSame(__('statamic-payments::messages.order_consent'), $neu->consent_text);
+        $this->assertNotSame($payment->consent_text, $neu->consent_text);
         // Nach Id gelesen: die Relation sortiert nicht, SQLite liefert hier
         // rückwärts, und die Reihenfolge ist genau das, was der Test prüft.
         $items = $neu->items()->orderBy('id')->get();
         $this->assertSame(['noten-paket', 'chorheft'], $items->pluck('product')->all());
         $this->assertSame(['primary', 'bump'], $items->pluck('kind')->all());
         $this->assertSame('fruehling', $items->first()->offer);
+
+        Carbon::setTestNow();
     }
 
     #[Test]
-    public function an_unsigned_or_paid_link_does_not_start_anything(): void
+    public function without_the_box_ticked_no_consent_is_written(): void
+    {
+        $payment = $this->offen();
+
+        $this->post($this->orderUrl($payment))->assertRedirect();
+
+        $neu = Payment::query()->orderByDesc('id')->first();
+
+        $this->assertNotSame($payment->id, $neu->id);
+        $this->assertNull($neu->consent_at);
+        $this->assertNull($neu->consent_text);
+    }
+
+    #[Test]
+    public function the_wording_comes_from_the_payment_where_it_carries_one(): void
+    {
+        $payment = $this->offen(['meta' => ['withdrawal' => ['text' => 'Eigener Satz der Kasse.', 'version' => '2026-06']]]);
+
+        $this->get($this->resumeUrl($payment))->assertSee('Eigener Satz der Kasse.');
+
+        $this->post($this->orderUrl($payment), ['consent' => '1'])->assertRedirect();
+
+        $this->assertSame('Eigener Satz der Kasse.', Payment::query()->orderByDesc('id')->first()->consent_text);
+    }
+
+    #[Test]
+    public function a_second_press_reuses_the_open_checkout(): void
+    {
+        $payment = $this->offen();
+
+        $first = $this->post($this->orderUrl($payment), ['consent' => '1']);
+        $second = $this->post($this->orderUrl($payment), ['consent' => '1']);
+
+        $this->assertSame(2, Payment::count(), 'ein Original, ein Neustart — kein dritter');
+        $this->assertSame($first->headers->get('Location'), $second->headers->get('Location'));
+
+        // Nach einer Stunde ist die Kasse des Anbieters abgelaufen: dann neu.
+        Payment::query()->where('meta->resumed_from', $payment->id)->update(['created_at' => Carbon::now()->subHours(2)]);
+
+        $this->post($this->orderUrl($payment), ['consent' => '1'])->assertRedirect();
+        $this->assertSame(3, Payment::count());
+    }
+
+    #[Test]
+    public function an_unsigned_link_is_refused_and_a_paid_one_answers_with_a_sentence(): void
     {
         $payment = $this->offen();
 
         $this->get('/!/statamic-payments/weiter/'.$payment->id)->assertForbidden();
+        $this->post('/!/statamic-payments/weiter/'.$payment->id, ['consent' => '1'])->assertForbidden();
 
         $payment->forceFill(['status' => Payment::STATUS_PAID, 'paid_at' => now()])->save();
-        $url = URL::temporarySignedRoute('statamic-payments.resume', Carbon::now()->addDay(), ['payPayment' => $payment->id]);
 
-        $this->get($url)->assertStatus(410);
+        $this->get($this->resumeUrl($payment))->assertStatus(410);
+        $this->post($this->orderUrl($payment), ['consent' => '1'])->assertStatus(410);
         $this->assertSame(1, Payment::count());
+    }
+
+    #[Test]
+    public function a_name_with_markup_stays_text_in_a_template(): void
+    {
+        $payment = $this->offen(['name' => '<b>Eva</b> & Co']);
+        $variables = app(AbandonedReminder::class)->variables($payment);
+
+        $html = AbandonedReminder::apply('<p>Hallo {{ buyer.name }}</p>{{ order.lines }}<a href="{{ resume_url }}">x</a>', $variables);
+
+        $this->assertStringContainsString('Hallo &lt;b&gt;Eva&lt;/b&gt; &amp; Co', $html);
+        $this->assertStringNotContainsString('<b>Eva</b>', $html);
+        $this->assertStringContainsString('<ul><li>', $html, 'die Liste bleibt Markup');
+        $this->assertStringContainsString('href="'.$variables['resume_url'].'"', $html);
+
+        // Der Betreff ist kein HTML.
+        $this->assertSame('Für <b>Eva</b> & Co', AbandonedReminder::apply('Für {{ buyer.name }}', $variables, escape: false));
     }
 
     #[Test]
@@ -231,8 +333,7 @@ class AbandonedMailTest extends TestCase
         $original = $this->offen();
         app(Abandonment::class)->sweep();
 
-        $url = URL::temporarySignedRoute('statamic-payments.resume', Carbon::now()->addDay(), ['payPayment' => $original->id]);
-        $this->get($url)->assertRedirect();
+        $this->post($this->orderUrl($original), ['consent' => '1'])->assertRedirect();
 
         $neu = Payment::query()->orderByDesc('id')->first();
 

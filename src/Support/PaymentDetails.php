@@ -118,6 +118,7 @@ final class PaymentDetails
         'refunds',
         'cycle_of',
         'resumed_from',
+        'resume_checkout_url',
     ];
 
     /**

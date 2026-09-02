@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.17.0 — 2026-09-02
 
 ### Zahlungs-Detailseite mit Kommunikationsprotokoll
 
@@ -27,11 +27,15 @@ Kündigungsbestätigung aus dem Portal (an der jüngsten Zahlung des Abos), Abbr
 nicht, wenn `statamic-suppression` die Adresse führt (dann eine Notiz im Protokoll). `template` nimmt
 einen email-templates-Slug mit den Variablen `buyer.email`, `buyer.name`, `order.lines`,
 `order.total`, `order.currency`, `resume_url`; ohne Vorlage geht eine eingebaute, veröffentlichbare
-Blade-Mail (de/en). `resume_url` ist ein signierter Link (`abandoned.mail.resume_days`, Vorgabe 14),
-der über `Checkout::resume()` denselben Warenkorb neu startet — gleiche Positionen, Käufer, Herkunft,
-Rabatt und Zustimmung, `meta.resumed_from` zeigt zurück; oder eine eigene Adresse mit `{payment}`.
-Neue Spalte `payments.recovered_at`: gesetzt, wenn eine erinnerte Zahlung doch bezahlt wird, auch über
-den neu gestarteten Checkout. Register K·8.
+Blade-Mail (de/en). `resume_url` ist ein signierter Link (`abandoned.mail.resume_days`, Vorgabe 14)
+auf eine Bestellseite im Portal-Layout: Positionen, Gesamtpreis, Widerrufshinweis, Haken nach § 356
+Abs. 5 mit dem Wortlaut aus `meta.withdrawal` (sonst `messages.order_consent`) und die Schaltfläche
+„Zahlungspflichtig bestellen" (§ 312j Abs. 3). Der GET legt nichts an; erst der signierte POST startet
+über `Checkout::resume()` denselben Warenkorb als neue Zahlung — gleiche Positionen, Käufer, Herkunft,
+Rabatt und Marke, `meta.resumed_from` zeigt zurück, die Zustimmung ist frisch (jetzt, gezeigter
+Wortlaut, nur mit Haken) und wird nie kopiert. Ein zweiter Klick binnen einer Stunde findet die offene
+Kasse wieder. Oder eine eigene Adresse mit `{payment}`. Neue Spalte `payments.recovered_at`: gesetzt,
+wenn eine erinnerte Zahlung doch bezahlt wird, auch über den neu gestarteten Checkout. Register K·8.
 
 ### Zahlungsarten
 

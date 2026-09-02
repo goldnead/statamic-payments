@@ -640,10 +640,16 @@ plain built-in mail goes out — German and English, no images, publishable unde
 `views/vendor/statamic-payments/abandoned/mail`.
 
 `resume_url` is where the button points. Left `null`, it is a signed link
-(`/!/statamic-payments/weiter/{id}`, valid `resume_days`) that runs `Checkout::resume()`: the same
-lines, buyer, origin, discount and consent, as a **new** payment whose `meta.resumed_from` points
-back — the provider's original checkout URL expires within minutes, so it cannot be reused. A paid
-or emptied payment answers with a one-sentence page instead. Your own URL may carry `{payment}`.
+(`/!/statamic-payments/weiter/{id}`, valid `resume_days`) to an **order page** in the portal layout:
+the lines, the total, the withdrawal note, the § 356 (5) consent box with the wording from
+`meta.withdrawal` (or `messages.order_consent`), and one button reading „Zahlungspflichtig
+bestellen". Opening the link creates nothing — a mail client prefetching it must not order. The
+button is a signed POST that runs `Checkout::resume()`: the same lines, buyer, origin and discount as
+a **new** payment whose `meta.resumed_from` points back (the provider's original checkout URL expires
+within minutes). The consent is **fresh** — `now()` and the wording shown, only if the box was
+ticked; nothing is copied from the abandoned row. A second press within an hour reuses the open
+checkout instead of creating a third payment. A paid or emptied payment answers with a one-sentence
+page instead. Your own URL may carry `{payment}`.
 
 **Recovered revenue.** When a reminded payment is paid after all — itself, or through the restarted
 checkout — `payments.recovered_at` is set on the reminded row. `abandoned_notified_at` is cleared as
@@ -870,6 +876,12 @@ above: payment, brand, channel, kind, recipient, subject, status, reference, `me
 
 Declarations under § 356a and § 312k that were begun and never confirmed are deleted by
 `payments:prune-legal-drafts` after seven days (`--days`, `--dry-run`); confirmed ones never are.
+Like the sweep, it is not scheduled for you:
+
+```php
+// routes/console.php
+Schedule::command('payments:prune-legal-drafts')->daily();
+```
 
 ## Multi-site
 

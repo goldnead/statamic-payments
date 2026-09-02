@@ -213,13 +213,23 @@ Route::prefix(config('statamic-payments.cancellation.prefix', '!/statamic-paymen
     });
 
 /*
- * The link in the abandoned-checkout reminder: start the checkout again with
- * the same lines. Signed and expiring (`abandoned.mail.resume_days`), so the
- * link is the proof that the mail reached the address; `payPayment` for the
- * same reason as every parameter above. A GET that redirects to the provider
- * — nothing is charged by following it, the provider's page still asks.
+ * The link in the abandoned-checkout reminder. Signed and expiring
+ * (`abandoned.mail.resume_days`), so the link is the proof that the mail
+ * reached the address; `payPayment` for the same reason as every parameter
+ * above. The GET only *shows* — lines, price, instruction, consent box and the
+ * order button. It creates nothing.
  */
-Route::get('/!/statamic-payments/weiter/{payPayment}', ResumeController::class)
+Route::get('/!/statamic-payments/weiter/{payPayment}', [ResumeController::class, 'show'])
     ->whereNumber('payPayment')
     ->middleware(['web', ValidateSignature::class, ThrottleRequests::class.':10,1'])
     ->name('statamic-payments.resume');
+
+/*
+ * The order itself. A POST, signed (the page hands out the link, valid for
+ * an hour) and with CSRF from the `web` group: § 312j (3) BGB wants a button
+ * pressed for this order, and a GET a mail client prefetches is not one.
+ */
+Route::post('/!/statamic-payments/weiter/{payPayment}', [ResumeController::class, 'start'])
+    ->whereNumber('payPayment')
+    ->middleware(['web', ValidateSignature::class, ThrottleRequests::class.':10,1'])
+    ->name('statamic-payments.resume.start');

@@ -379,10 +379,15 @@ class Fulfilment
         // späteren Antwort nicht mehr geändert. Der Anbieter beschreibt bei
         // einer Folgeabbuchung die Karte des Mandats, nicht die der
         // Erstzahlung — die beiden dürfen sich nicht gegenseitig überschreiben.
+        // Leer zählt wie nicht gesetzt. Eine Spalte, in der ein `''` steht — aus
+        // einer älteren Fassung, aus einem Import —, wäre sonst für immer
+        // gesperrt: sie sieht belegt aus und sagt nichts.
+        $frei = static fn (?string $wert): bool => $wert === null || trim($wert) === '';
+
         $karte = array_filter([
-            'card_last4' => $payment->card_last4 === null ? $remote->cardLast4 : null,
-            'card_label' => $payment->card_label === null ? $remote->cardLabel : null,
-        ], static fn (?string $wert): bool => $wert !== null && $wert !== '');
+            'card_last4' => $frei($payment->card_last4) ? $remote->cardLast4 : null,
+            'card_label' => $frei($payment->card_label) ? $remote->cardLabel : null,
+        ], static fn (?string $wert): bool => $wert !== null && trim($wert) !== '');
 
         if ($karte !== []) {
             $payment->forceFill($karte)->save();

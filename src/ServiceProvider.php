@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments;
 
 use Goldnead\StatamicPayments\Contracts\PaymentGateway;
+use Goldnead\StatamicPayments\Cp\SuiteNav;
 use Goldnead\StatamicPayments\Gateways\MollieGateway;
 use Goldnead\StatamicPayments\Http\Controllers\Cp\CancellationActionsController;
 use Goldnead\StatamicPayments\Http\Controllers\Cp\CancellationsController;
@@ -19,7 +20,6 @@ use Goldnead\StatamicPayments\Integrations\Insights\RefundRate;
 use Goldnead\StatamicPayments\Integrations\Insights\RevenueGross;
 use Goldnead\StatamicPayments\Integrations\Insights\RevenueNet;
 use Goldnead\StatamicPayments\Integrations\InvoiceBridge;
-use Goldnead\StatamicPayments\Cp\SuiteNav;
 use Goldnead\StatamicPayments\Support\Invoices;
 use Illuminate\Support\Facades\Log;
 use Mollie\Api\MollieApiClient;

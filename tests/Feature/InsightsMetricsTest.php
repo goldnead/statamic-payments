@@ -211,7 +211,7 @@ class InsightsMetricsTest extends TestCase
     }
 
     /** The ten days the fixture lives in, bucketed by day. */
-    protected function query(array $filters = [], string $bucket = MetricQuery::BUCKET_DAY): MetricQuery
+    protected function metricQuery(array $filters = [], string $bucket = MetricQuery::BUCKET_DAY): MetricQuery
     {
         return new MetricQuery(
             Period::between(Carbon::parse('2026-08-11')->startOfDay(), Carbon::parse('2026-08-20')->endOfDay()),
@@ -311,7 +311,7 @@ class InsightsMetricsTest extends TestCase
     public function the_six_figures_match_what_the_report_would_have_said(): void
     {
         $this->fixture();
-        $frage = $this->query();
+        $frage = $this->metricQuery();
 
         $this->assertSame(6700, (new RevenueGross)->value($frage), 'gross: 1900 + 2900 + 1900');
         $this->assertSame(500, (new Refunded)->value($frage), 'refunded: half of the first order');
@@ -358,7 +358,7 @@ class InsightsMetricsTest extends TestCase
 
             $this->assertSame(
                 $erwarteteMeta,
-                array_diff_key($metrik->meta($this->query()), ['line_item_sum_cent' => null]),
+                array_diff_key($metrik->meta($this->metricQuery()), ['line_item_sum_cent' => null]),
             );
         }
     }
@@ -369,7 +369,7 @@ class InsightsMetricsTest extends TestCase
     {
         $this->assertSame(
             'CHF',
-            (new RevenueGross)->meta($this->query(['currency' => 'CHF']))['currency'],
+            (new RevenueGross)->meta($this->metricQuery(['currency' => 'CHF']))['currency'],
         );
     }
 
@@ -424,11 +424,11 @@ class InsightsMetricsTest extends TestCase
     {
         $this->fixture();
 
-        $this->assertSame(6700, (new RevenueGross)->value($this->query()));
-        $this->assertSame(3, (new Orders)->value($this->query()));
+        $this->assertSame(6700, (new RevenueGross)->value($this->metricQuery()));
+        $this->assertSame(3, (new Orders)->value($this->metricQuery()));
 
-        $this->assertSame(5000, (new RevenueGross)->value($this->query(['currency' => 'CHF'])));
-        $this->assertSame(1, (new Orders)->value($this->query(['currency' => 'CHF'])));
+        $this->assertSame(5000, (new RevenueGross)->value($this->metricQuery(['currency' => 'CHF'])));
+        $this->assertSame(1, (new Orders)->value($this->metricQuery(['currency' => 'CHF'])));
     }
 
     // -- The splits ---------------------------------------------------------
@@ -445,7 +445,7 @@ class InsightsMetricsTest extends TestCase
     {
         $this->fixture();
 
-        $zeilen = (new RevenueGross)->breakdown($this->query(), 'campaign');
+        $zeilen = (new RevenueGross)->breakdown($this->metricQuery(), 'campaign');
 
         $this->assertCount(2, $zeilen);
 
@@ -469,12 +469,12 @@ class InsightsMetricsTest extends TestCase
 
         $this->assertSame(
             ['newsletter' => 3800, '' => 2900],
-            $this->keyed((new RevenueGross)->breakdown($this->query(), 'source')),
+            $this->keyed((new RevenueGross)->breakdown($this->metricQuery(), 'source')),
         );
 
         $this->assertSame(
             ['DE' => 3800, 'AT' => 2900],
-            $this->keyed((new RevenueGross)->breakdown($this->query(), 'country')),
+            $this->keyed((new RevenueGross)->breakdown($this->metricQuery(), 'country')),
         );
     }
 
@@ -492,7 +492,7 @@ class InsightsMetricsTest extends TestCase
     {
         $this->fixture();
 
-        $zeilen = (new RevenueGross)->breakdown($this->query(), 'product');
+        $zeilen = (new RevenueGross)->breakdown($this->metricQuery(), 'product');
 
         $this->assertSame(
             ['noten-paket' => 3800, 'kurs' => 2400, 'bump' => 500],
@@ -522,7 +522,7 @@ class InsightsMetricsTest extends TestCase
     {
         $this->fixture();
 
-        $zeilen = $this->keyed((new RevenueGross)->breakdown($this->query(), 'product'));
+        $zeilen = $this->keyed((new RevenueGross)->breakdown($this->metricQuery(), 'product'));
 
         $this->assertSame(3800, $zeilen['noten-paket']);
     }
@@ -541,12 +541,12 @@ class InsightsMetricsTest extends TestCase
 
         $this->assertSame(
             ['noten-paket' => 2, 'kurs' => 1, 'bump' => 1],
-            $this->keyed((new Orders)->breakdown($this->query(), 'product')),
+            $this->keyed((new Orders)->breakdown($this->metricQuery(), 'product')),
         );
 
         $this->assertSame(
             ['sommer-2026' => 2, '' => 1],
-            $this->keyed((new Orders)->breakdown($this->query(), 'campaign')),
+            $this->keyed((new Orders)->breakdown($this->metricQuery(), 'campaign')),
         );
     }
 
@@ -556,8 +556,8 @@ class InsightsMetricsTest extends TestCase
     {
         $this->fixture();
 
-        $this->assertSame([], (new RevenueGross)->breakdown($this->query(), 'weather'));
-        $this->assertSame([], (new Orders)->breakdown($this->query(), 'country'));
+        $this->assertSame([], (new RevenueGross)->breakdown($this->metricQuery(), 'weather'));
+        $this->assertSame([], (new Orders)->breakdown($this->metricQuery(), 'country'));
 
         $this->assertSame(['campaign', 'source', 'product', 'country'], array_keys((new RevenueGross)->breakdowns()));
         $this->assertSame(['campaign', 'product'], array_keys((new Orders)->breakdowns()));
@@ -569,12 +569,12 @@ class InsightsMetricsTest extends TestCase
     {
         $this->fixture();
 
-        $zeilen = (new RevenueGross)->breakdown($this->query(), 'product', 2);
+        $zeilen = (new RevenueGross)->breakdown($this->metricQuery(), 'product', 2);
 
         $this->assertCount(2, $zeilen);
         $this->assertSame(['noten-paket', 'kurs'], array_column($zeilen, 'key'));
 
-        $this->assertCount(1, (new RevenueGross)->breakdown($this->query(), 'campaign', 1));
+        $this->assertCount(1, (new RevenueGross)->breakdown($this->metricQuery(), 'campaign', 1));
     }
 
     /**
@@ -600,7 +600,7 @@ class InsightsMetricsTest extends TestCase
         $this->item($zahlung, 'noten-paket', 'Notenpaket', 1000, PaymentItem::KIND_PRIMARY, 3, 300);
 
         $metrik = new RevenueGross;
-        $frage = $this->query();
+        $frage = $this->metricQuery();
 
         $zeilen = $metrik->breakdown($frage, 'product');
 
@@ -637,7 +637,7 @@ class InsightsMetricsTest extends TestCase
             'refunded_at' => '2026-08-17 10:00:00',
         ]);
 
-        $frage = $this->query();
+        $frage = $this->metricQuery();
 
         $this->assertSame(500, (new Refunded)->value($frage), 'only the refund of a real sale');
         $this->assertSame(['2026-08-19' => 500], (new Refunded)->series($frage), 'and no bucket on the 17th');
@@ -659,7 +659,7 @@ class InsightsMetricsTest extends TestCase
     public function a_series_returns_only_the_buckets_that_have_data(): void
     {
         $this->fixture();
-        $frage = $this->query();
+        $frage = $this->metricQuery();
 
         $this->assertSame(
             ['2026-08-15' => 4800, '2026-08-18' => 1900],
@@ -695,7 +695,7 @@ class InsightsMetricsTest extends TestCase
 
         $this->assertSame(
             ['2026-08' => 6700],
-            (new RevenueGross)->series($this->query([], MetricQuery::BUCKET_MONTH)),
+            (new RevenueGross)->series($this->metricQuery([], MetricQuery::BUCKET_MONTH)),
         );
     }
 
@@ -749,7 +749,7 @@ class InsightsMetricsTest extends TestCase
 
         $this->assertNotNull($zahlung->refunded_at);
 
-        $frage = $this->query();
+        $frage = $this->metricQuery();
 
         $this->assertSame(0, (new RevenueGross)->value($frage), 'nothing was sold in the window');
         $this->assertSame(4000, (new Refunded)->value($frage), 'and yet money went back');
@@ -770,7 +770,7 @@ class InsightsMetricsTest extends TestCase
 
         $this->assertSame(
             ['2026-08-15' => 0.0, '2026-08-18' => 0.0],
-            (new RefundRate)->series($this->query()),
+            (new RefundRate)->series($this->metricQuery()),
             'the 19th holds only a refund and therefore no rate',
         );
 
@@ -783,7 +783,7 @@ class InsightsMetricsTest extends TestCase
 
         $this->assertSame(
             ['2026-08-15' => 0.0, '2026-08-18' => 0.0, '2026-08-19' => 25.0],
-            (new RefundRate)->series($this->query()),
+            (new RefundRate)->series($this->metricQuery()),
             '500 given back against 2000 taken in on the same day',
         );
     }
@@ -804,7 +804,7 @@ class InsightsMetricsTest extends TestCase
     {
         $this->fixture();
 
-        $zeilen = (new RevenueGross)->breakdown($this->query(), 'campaign');
+        $zeilen = (new RevenueGross)->breakdown($this->metricQuery(), 'campaign');
 
         $this->assertSame('sommer-2026', $zeilen[0]['key']);
         $this->assertSame('sommer-2026 · newsletter', $zeilen[0]['label']);
@@ -836,7 +836,7 @@ class InsightsMetricsTest extends TestCase
             'paid_at' => '2026-08-16 12:00:00',
         ]);
 
-        $zeilen = (new RevenueGross)->breakdown($this->query(), 'campaign');
+        $zeilen = (new RevenueGross)->breakdown($this->metricQuery(), 'campaign');
 
         $this->assertSame('sommer-2026', $zeilen[0]['key']);
         $this->assertSame('sommer-2026', $zeilen[0]['label']);
@@ -852,8 +852,8 @@ class InsightsMetricsTest extends TestCase
         $this->fixture();
 
         $this->assertSame(
-            array_column((new RevenueGross)->breakdown($this->query(), 'campaign'), 'label'),
-            array_column((new Orders)->breakdown($this->query(), 'campaign'), 'label'),
+            array_column((new RevenueGross)->breakdown($this->metricQuery(), 'campaign'), 'label'),
+            array_column((new Orders)->breakdown($this->metricQuery(), 'campaign'), 'label'),
         );
     }
 
@@ -874,7 +874,7 @@ class InsightsMetricsTest extends TestCase
         $this->fixture();
 
         $metrik = new RevenueGross;
-        $frage = $this->query();
+        $frage = $this->metricQuery();
 
         $this->assertSame(6700, $metrik->value($frage));
         $this->assertSame(6700, $metrik->meta($frage)['line_item_sum_cent']);
@@ -903,7 +903,7 @@ class InsightsMetricsTest extends TestCase
         $this->item($kaputt, 'kurs', 'Kurs', 1000);
 
         $metrik = new RevenueGross;
-        $frage = $this->query();
+        $frage = $this->metricQuery();
 
         $this->assertSame(9700, $metrik->value($frage), 'what was charged');
         $this->assertSame(7700, $metrik->meta($frage)['line_item_sum_cent'], 'what the lines say');
@@ -921,13 +921,13 @@ class InsightsMetricsTest extends TestCase
         Schema::rename('payment_items', 'payment_items_beiseite');
 
         try {
-            $this->assertSame(['currency' => 'EUR'], (new RevenueGross)->meta($this->query()));
+            $this->assertSame(['currency' => 'EUR'], (new RevenueGross)->meta($this->metricQuery()));
 
             // And the product split is empty rather than wrong.
-            $this->assertSame([], (new RevenueGross)->breakdown($this->query(), 'product'));
+            $this->assertSame([], (new RevenueGross)->breakdown($this->metricQuery(), 'product'));
 
             // The figure itself is unaffected: it never needed the lines.
-            $this->assertSame(6700, (new RevenueGross)->value($this->query()));
+            $this->assertSame(6700, (new RevenueGross)->value($this->metricQuery()));
         } finally {
             Schema::rename('payment_items_beiseite', 'payment_items');
         }
@@ -1054,11 +1054,11 @@ class InsightsMetricsTest extends TestCase
             'updated_at' => '2026-08-12 10:00:00',
         ]);
 
-        $this->assertSame(1000, (new RevenueGross)->value($this->query()));
-        $this->assertSame(1, (new Orders)->value($this->query()));
+        $this->assertSame(1000, (new RevenueGross)->value($this->metricQuery()));
+        $this->assertSame(1, (new Orders)->value($this->metricQuery()));
         $this->assertSame(
             ['noten-paket' => 1000],
-            $this->keyed((new RevenueGross)->breakdown($this->query(), 'product')),
+            $this->keyed((new RevenueGross)->breakdown($this->metricQuery(), 'product')),
         );
     }
 
@@ -1077,7 +1077,7 @@ class InsightsMetricsTest extends TestCase
 
         $metrik = new RevenueGross;
 
-        $this->assertSame(0, $metrik->value($this->query()));
+        $this->assertSame(0, $metrik->value($this->metricQuery()));
         $this->assertTrue($metrik->available());
     }
 
@@ -1088,7 +1088,7 @@ class InsightsMetricsTest extends TestCase
         $this->verkauf('2026-08-12 10:00:00', brand: 0);
         $this->verkauf('2026-08-13 10:00:00', brand: 0);
 
-        $this->assertSame(2, (new Orders)->value($this->query()));
+        $this->assertSame(2, (new Orders)->value($this->metricQuery()));
     }
 
     #[Test]
@@ -1098,7 +1098,7 @@ class InsightsMetricsTest extends TestCase
         $this->verkauf('2026-08-12 10:00:00', brand: 2);
         $this->verkauf('2026-08-13 10:00:00', brand: 3);
 
-        $this->assertSame(2, (new Orders)->value($this->query()));
+        $this->assertSame(2, (new Orders)->value($this->metricQuery()));
     }
 
     #[Test]
@@ -1109,7 +1109,7 @@ class InsightsMetricsTest extends TestCase
         $this->verkauf('2026-08-12 10:00:00', brand: 2);
         $this->verkauf('2026-08-13 10:00:00', brand: 3);
 
-        $this->assertSame(2, (new Orders)->value($this->query()));
+        $this->assertSame(2, (new Orders)->value($this->metricQuery()));
     }
 
     // -- The edge of the window ---------------------------------------------
@@ -1130,7 +1130,7 @@ class InsightsMetricsTest extends TestCase
         $this->verkauf('2026-08-20 23:59:59.500', brand: 0);
         $this->verkauf('2026-08-20 12:00:00', brand: 0);
 
-        $this->assertSame(2, (new Orders)->value($this->query()));
+        $this->assertSame(2, (new Orders)->value($this->metricQuery()));
     }
 
     #[Test]
@@ -1138,6 +1138,6 @@ class InsightsMetricsTest extends TestCase
     {
         $this->verkauf('2026-08-21 00:00:00', brand: 0);
 
-        $this->assertSame(0, (new Orders)->value($this->query()));
+        $this->assertSame(0, (new Orders)->value($this->metricQuery()));
     }
 }

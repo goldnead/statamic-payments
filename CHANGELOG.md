@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.18.0 — 2026-09-05
+
+Ein Befund aus Adrians Durchgang vom 03.09.2026 (F36), dazu ein Test, der unter Laravel 13 nicht
+mehr startete.
+
+### Verkaufs-Bildschirme in einem eigenen Abschnitt der Seitenleiste
+
+Zahlungen, Abos, Widerrufe und Kündigungen sind als Statamic-Utilities registriert und standen damit
+unter „Hilfsmittel", zwischen Cache, PHP-Info und Suche. Jetzt zeigt je ein eigener Nav-Eintrag auf
+dieselbe Route, in einem Abschnitt, der nach dem klingt, was man dort tut. Routen und Rechte sind
+unverändert; die Utility-Registrierung bleibt, weil sie Route, Recht und Middleware trägt. Der
+Eintrag unter „Hilfsmittel" wird dafür ausgehängt (`Nav::remove('Tools', 'Utilities', …)`). Der
+erste Anlauf vom 04.09. hatte den neuen Abschnitt nur daneben gelegt, und jeder Bildschirm stand
+zweimal da. Unter „Hilfsmittel" bleiben jetzt Statamics eigene fünf: Cache, E-Mail, Lizenzierung,
+PHP-Info, Suchen.
+
+Der Abschnittsname steht in `Cp\SuiteNav::section()`, weil Statamic Abschnittsnamen nicht
+übersetzt: der NavBuilder zeigt den übergebenen Schlüssel, wie er ist. Zwei Addons mit „Verkauf"
+und „Shop" ergäben zwei halb gefüllte Abschnitte nebeneinander. `statamic-offers`,
+`statamic-funnels` und `statamic-products` rufen die Methode ab ihren nächsten Fassungen und
+brauchen dafür diese Version.
+
+### Testsuite unter Laravel 13
+
+`InsightsMetricsTest` deklarierte eine Hilfsmethode `query()` als `protected`. Orchestra Testbench
+11, das Laravel-13-Bein der Matrix, bringt auf `TestCase` eine öffentliche Methode desselben Namens
+mit, und PHP bricht beim Laden der Klasse ab, bevor ein Test läuft. Die Hilfsmethode heißt jetzt
+`metricQuery()`. Betroffen war nur die Suite, nicht das Paket.
+
 ## 1.17.1 — 2026-09-02
 
 Drei Befunde aus einem echten Kauftest auf staging (Mollie-Testmodus, Zahlungen 29/30/31).

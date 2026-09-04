@@ -4,6 +4,11 @@ return [
     'missing_payment_id' => 'Missing payment id.',
     'utility_title' => 'Payments',
     'utility_nav' => 'Payments',
+    // The CP navigation section the suite's selling screens live under. Shared
+    // with offers, funnels, products and booking (see Cp\SuiteNav) — Statamic
+    // does not translate section names, so this value has to stay the single
+    // source.
+    'nav_section' => 'Selling',
     'utility_description' => 'Look at orders and check whether they were fulfilled.',
     'empty_heading' => 'No payments yet',
     'empty_title' => 'Nothing here yet',

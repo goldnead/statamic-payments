@@ -4,6 +4,11 @@ return [
     'missing_payment_id' => 'Zahlungs-ID fehlt.',
     'utility_title' => 'Zahlungen',
     'utility_nav' => 'Zahlungen',
+    // Der Abschnitt der CP-Navigation, unter dem die Verkaufs-Bildschirme der
+    // Suite haengen. Wird von offers, funnels, products und booking mitbenutzt
+    // (siehe Cp\SuiteNav) — Statamic uebersetzt Abschnittsnamen nicht, deshalb
+    // muss dieser Wert die einzige Quelle bleiben.
+    'nav_section' => 'Verkauf',
     'utility_description' => 'Bestellungen ansehen und prüfen, ob sie erfüllt wurden.',
     'empty_heading' => 'Noch keine Zahlungen',
     'empty_title' => 'Hier ist noch nichts eingetragen',

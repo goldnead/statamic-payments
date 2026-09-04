@@ -19,10 +19,12 @@ use Goldnead\StatamicPayments\Integrations\Insights\RefundRate;
 use Goldnead\StatamicPayments\Integrations\Insights\RevenueGross;
 use Goldnead\StatamicPayments\Integrations\Insights\RevenueNet;
 use Goldnead\StatamicPayments\Integrations\InvoiceBridge;
+use Goldnead\StatamicPayments\Cp\SuiteNav;
 use Goldnead\StatamicPayments\Support\Invoices;
 use Illuminate\Support\Facades\Log;
 use Mollie\Api\MollieApiClient;
 use Statamic\Actions\Action;
+use Statamic\Facades\CP\Nav;
 use Statamic\Facades\Permission;
 use Statamic\Facades\Utility;
 use Statamic\Providers\AddonServiceProvider;
@@ -95,7 +97,8 @@ class ServiceProvider extends AddonServiceProvider
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'statamic-payments');
 
         $this->bootUtilities()
-            ->bootPermissions();
+            ->bootPermissions()
+            ->bootNavigation();
         $this->registerInsightsMetrics();
         $this->registerInvoiceSource();
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
@@ -230,6 +233,56 @@ class ServiceProvider extends AddonServiceProvider
      * forget — on screens that list who bought what and let somebody stop the
      * money.
      */
+    /**
+     * Die vier Bildschirme in die Seitenleiste holen.
+     *
+     * Sie bleiben Statamic-Utilities — dieselbe Route, dasselbe Recht, dasselbe
+     * Lesezeichen. Was fehlte, war der Weg dorthin: unter „Hilfsmittel" stehen
+     * sie zwischen Cache, PHP-Info und Suche, und genau das hat Adrian am
+     * 03.09.2026 als verwirrend gemeldet. Ein Nav-Eintrag zeigt jetzt auf
+     * dieselbe Route, in einem Abschnitt, der nach dem klingt, was man dort tut.
+     *
+     * `can()` bekommt das Recht, das `Utility::register` ohnehin anlegt — wer
+     * den Bildschirm nicht sehen darf, sieht auch den Eintrag nicht, und es gibt
+     * keinen zweiten Schalter fuer dieselbe Tuer.
+     *
+     * Der Abschnittsname kommt aus {@see SuiteNav}, weil Statamic
+     * Abschnittsnamen nicht uebersetzt und zwei verschiedene Schreibweisen zwei
+     * halb gefuellte Abschnitte ergeben wuerden.
+     */
+    protected function bootNavigation(): self
+    {
+        Nav::extend(function ($nav) {
+            $section = SuiteNav::section();
+
+            $nav->create(__('statamic-payments::messages.utility_nav'))
+                ->section($section)
+                ->icon('credit-card')
+                ->route('utilities.payments')
+                ->can('access payments utility');
+
+            $nav->create(__('statamic-payments::messages.subscriptions_utility_nav'))
+                ->section($section)
+                ->icon('money-cash-bill')
+                ->route('utilities.subscriptions')
+                ->can('access subscriptions utility');
+
+            $nav->create(__('statamic-payments::messages.withdrawals_utility_nav'))
+                ->section($section)
+                ->icon('return-square')
+                ->route('utilities.withdrawals')
+                ->can('access withdrawals utility');
+
+            $nav->create(__('statamic-payments::messages.cancellations_utility_nav'))
+                ->section($section)
+                ->icon('folder-remove')
+                ->route('utilities.cancellations')
+                ->can('access cancellations utility');
+        });
+
+        return $this;
+    }
+
     protected function bootUtilities(): self
     {
         // Registered inside `Utility::extend`, not straight in boot. `__()`

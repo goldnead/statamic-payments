@@ -255,6 +255,28 @@ class ServiceProvider extends AddonServiceProvider
         Nav::extend(function ($nav) {
             $section = SuiteNav::section();
 
+            // Erst aushaengen, dann einhaengen — sonst steht jeder Bildschirm
+            // ZWEIMAL in der Seitenleiste. Genau das war der erste Versuch am
+            // 04.09.2026: der neue Abschnitt kam dazu, unter „Hilfsmittel"
+            // blieb alles stehen, und Adrian sah zu Recht keinen Unterschied.
+            //
+            // `Utility::register` haengt jeden Bildschirm als Kind an den
+            // Hilfsmittel-Punkt (CoreNav::makeUtilitiesItems). Die Registrierung
+            // selbst bleibt — sie traegt Route, Recht und Middleware. Nur der
+            // Eintrag unter „Hilfsmittel" faellt weg.
+            //
+            // Die Namen sind so zu lesen, wie der Core sie fuehrt: der
+            // Elternpunkt heisst intern `Utilities` (uebersetzt wird erst beim
+            // Zeichnen), das Kind traegt den bereits uebersetzten `navTitle`.
+            foreach ([
+                'statamic-payments::messages.utility_nav',
+                'statamic-payments::messages.subscriptions_utility_nav',
+                'statamic-payments::messages.withdrawals_utility_nav',
+                'statamic-payments::messages.cancellations_utility_nav',
+            ] as $schluessel) {
+                $nav->remove('Tools', 'Utilities', __($schluessel));
+            }
+
             $nav->create(__('statamic-payments::messages.utility_nav'))
                 ->section($section)
                 ->icon('credit-card')

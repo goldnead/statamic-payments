@@ -28,7 +28,7 @@
             "description": "Take payments in Statamic with Mollie: hosted checkout, a webhook that never trusts the caller, idempotent fulfilment.",
             "url": "https://github.com/goldnead/statamic-payments",
             "developer": "Adrian Goldner",
-            "developer-url": "https://gldnr.studio"
+            "developer-url": "https://adriangoldner.dev"
         },
         "laravel": {
             "providers": [

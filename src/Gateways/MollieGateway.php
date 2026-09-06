@@ -197,6 +197,10 @@ class MollieGateway implements MandateGateway, SubscriptionGateway
             country: $this->country($payment),
             cardLast4: $this->cardLast4($payment),
             cardLabel: $this->cardLabel($payment),
+            // Auch hier, damit dasselbe Objekt nicht in zwei Wahrheitsgraden
+            // existiert. Heute liest nur `fetch()` in die Datenbank; wer das
+            // spaeter aendert, soll nicht still ein `null` bekommen.
+            mandateId: $this->mandateId($payment),
         );
     }
 

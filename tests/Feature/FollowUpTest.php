@@ -42,6 +42,17 @@ class FollowUpTest extends TestCase
             'customer_reference' => 'cst_maria',
         ], $overrides))->save();
 
+        // Was an der Zahlung steht, kennt der Anbieter auch — sonst prueft der
+        // Fake gegen eine leere Liste und lehnt jedes Mandat ab. Hier statt in
+        // jedem Test, damit niemand es vergessen kann: der Fake ist absichtlich
+        // streng, und die Strenge soll an ihm haengen, nicht an der Disziplin
+        // des naechsten Testschreibers.
+        $mandat = trim((string) ($payment->fresh()->mandate_id ?? ''));
+
+        if ($mandat !== '' && ! in_array($mandat, $this->gateway->knownMandates, true)) {
+            $this->gateway->knownMandates[] = $mandat;
+        }
+
         return $payment->fresh();
     }
 

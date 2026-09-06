@@ -232,9 +232,14 @@ class FollowUp
             // Fehlt die Kennung — Bestandszeile von vor dieser Fassung, oder
             // eine Zahlung, die nie ein Mandat hinterlassen hat —, wird der
             // Schluessel gar nicht erst mitgeschickt. Dann laeuft es wie bisher
-            // und der Anbieter waehlt. Ein `null` mitzugeben waere das
-            // Gegenteil von harmlos: Mollie liest einen gesetzten, leeren
-            // Schluessel als Angabe und lehnt ab.
+            // und der Anbieter waehlt.
+            //
+            // Das `trim()` traegt dabei mehr, als es aussieht. Mollies Client
+            // wirft `null` und `''` vor dem Senden selbst heraus
+            // (`Utils/DataTransformer.php`), ein `'   '` aber nicht — das ginge
+            // als echte Angabe raus und wuerde abgelehnt. Und der Vertrag ist
+            // anbieterunabhaengig: ein zweiter Gateway filtert vielleicht gar
+            // nichts.
             //
             // Nur fuer die EINZELNE Folgeabbuchung. Abos pinnen weiterhin kein
             // Mandat, damit ein Kartenwechsel ab dem naechsten Zyklus greift

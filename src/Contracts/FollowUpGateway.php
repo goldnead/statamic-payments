@@ -51,9 +51,16 @@ interface FollowUpGateway extends PaymentGateway
      *                                         Punkt: die Seite, auf der das Nachfassangebot angenommen wurde, hat
      *                                         eine bestimmte Karte angekuendigt.
      *
-     *                                         Fehlt der Schluessel, waehlt der Anbieter wie bisher selbst. Ein
-     *                                         gesetzter, leerer Schluessel ist kein Ersatz dafuer — er ist eine
-     *                                         Angabe, und Mollie lehnt sie ab. Weglassen heisst weglassen.
+     *                                         Fehlt der Schluessel, waehlt der Anbieter wie bisher selbst.
+     *                                         **Weglassen heisst weglassen** — nicht `null` und nicht `''`
+     *                                         mitgeben. Dieser Vertrag ist anbieterunabhaengig, und ein
+     *                                         Gateway darf einen gesetzten Schluessel als Angabe lesen.
+     *                                         (Mollies eigener Client waere hier gutmuetig: sein
+     *                                         `DataTransformer` wirft `null` und `''` vor dem Senden selbst
+     *                                         heraus, `vendor/mollie/mollie-api-php/src/Utils/DataTransformer.php`.
+     *                                         Ein `'   '` laesst er aber durch, und das geht dann als echte
+     *                                         Angabe raus. Der Aufrufer soll sich auf keins von beidem
+     *                                         verlassen muessen.)
      */
     public function chargeAgain(string $customerReference, array $payload): RemotePayment;
 }

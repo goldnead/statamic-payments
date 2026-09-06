@@ -396,6 +396,14 @@ class Fulfilment
             // zurueck; duerfte die Antwort zurueckschreiben, wanderte die
             // Kennung der Erstzahlung weg — und die naechste Abbuchung ginge
             // wieder gegen ein Mandat, das die Seite nie angekuendigt hat.
+            //
+            // Bewusst hier und nicht als Waechter im Model: der `updating`-
+            // Waechter dort traegt eine Fehlermeldung nach § 356 Abs. 5 BGB und
+            // gehoert der Zustimmung. Das Einfrieren haelt hier, weil diese
+            // Methode die einzige Stelle ist, die die Spalte schreibt —
+            // `PaymentDetails::ALLOWED` sperrt jeden Aufrufer aus, und
+            // `Checkout::resume()` kopiert sie nicht mit. Wer das aendert,
+            // braucht dann doch einen Waechter.
             'mandate_id' => $frei($payment->mandate_id) ? $remote->mandateId : null,
         ], static fn (?string $wert): bool => $wert !== null && trim($wert) !== '');
 

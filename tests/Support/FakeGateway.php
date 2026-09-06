@@ -142,9 +142,15 @@ class FakeGateway implements SubscriptionGateway
     /**
      * Die Mandate, die dieser Anbieter kennt.
      *
-     * Leer heisst „nicht geprueft", damit die vorhandenen Tests, die von
-     * Mandaten nichts wissen, unveraendert durchlaufen. Wer die Prueung will,
-     * traegt hier ein, was gelten soll.
+     * **Leer heisst „keins", nicht „nicht geprueft".** Die erste Fassung liess
+     * die Pruefung aus, solange die Liste leer war — bequem fuer bestehende
+     * Tests, aber die nachgiebige Voreinstellung ist genau die Richtung, in die
+     * ein Fake nicht driften darf: ein kuenftiger Test, der ein `mandate_id`
+     * setzt und diese Liste vergisst, waere gruen geworden, ohne irgendetwas zu
+     * belegen.
+     *
+     * Wer eine bezahlte Zahlung mit Mandat baut, traegt es hier ein. Der
+     * Testhelfer `paidPayment()` in FollowUpTest macht das.
      *
      * @var list<string>
      */
@@ -212,7 +218,7 @@ class FakeGateway implements SubscriptionGateway
                 throw new RuntimeException('mandate revoked: '.$verlangt);
             }
 
-            if ($this->knownMandates !== [] && ! in_array($verlangt, $this->knownMandates, true)) {
+            if (! in_array($verlangt, $this->knownMandates, true)) {
                 throw new RuntimeException('unknown mandate: '.$verlangt);
             }
         }

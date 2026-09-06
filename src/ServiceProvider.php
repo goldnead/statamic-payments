@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments;
 
+use Goldnead\BrandContext\Settings\SettingsRegistry;
 use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Cp\SuiteLicence;
 use Goldnead\StatamicPayments\Cp\SuiteNav;
@@ -22,6 +23,7 @@ use Goldnead\StatamicPayments\Integrations\Insights\RevenueGross;
 use Goldnead\StatamicPayments\Integrations\Insights\RevenueNet;
 use Goldnead\StatamicPayments\Integrations\InvoiceBridge;
 use Goldnead\StatamicPayments\Support\Invoices;
+use Goldnead\StatamicPayments\Support\Settings;
 use Illuminate\Support\Facades\Log;
 use Mollie\Api\MollieApiClient;
 use Statamic\Actions\Action;
@@ -100,6 +102,7 @@ class ServiceProvider extends AddonServiceProvider
 
         $this->bootUtilities()
             ->bootPermissions()
+            ->bootSettings()
             ->bootNavigation()
             ->bootSuiteLicenceNotice();
         $this->registerInsightsMetrics();
@@ -369,8 +372,46 @@ class ServiceProvider extends AddonServiceProvider
                     ->label(__('statamic-payments::messages.permission_handle_withdrawals'));
                 Permission::register('handle payment cancellations')
                     ->label(__('statamic-payments::messages.permission_handle_cancellations'));
+
+                // Bewacht den Abschnitt dieses Addons auf der gemeinsamen
+                // Einstellungs-Seite. Immer angemeldet, auch ohne
+                // `statamic-brand-context`: ein Recht, das nur manchmal
+                // existiert, verschwindet aus Rollen, die es tragen. Der Name
+                // steht hingeschrieben in Support\Settings, die Registry
+                // leitet ihn nicht ab.
+                Permission::register('manage payments settings')
+                    ->label(__('statamic-payments::settings.permission_manage_settings'));
             });
         });
+
+        return $this;
+    }
+
+    /**
+     * Die Einstellungs-Seite, angemeldet statt gebaut.
+     *
+     * Das ist der ganze Umfang: die Registry bekommt die Feldliste, und
+     * `statamic-brand-context` stellt Bildschirm, Formular, Validierung,
+     * Speicher, Marken und Routen. Ein eigener Controller oder Statamics
+     * `settingsBlueprint()` wären zwei Wege, dieselbe Sache ein zweites Mal zu
+     * beschreiben — der Blueprint zusätzlich einer, der `config()` gar nicht
+     * anfasst und Vollkopien statt Abweichungen speichert.
+     *
+     * **Die Prüfung ist keine Vorsicht, sie ist Ladeordnung.**
+     * `statamic-brand-context` steht in `require-dev`; dieses Addon läuft ohne
+     * es. `Support\Settings` implementiert aber eine Schnittstelle aus diesem
+     * Paket, und eine Klasse, deren Schnittstelle fehlt, lässt sich nicht
+     * laden. Solange `Settings::class` nur als Konstante hier steht, fasst
+     * nichts sie an; erst `register()` löst das Autoloading aus, und dahin
+     * kommt es nur, wenn das Paket da ist.
+     */
+    protected function bootSettings(): self
+    {
+        if (! class_exists(SettingsRegistry::class)) {
+            return $this;
+        }
+
+        $this->app->make(SettingsRegistry::class)->register(Settings::class);
 
         return $this;
     }

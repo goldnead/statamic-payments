@@ -52,7 +52,7 @@
         "mollie/mollie-api-php": "^2.79 || ^3.0"
     },
     "require-dev": {
-        "goldnead/statamic-brand-context": "^1.5",
+        "goldnead/statamic-brand-context": "^1.12",
         "goldnead/statamic-entitlements": "^1.1",
         "larastan/larastan": "^3.0",
         "laravel/pint": "^1.18",

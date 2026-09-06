@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.19.0 — 2026-09-07
+
+**Eine Einstellungs-Seite im Control Panel.** § 356a BGB (Widerrufsbutton) und § 312k BGB
+(Kündigungsbutton) verlangen beide eine Meldestelle und erlauben beide, auf eine eigene
+Belehrung zu verlinken. Diese vier Angaben — `withdrawal.notify`, `withdrawal.policy_url`,
+`cancellation.notify`, `cancellation.policy_url` — standen bisher ausschließlich in der `.env`:
+gesetzlich verlangt und für den Betreiber, dem sie gehören, unerreichbar. Dazu kommen
+Kundenkonto, abgebrochene Kassen, Einwilligungssätze und die Schalter zu den Geschwistern.
+
+Gebaut wird die Seite nicht hier. Das Addon meldet nur seine Feldliste
+(`Support\Settings`, `Goldnead\BrandContext\Contracts\ProvidesSettings`) bei der
+`SettingsRegistry` an; Bildschirm, Formular, Validierung, Speicher, Marken und Routen kommen
+aus `statamic-brand-context`. Das Paket bleibt optional (`require-dev`, jetzt `^1.12`) — ohne
+es läuft alles wie bisher, nur ohne Abschnitt: die Anmeldung steht hinter einem `class_exists`,
+und `Support\Settings` wird dann nie geladen.
+
+- Neues Recht `manage payments settings`, immer angemeldet, auch ohne `brand-context`.
+- **Der Mollie-Schlüssel steht nicht auf der Seite** und wird es nie: er bewegt Geld und
+  gehört nicht in eine Datenbanksicherung. Ebenso wenig `suite.license_key`.
+- Nicht auf der Seite, weil beim Booten gelesen: `rate_limit`, `portal.prefix`,
+  `portal.middleware`, `portal.request_rate_limit`, `withdrawal.prefix`,
+  `withdrawal.throttle`, `cancellation.prefix`, `cancellation.throttle`.
+  `SettingsManager::apply()` läuft aus `app->booted()`, `routes/web.php` liest davor — eine
+  Änderung käme dort erst nach dem nächsten Deploy an.
+- Ebenfalls nicht: `webhook_url` (Deployment), `products` und `portal.throttle`
+  (verschachtelt), `methods` (die Config hält dort eine kommagetrennte Zeichenkette, keine
+  Liste) und `portal.min_response_ms` (der Boden gegen ein Laufzeit-Orakel).
+
 ## 1.18.0 — 2026-09-05
 
 Ein Befund aus Adrians Durchgang vom 03.09.2026 (F36), dazu ein Test, der unter Laravel 13 nicht

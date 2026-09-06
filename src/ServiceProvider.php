@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments;
 
 use Goldnead\StatamicPayments\Contracts\PaymentGateway;
+use Goldnead\StatamicPayments\Cp\SuiteLicence;
 use Goldnead\StatamicPayments\Cp\SuiteNav;
 use Goldnead\StatamicPayments\Gateways\MollieGateway;
 use Goldnead\StatamicPayments\Http\Controllers\Cp\CancellationActionsController;
@@ -28,6 +29,7 @@ use Statamic\Facades\CP\Nav;
 use Statamic\Facades\Permission;
 use Statamic\Facades\Utility;
 use Statamic\Providers\AddonServiceProvider;
+use Statamic\Statamic;
 use Throwable;
 
 class ServiceProvider extends AddonServiceProvider
@@ -98,7 +100,8 @@ class ServiceProvider extends AddonServiceProvider
 
         $this->bootUtilities()
             ->bootPermissions()
-            ->bootNavigation();
+            ->bootNavigation()
+            ->bootSuiteLicenceNotice();
         $this->registerInsightsMetrics();
         $this->registerInvoiceSource();
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
@@ -250,6 +253,29 @@ class ServiceProvider extends AddonServiceProvider
      * Abschnittsnamen nicht uebersetzt und zwei verschiedene Schreibweisen zwei
      * halb gefuellte Abschnitte ergeben wuerden.
      */
+    /**
+     * Der Lizenzhinweis der Suite, an den Browser gereicht.
+     *
+     * Nur eine Zahl, ein Text und ein `true`/`false` — die Entscheidung faellt
+     * serverseitig in {@see SuiteLicence}, damit im Client nichts zu entscheiden
+     * bleibt. Der Schluessel selbst geht nie mit.
+     *
+     * Genau hier und nur hier. Bei sechzehn Paketen waere ein Hinweis je Paket
+     * der wahrscheinlichste Fehler dieses Tickets; die Geschwister binden
+     * `statamic-payments` per `class_exists` ein und bringen nichts Eigenes mit.
+     *
+     * Kein Netzaufruf, keine Sperre, keine Pruefung des Schluessels. Wer das
+     * aendert, aendert eine Produktentscheidung von Adrian (05.09.2026, Weg B).
+     */
+    protected function bootSuiteLicenceNotice(): self
+    {
+        Statamic::provideToScript([
+            'statamicPaymentsSuiteLicence' => SuiteLicence::forScript(),
+        ]);
+
+        return $this;
+    }
+
     protected function bootNavigation(): self
     {
         Nav::extend(function ($nav) {

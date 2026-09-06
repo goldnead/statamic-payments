@@ -552,4 +552,47 @@ return [
         */
         'policy_url' => env('STATAMIC_PAYMENTS_CANCELLATION_POLICY_URL'),
     ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Die Suite-Lizenz
+    |---------------------------------------------------------------------------
+    |
+    | Ein Hinweis, kein Schloss. Drei Regeln, und sie sind nicht verhandelbar:
+    |
+    |  1. KEIN NETZWERKAUFRUF. Nicht zu uns, nicht zu Statamic, zu niemandem.
+    |     Gelesen wird diese Einstellung und sonst nichts.
+    |  2. KEINE SPERRE. Es wird nie eine Funktion abgeschaltet, verlangsamt oder
+    |     mit einem Wasserzeichen versehen. Ohne Schluessel laeuft alles genau
+    |     wie mit.
+    |  3. KEINE PRUEFUNG DES SCHLUESSELS. Nicht gegen einen Server, nicht
+    |     kryptografisch. Wer irgendetwas eintraegt, bekommt keinen Hinweis
+    |     mehr — das ist Absicht und der ganze Punkt: die Entscheidung liegt
+    |     sichtbar beim Betreiber.
+    |
+    | Warum so und nicht strenger, belegt am 05.09.2026 im Quellcode: Cargo
+    | (199 USD/Jahr) hat null eigene Lizenzmechanik. Statamics eigenes Banner
+    | sperrt ebenfalls nichts. Und eine echte Pruefung waere GEFAEHRLICHER als
+    | keine — Statamic faengt Netzfehler ab und schweigt (fail-open); ein Addon,
+    | das stumpf auf `valid()` gated, wird bei jedem Netzproblem fail-closed und
+    | sperrt zahlende Kunden aus.
+    |
+    | Der Hinweis erscheint nur in `production`. Ohne eigenen Lizenzserver muss
+    | das lokal entschieden werden, und niemand soll beim Entwickeln ein Banner
+    | wegklicken.
+    |
+    | `notice_days` ist, wie lange Ruhe ist, nachdem jemand weggeklickt hat.
+    | Statamics eigenes Modal laesst sich auf einer Produktionsdomain nur fuenf
+    | Minuten stummschalten und ist nicht schliessbar. Fuer ein Produkt, das
+    | ausdruecklich nichts erzwingt, waere das feindselig.
+    */
+
+    'suite' => [
+
+        'license_key' => env('SUITE_LICENSE_KEY'),
+
+        'notice_days' => 30,
+
+        'buy_url' => env('SUITE_LICENSE_URL', 'https://suite.adriangoldner.dev'),
+    ],
 ];

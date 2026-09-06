@@ -11,10 +11,14 @@ import SubscriptionsIndex from './pages/Subscriptions/Index.vue';
 import WithdrawalsIndex from './pages/Withdrawals/Index.vue';
 import CancellationsIndex from './pages/Cancellations/Index.vue';
 
+import { suiteLicenceNotice } from './suite-licence';
+
 Statamic.booting(() => {
     Statamic.$inertia.register('statamic-payments::Payments/Index', PaymentsIndex);
     Statamic.$inertia.register('statamic-payments::Payments/Show', PaymentsShow);
     Statamic.$inertia.register('statamic-payments::Subscriptions/Index', SubscriptionsIndex);
     Statamic.$inertia.register('statamic-payments::Withdrawals/Index', WithdrawalsIndex);
     Statamic.$inertia.register('statamic-payments::Cancellations/Index', CancellationsIndex);
+
+    suiteLicenceNotice();
 });

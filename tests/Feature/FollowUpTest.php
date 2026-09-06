@@ -452,4 +452,125 @@ class FollowUpTest extends TestCase
         $this->assertNotNull($follow);
         $this->assertSame('kurs-angebot', $follow->items()->first()->getAttribute('offer'));
     }
+
+    /*
+    |---------------------------------------------------------------------------
+    | Welches Mandat belastet wird
+    |---------------------------------------------------------------------------
+    |
+    | Die Seite eines Nachfassangebots kuendigt eine bestimmte Karte an — Marke
+    | und letzte vier Ziffern der Erstzahlung. Bis 06.09.2026 bekam der Anbieter
+    | nur die Kundenkennung und suchte sich selbst ein gueltiges Mandat aus. Bei
+    | einem Kaeufer mit einem Mandat faellt das nie auf; bei zweien sind
+    | Ankuendigung und Abbuchung zwei verschiedene Dinge.
+    |
+    | Mollies Testmodus taugt hier nicht als Beleg: er liefert bei einer
+    | Folgeabbuchung ohnehin andere Kartendaten als bei der Erstzahlung. Der
+    | Beleg muss aus dem Code kommen, und das ist, was hier steht.
+    */
+
+    #[Test]
+    public function the_follow_up_charges_the_mandate_the_first_payment_left_behind(): void
+    {
+        $original = $this->paidPayment(['mandate_id' => 'mdt_erste']);
+        $this->gateway->mandates[] = 'cst_maria';
+        $this->gateway->knownMandates = ['mdt_erste', 'mdt_zweite'];
+
+        $gesehen = null;
+        $this->gateway->whileCalling = function (array $payload) use (&$gesehen): void {
+            $gesehen = $payload['mandateId'] ?? null;
+        };
+
+        $follow = app(FollowUp::class)->accept($original, 'begleit-cd');
+
+        $this->assertNotNull($follow);
+        // Nicht "irgendein gueltiges Mandat des Kunden", sondern genau das der
+        // Erstzahlung — auch wenn ein zweites existiert und gueltig waere.
+        $this->assertSame('mdt_erste', $gesehen);
+    }
+
+    #[Test]
+    public function without_a_stored_mandate_the_key_is_left_out_entirely(): void
+    {
+        // Bestandszeile von vor der Spalte, oder eine Zahlung, die nie ein
+        // Mandat hinterlassen hat. Dann laeuft es wie bisher: der Anbieter
+        // waehlt. Ein gesetzter, leerer Schluessel waere das Gegenteil von
+        // harmlos — Mollie liest ihn als Angabe und lehnt ab.
+        $original = $this->paidPayment(['mandate_id' => null]);
+        $this->gateway->mandates[] = 'cst_maria';
+
+        $schluesselDa = true;
+        $this->gateway->whileCalling = function (array $payload) use (&$schluesselDa): void {
+            $schluesselDa = array_key_exists('mandateId', $payload);
+        };
+
+        $follow = app(FollowUp::class)->accept($original, 'begleit-cd');
+
+        $this->assertNotNull($follow, 'Ohne Mandat soll weiter abgebucht werden koennen wie bisher.');
+        $this->assertFalse($schluesselDa, 'Der Schluessel darf gar nicht erst mitgeschickt werden.');
+    }
+
+    #[Test]
+    public function an_empty_stored_mandate_counts_as_none(): void
+    {
+        // Ein `''` aus einer aelteren Fassung oder einem Import sieht belegt
+        // aus und sagt nichts. Es darf nicht als Angabe rausgehen.
+        $original = $this->paidPayment(['mandate_id' => '   ']);
+        $this->gateway->mandates[] = 'cst_maria';
+
+        $schluesselDa = true;
+        $this->gateway->whileCalling = function (array $payload) use (&$schluesselDa): void {
+            $schluesselDa = array_key_exists('mandateId', $payload);
+        };
+
+        $this->assertNotNull(app(FollowUp::class)->accept($original, 'begleit-cd'));
+        $this->assertFalse($schluesselDa);
+    }
+
+    #[Test]
+    public function a_revoked_mandate_leaves_a_failed_row_and_no_charge(): void
+    {
+        // Der Kaeufer hat sein Einzugsrecht zurueckgezogen. Der Anbieter lehnt
+        // ab — und weicht NICHT auf ein anderes Mandat aus, auch wenn eines da
+        // waere. Der Kauf laeuft dann nicht in einen Fehler, sondern
+        // hinterlaesst eine gescheiterte Zeile als Beleg, genau wie heute,
+        // wenn gar kein Mandat existiert.
+        $original = $this->paidPayment(['mandate_id' => 'mdt_widerrufen']);
+        $this->gateway->mandates[] = 'cst_maria';
+        $this->gateway->knownMandates = ['mdt_widerrufen', 'mdt_andere'];
+        $this->gateway->revokedMandates = ['mdt_widerrufen'];
+
+        $follow = app(FollowUp::class)->accept($original, 'begleit-cd');
+
+        $this->assertNull($follow, 'Ein widerrufenes Mandat darf keine bezahlte Bestellung ergeben.');
+
+        $zeile = Payment::where('parent_payment_id', $original->id)->first();
+        $this->assertNotNull($zeile, 'Die angenommene Bestellung soll als Beleg stehen bleiben.');
+        $this->assertSame(Payment::STATUS_FAILED, $zeile->status);
+    }
+
+    #[Test]
+    public function the_mandate_of_the_first_payment_is_not_overwritten_by_the_follow_up(): void
+    {
+        // Der Anbieter beschreibt bei einer Folgeabbuchung das Mandat, gegen
+        // das sie lief. Duerfte diese Antwort zurueckschreiben, wanderte die
+        // Kennung der Erstzahlung weg — und die naechste Abbuchung ginge gegen
+        // etwas, das die Seite nie angekuendigt hat. Dieselbe Einfrier-Regel
+        // wie bei card_last4 eine Spalte weiter.
+        $original = $this->paidPayment(['mandate_id' => 'mdt_erste']);
+        $this->gateway->mandates[] = 'cst_maria';
+        $this->gateway->knownMandates = ['mdt_erste'];
+
+        $follow = app(FollowUp::class)->accept($original, 'begleit-cd');
+        $this->assertNotNull($follow);
+
+        // Der Anbieter beschreibt die Folgeabbuchung mit IHREM Mandat.
+        $this->gateway->markPaid($follow->provider_id, mandateId: 'mdt_folge');
+        app(Fulfilment::class)->handle($follow->provider_id);
+
+        // Die Erstzahlung behaelt ihre Kennung ...
+        $this->assertSame('mdt_erste', $original->fresh()->mandate_id);
+        // ... und die Folgezeile traegt ihre eigene, nicht die geerbte.
+        $this->assertSame('mdt_folge', $follow->fresh()->mandate_id);
+    }
 }

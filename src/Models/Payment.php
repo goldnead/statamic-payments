@@ -47,6 +47,7 @@ use LogicException;
  * @property Carbon|null $paid_at
  * @property Carbon|null $created_at
  * @property string|null $customer_reference
+ * @property string|null $mandate_id
  * @property int|null $parent_payment_id
  * @property int|null $subscription_id
  * @property string|null $discount_code

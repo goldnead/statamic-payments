@@ -51,6 +51,25 @@ final readonly class RemotePayment
         public ?string $cardLast4 = null,
         /** Die Marke der Karte, wie der Anbieter sie nennt („Mastercard"). */
         public ?string $cardLabel = null,
+        /**
+         * Das Mandat, das diese Zahlung hinterlassen hat.
+         *
+         * Die zweite Hälfte der Auskunft, deren erste `customer_reference` ist:
+         * wer, und womit. Gebraucht wird sie bei einer Folgeabbuchung, denn die
+         * Seite davor kündigt eine bestimmte Karte an — dieselbe, deren vier
+         * Ziffern eine Zeile weiter oben stehen. Ohne die Kennung sucht der
+         * Anbieter sich selbst ein gültiges Mandat des Kunden aus, und bei
+         * jemandem mit zwei Karten sind Ankündigung und Abbuchung dann zwei
+         * verschiedene Dinge.
+         *
+         * Vom Anbieter gelesen, nie vom Aufrufer: wer sie behaupten dürfte,
+         * dürfte fremde Einzugsrechte belasten.
+         *
+         * Fehlt bei jeder Zahlung, die kein Mandat hinterlässt — eine einmalige
+         * Zahlung ohne `sequenceType: first` tut das nicht. Dann bleibt es beim
+         * bisherigen Verhalten, und der Anbieter wählt selbst.
+         */
+        public ?string $mandateId = null,
     ) {}
 
     public function isPaid(): bool

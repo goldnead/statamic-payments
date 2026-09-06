@@ -139,6 +139,29 @@ class FakeGateway implements SubscriptionGateway
     /** Customer ids the provider will accept a second charge for. */
     public array $mandates = [];
 
+    /**
+     * Die Mandate, die dieser Anbieter kennt.
+     *
+     * Leer heisst „nicht geprueft", damit die vorhandenen Tests, die von
+     * Mandaten nichts wissen, unveraendert durchlaufen. Wer die Prueung will,
+     * traegt hier ein, was gelten soll.
+     *
+     * @var list<string>
+     */
+    public array $knownMandates = [];
+
+    /**
+     * Mandate, die es gab und die nicht mehr gelten.
+     *
+     * Getrennt von `knownMandates` gefuehrt, weil widerrufen etwas anderes ist
+     * als nie dagewesen: der Kaeufer hat einmal zugestimmt und sie
+     * zurueckgezogen. Fuer den Aufrufer endet beides gleich — der Anbieter
+     * lehnt ab —, aber ein Test soll den Unterschied ausdruecken koennen.
+     *
+     * @var list<string>
+     */
+    public array $revokedMandates = [];
+
     public bool $refuseFollowUp = false;
 
     public function supportsFollowUp(): bool
@@ -168,6 +191,30 @@ class FakeGateway implements SubscriptionGateway
             // What Mollie does when there is no mandate: it refuses. Which is
             // correct — no mandate means the buyer never agreed to this.
             throw new RuntimeException('no mandate for '.$customerReference);
+        }
+
+        // Ein ausdruecklich benanntes Mandat wird ausdruecklich geprueft.
+        //
+        // So streng wie das Original: Mollie lehnt ein `mandateId` ab, das dem
+        // Kunden nicht gehoert, widerrufen oder abgelaufen ist — es weicht
+        // NICHT auf ein anderes gueltiges Mandat aus. Ein Fake, der den
+        // Schluessel bloss durchwinkt, wuerde genau den Fehler verstecken, den
+        // die Spalte `mandate_id` verhindern soll, und der Test darueber waere
+        // eine Selbstbestaetigung.
+        if (array_key_exists('mandateId', $payload)) {
+            $verlangt = $payload['mandateId'];
+
+            if (! is_string($verlangt) || trim($verlangt) === '') {
+                throw new RuntimeException('mandateId was set but empty');
+            }
+
+            if (in_array($verlangt, $this->revokedMandates, true)) {
+                throw new RuntimeException('mandate revoked: '.$verlangt);
+            }
+
+            if ($this->knownMandates !== [] && ! in_array($verlangt, $this->knownMandates, true)) {
+                throw new RuntimeException('unknown mandate: '.$verlangt);
+            }
         }
 
         $this->created++;
@@ -232,8 +279,15 @@ class FakeGateway implements SubscriptionGateway
             ?? throw new RuntimeException('no such payment: '.$providerId);
     }
 
-    /** Let the provider say the payment is paid. Only the provider may. */
-    public function markPaid(string $providerId, ?string $email = null, ?string $cardLast4 = null, ?string $cardLabel = null): void
+    /**
+     * Let the provider say the payment is paid. Only the provider may.
+     *
+     * `$mandateId` ist das Einzugsrecht, das diese Zahlung hinterlassen hat —
+     * bei Mollie gesetzt auf einer Zahlung mit `sequenceType: first`, leer bei
+     * einer einmaligen. Getrennt angebbar, weil eine Folgeabbuchung ihr eigenes
+     * Mandat zurueckmeldet und der Test genau das ausdruecken koennen muss.
+     */
+    public function markPaid(string $providerId, ?string $email = null, ?string $cardLast4 = null, ?string $cardLabel = null, ?string $mandateId = null): void
     {
         $this->remote[$providerId] = new RemotePayment(
             providerId: $providerId,
@@ -242,6 +296,7 @@ class FakeGateway implements SubscriptionGateway
             email: $email,
             cardLast4: $cardLast4,
             cardLabel: $cardLabel,
+            mandateId: $mandateId,
         );
     }
 

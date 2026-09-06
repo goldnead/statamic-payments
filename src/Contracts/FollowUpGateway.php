@@ -43,6 +43,17 @@ interface FollowUpGateway extends PaymentGateway
      *                                     the stored agreement.
      * @param  array<string, mixed>  $payload  Amount, currency, description,
      *                                         webhook and metadata, exactly as `createPayment()` takes them.
+     *
+     *                                         Dazu **optional `mandateId`**: welches Einzugsrecht belastet werden
+     *                                         soll. Wer den Schluessel setzt, verlangt genau dieses Mandat; eine
+     *                                         Implementierung darf dann nicht auf ein anderes ausweichen, sondern
+     *                                         muss ablehnen, wenn es ungueltig oder widerrufen ist. Das ist der
+     *                                         Punkt: die Seite, auf der das Nachfassangebot angenommen wurde, hat
+     *                                         eine bestimmte Karte angekuendigt.
+     *
+     *                                         Fehlt der Schluessel, waehlt der Anbieter wie bisher selbst. Ein
+     *                                         gesetzter, leerer Schluessel ist kein Ersatz dafuer — er ist eine
+     *                                         Angabe, und Mollie lehnt sie ab. Weglassen heisst weglassen.
      */
     public function chargeAgain(string $customerReference, array $payload): RemotePayment;
 }

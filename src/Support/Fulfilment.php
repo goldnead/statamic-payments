@@ -387,6 +387,16 @@ class Fulfilment
         $karte = array_filter([
             'card_last4' => $frei($payment->card_last4) ? $remote->cardLast4 : null,
             'card_label' => $frei($payment->card_label) ? $remote->cardLabel : null,
+            // Womit abgebucht werden darf, nach genau derselben Regel wie die
+            // beiden Zeilen darueber: nur von der Zahlung, die das Mandat
+            // erteilt hat, und einmal eingefroren nicht mehr geaendert.
+            //
+            // Das Einfrieren ist hier nicht Kosmetik, sondern der Punkt. Eine
+            // Folgeabbuchung bekommt von Mollie ihr eigenes `mandateId`
+            // zurueck; duerfte die Antwort zurueckschreiben, wanderte die
+            // Kennung der Erstzahlung weg — und die naechste Abbuchung ginge
+            // wieder gegen ein Mandat, das die Seite nie angekuendigt hat.
+            'mandate_id' => $frei($payment->mandate_id) ? $remote->mandateId : null,
         ], static fn (?string $wert): bool => $wert !== null && trim($wert) !== '');
 
         if ($karte !== []) {

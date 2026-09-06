@@ -219,11 +219,34 @@ class FollowUp
             /** @var FollowUpGateway $gateway */
             $gateway = $this->gateway;
 
+            // Das Mandat der Erstbestellung, ausdruecklich benannt.
+            //
+            // Ohne diese Zeile bekommt der Anbieter nur die Kundenkennung und
+            // sucht sich selbst ein gueltiges Mandat aus. Die Seite, auf der
+            // dieses Angebot angenommen wurde, hat aber eine BESTIMMTE Karte
+            // angekuendigt — Marke und letzte vier Ziffern der Erstzahlung,
+            // aus `card_label`/`card_last4` derselben Zeile. Bei einem Kaeufer
+            // mit zwei Mandaten waeren Ankuendigung und Abbuchung sonst zwei
+            // verschiedene Dinge.
+            //
+            // Fehlt die Kennung — Bestandszeile von vor dieser Fassung, oder
+            // eine Zahlung, die nie ein Mandat hinterlassen hat —, wird der
+            // Schluessel gar nicht erst mitgeschickt. Dann laeuft es wie bisher
+            // und der Anbieter waehlt. Ein `null` mitzugeben waere das
+            // Gegenteil von harmlos: Mollie liest einen gesetzten, leeren
+            // Schluessel als Angabe und lehnt ab.
+            //
+            // Nur fuer die EINZELNE Folgeabbuchung. Abos pinnen weiterhin kein
+            // Mandat, damit ein Kartenwechsel ab dem naechsten Zyklus greift
+            // (begruendet in MollieGateway::startMandateUpdate()).
+            $mandat = trim((string) ($original->mandate_id ?? ''));
+
             $remote = $gateway->chargeAgain((string) $original->customer_reference, [
                 'amount' => [
                     'currency' => $payment->currency,
                     'value' => $payment->amount(),
                 ],
+                ...($mandat === '' ? [] : ['mandateId' => $mandat]),
                 'description' => $product['name'],
                 'webhookUrl' => config('statamic-payments.webhook_url') === false
                     ? null

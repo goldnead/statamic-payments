@@ -229,6 +229,7 @@ class MollieGateway implements MandateGateway, SubscriptionGateway
             country: $this->country($payment),
             cardLast4: $this->cardLast4($payment),
             cardLabel: $this->cardLabel($payment),
+            mandateId: $this->mandateId($payment),
             // Present only on a payment Mollie made on its own, on a rhythm.
             subscriptionId: isset($payment->subscriptionId) && $payment->subscriptionId
                 ? (string) $payment->subscriptionId
@@ -319,6 +320,27 @@ class MollieGateway implements MandateGateway, SubscriptionGateway
 
         return is_string($kandidat) && preg_match('/^\d{4}$/', $kandidat) === 1
             ? $kandidat
+            : null;
+    }
+
+    /**
+     * Das Mandat, das diese Zahlung hinterlassen hat.
+     *
+     * Mollie setzt `mandateId` auf einer Zahlung mit `sequenceType: first` —
+     * genau die, die das Einzugsrecht erteilt. Bei einer einmaligen Zahlung
+     * steht nichts da, und das ist richtig so: sie hinterlässt kein Mandat.
+     *
+     * Nur eine Kennung wird übernommen, kein leerer String und nichts, was
+     * nicht danach aussieht. Ein `''` in der Spalte sähe belegt aus und sagte
+     * nichts — dieselbe Falle, die eine Zeile weiter oben bei `card_last4`
+     * schon einmal zugeschnappt ist.
+     */
+    protected function mandateId(mixed $payment): ?string
+    {
+        $kandidat = $payment->mandateId ?? null;
+
+        return is_string($kandidat) && trim($kandidat) !== ''
+            ? trim($kandidat)
             : null;
     }
 

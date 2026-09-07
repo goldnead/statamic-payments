@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.20.0 — 2026-09-07
+
+**Eine Ratenzahlung übersteht jetzt eine Kasse mit Korb — und sagt auf der Rechnung, welche
+Rate sie ist.** Drei Änderungen, die zusammengehören, weil sie derselbe Verkauf sind.
+
+### Eine Vereinbarung darf aus einem Korb beginnen
+
+`Subscriptions::start()` nahm genau einen Handle. Eine Kasse mit Order-Bumps (statamic-funnels)
+konnte ihn deshalb nicht rufen und ging an `Checkout::start()` — und das kennt keine Pläne.
+
+Der Ausgang war eine **stille Teilzahlung**: ein Angebot mit `interval` (statamic-offers 1.8.0)
+wurde einmal abgebucht, der Zugang vollständig erteilt, und die fehlenden Raten tauchten
+nirgends auf. Kein Fehler, keine Meldung, keine offene Forderung. Der Katalog gab den Plan
+korrekt heraus; auf diesem Weg fragte ihn niemand.
+
+`start()` nimmt jetzt `string|array`. Den Rhythmus gibt der **erste** Handle vor, die
+Folgeeinzüge belasten nur dessen Betrag — ein Bump neben einer Ratenoption ist damit einmal
+gekauft und nicht jede Rate wieder. Dazu ein optionaler `$discount` als fünfter Parameter, für
+den Gutschein, den die Strecke schon errechnet hat; ein Testzeitraum hat weiter Vorrang.
+
+Neu: `Subscriptions::canStart()`. Ob dieser Betrieb überhaupt Vereinbarungen beginnen kann
+(Anbieter plus Mandat-Einzug), ohne dafür einen Kauf zu starten. Eine Strecke, die eine
+Ratenoption **anzeigt**, muss das vorher wissen — es erst im `start()` als `null`
+herauszufinden ist eine Sackgasse mitten in der Kasse.
+
+### Wer eine Rate wählt, sieht keine Zahlungsart, die keine Raten kann
+
+`Checkout::start()` setzte `sequenceType: first` und reichte die konfigurierte Methodenliste
+unverändert weiter. Stand Klarna oder Überweisung neben der Karte darin, sah der Käufer beide,
+wählte eine davon, und der Anbieter lehnte ab — nachdem alles ausgefüllt war.
+
+Wird ein Mandat eingesammelt, bleiben von den konfigurierten Methoden nur die aus
+`PaymentMethods::MANDATE_FIRST`. Eine **leere** Konfiguration bleibt leer: sie heißt „der
+Anbieter entscheidet", und der zeigt bei einer ersten Zahlung von selbst nur, was ein Mandat
+kann. Hier eine Liste zu erfinden schaltete eine Zahlungsart ab, die er morgen freischaltet.
+
+### Jede Rechnung sagt, welche Rate sie ist
+
+Drei Raten ergaben drei Rechnungen mit dreimal demselben Satz und demselben Betrag. Die
+Hauptzeile trägt jetzt den Zusatz: „Chorleitungskurs — Rate 1 von 3 (Gesamt 1.560,00 €)", bei
+einem Abo ohne Ende stattdessen den Takt. **Am Betrag ändert das nichts** — § 14 UStG will den
+Betrag der abgerechneten Leistung, und das ist die Rate. Der Zusatz sagt nur, wozu sie gehört.
+
+Dabei zwei Fehler mitgenommen, die vorher niemand gesehen hatte:
+
+- **Die Zeile eines Zyklus trug den rohen Handle.** `Fulfilment::openCycle()` schrieb
+  `offer:choiraccelerator-raten` als Namen, während die Erstzahlung „ChoirAccelerator" aus dem
+  Katalog nahm. Ab der zweiten Rate wechselte die Beschriftung auf der Rechnung stumm.
+  `InvoiceWriter` druckt `item.name` unverändert und holt für eine vorhandene Position nichts
+  nach.
+- **`trial_discount` stand in keiner der beiden Sprachdateien.** `Subscriptions::trialDiscount()`
+  rief den Schlüssel, und auf der Zahlung landete der Schlüssel selbst.
+
+Dazu `Money::display()` und `Money::symbol()`: derselbe Betrag für einen Menschen statt für die
+Leitung. `format()` schreibt weiter „1560.00" für den Anbieter.
+
 ## 1.19.0 — 2026-09-07
 
 **Eine Einstellungs-Seite im Control Panel.** § 356a BGB (Widerrufsbutton) und § 312k BGB

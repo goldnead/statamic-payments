@@ -79,6 +79,25 @@ return [
     'subscription_cancelled_bulk' => 'Das Abo wurde gekündigt.|:count Abos wurden gekündigt.',
     'subscription_cancel_failed' => 'Der Anbieter hat :failed von :total Abos nicht gekündigt. Diese sind unverändert; bitte im Anbieter-Konto nachsehen.',
 
+    // Was auf der Rechnung neben dem Produktnamen steht, wenn nicht der ganze
+    // Preis geflossen ist. Die Rechnung selbst rechnet unverändert über den
+    // Betrag dieser einen Zahlung ab — § 14 UStG will den Betrag der
+    // abgerechneten Leistung, und das ist die Rate. Der Zusatz sagt nur, wozu
+    // sie gehört; ohne ihn steht auf drei Rechnungen dreimal dasselbe.
+    'invoice_line_installment' => ':name — Rate :number von :times (Gesamt :total)',
+    'invoice_line_subscription' => ':name — :interval',
+    'interval_1 month' => 'monatlich',
+    'interval_3 months' => 'vierteljährlich',
+    'interval_6 months' => 'halbjährlich',
+    'interval_12 months' => 'jährlich',
+    'interval_1 year' => 'jährlich',
+    'interval_1 week' => 'wöchentlich',
+
+    // Der Nachlass, den ein Testzeitraum heute gewährt. Stand bis 07.09.2026
+    // in keiner der beiden Sprachdateien: `Subscriptions::trialDiscount()`
+    // rief den Schlüssel, und auf der Zahlung landete der Schlüssel selbst.
+    'trial_discount' => 'Testzeitraum, :days Tage',
+
     // Widerrufe (§ 356a BGB) und Kündigungen (§ 312k BGB) — die Bildschirme
     // im Control Panel und das, was beide teilen.
     'permission_group' => 'Zahlungen',

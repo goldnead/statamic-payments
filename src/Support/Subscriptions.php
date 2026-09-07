@@ -95,12 +95,109 @@ class Subscriptions
     }
 
     /**
+     * Ob dieser Betrieb überhaupt eine Vereinbarung beginnen kann.
+     *
+     * Zwei Bedingungen, die nichts miteinander zu tun haben: der Anbieter muss
+     * Abrechnungen auf Wiedervorlage können, und der Betrieb muss sich die
+     * Zahlungsart des Käufers merken dürfen. Beides ist ohne einen Kauf
+     * feststellbar — und genau dafür ist diese Methode da. Eine aufrufende
+     * Strecke, die eine Ratenoption **anzeigt**, muss vorher wissen, ob sie sie
+     * auch einlösen kann; das erst im `start()` als `null` herauszufinden ist
+     * eine Sackgasse mitten in der Kasse.
+     */
+    public function canStart(): bool
+    {
+        return $this->available()
+            && (bool) config('statamic-payments.follow_up.collect_mandate', false);
+    }
+
+    /**
+     * Wie eine Position heißt, die nur einen Teil des Ganzen abrechnet.
+     *
+     * Ohne diesen Zusatz stehen auf drei Rechnungen dreimal derselbe Satz und
+     * derselbe Betrag, und weder Käufer noch Buchhaltung sehen, dass es
+     * dieselbe Leistung war. Der Zusatz ändert nichts an der Rechnung selbst:
+     * abgerechnet wird weiter der Betrag **dieser** Zahlung, weil § 14 UStG den
+     * Betrag der abgerechneten Leistung will und das die Rate ist. Was hier
+     * dazukommt, ist die Zuordnung, nicht der Betrag.
+     *
+     * **Statisch, weil zwei sehr verschiedene Stellen dieselbe Zeile brauchen**
+     * und keine von beiden ein `Subscriptions` in der Hand hat: die erste
+     * Zahlung entsteht in {@see Checkout::start()}, mitten in einer
+     * Transaktion, und ein Zyklus in {@see Fulfilment::openCycle()}, im Webhook
+     * des Anbieters. Zweimal getippt wäre es zweimal anders.
+     *
+     * Ein Rhythmus **ohne** feste Anzahl ist kein Ratenkauf, sondern ein Abo.
+     * Dort gibt es keine Gesamtsumme, die man nennen könnte — sie steht erst
+     * fest, wenn gekündigt wird. Also nennt die Zeile den Takt.
+     *
+     * @param  string  $name  Der Produktname, wie der Katalog ihn heute schreibt.
+     * @param  string  $interval  Der Rhythmus, in der Schreibweise des Anbieters („1 month").
+     * @param  int|null  $times  Wie viele Zahlungen es insgesamt sind, null bei einem Abo ohne Ende.
+     * @param  int  $number  Die wievielte Zahlung diese ist, bei 1 beginnend.
+     * @param  int  $amountCent  Was eine einzelne Zahlung kostet.
+     */
+    public static function lineLabel(
+        string $name,
+        string $interval,
+        ?int $times,
+        int $number,
+        int $amountCent,
+        ?string $currency,
+    ): string {
+        if ($times === null || $times < 2) {
+            return __('statamic-payments::messages.invoice_line_subscription', [
+                'name' => $name,
+                'interval' => self::intervalLabel($interval),
+            ]);
+        }
+
+        return __('statamic-payments::messages.invoice_line_installment', [
+            'name' => $name,
+            'number' => $number,
+            'times' => $times,
+            'total' => Money::display($times * $amountCent, $currency),
+        ]);
+    }
+
+    /**
+     * Der Rhythmus in Worten, oder unverändert, wenn es dafür keine gibt.
+     *
+     * Mollie nimmt „1 month", „3 months", „1 year" und einiges dazwischen. Für
+     * die geläufigen steht eine Übersetzung bereit; alles andere geht so durch,
+     * wie der Anbieter es schreibt. Das ist hässlicher als eine erfundene
+     * Formulierung und dafür nie falsch.
+     */
+    protected static function intervalLabel(string $interval): string
+    {
+        $key = 'statamic-payments::messages.interval_'.trim($interval);
+        $wort = __($key);
+
+        return is_string($wort) && $wort !== $key ? $wort : trim($interval);
+    }
+
+    /**
      * Begin one. Hands back the checkout for the first payment.
      *
      * Null when the product is not recurring, the provider cannot do it, or the
      * site has not turned mandate collection on — a subscription without a
      * stored card is not a subscription.
      *
+     * **Ein Korb ist erlaubt, ein Plan darin nicht zweimal.** Wer eine Liste
+     * übergibt, kauft die ganze Liste in der ersten Zahlung; den Rhythmus gibt
+     * allein der **erste** Handle vor, und die Folgeeinzüge belasten nur dessen
+     * Betrag (siehe {@see startFromPayment()}, das den Betrag aus dem Katalog
+     * dieses einen Produkts nimmt). Damit ist ein Bump neben einer Ratenoption
+     * genau das, was er sein soll: einmal bezahlt, nicht jede Rate wieder. Ohne
+     * diesen Weg musste eine Strecke mit Korb an `Checkout::start()` vorbei —
+     * und die Absicht kann sie dort nicht selbst anheften, `subscription_intent`
+     * steht in {@see PaymentDetails::RESERVED_META}.
+     *
+     * **Gutschein und Testzeitraum können nicht beide gelten.** `Checkout` nimmt
+     * einen `Discount`, und der Testzeitraum hat Vorrang: er ist der Preis, den
+     * der Käufer auf der Seite gesehen hat.
+     *
+     * @param  string|list<string>  $products
      * @param  array<string, mixed>  $buyer
      * @param  array<string, mixed>|PaymentDetails  $details  Was die aufrufende
      *                                                        Strecke an die erste Zahlung heften will. Siehe
@@ -108,9 +205,15 @@ class Subscriptions
      *
      * @throws \InvalidArgumentException wenn $details etwas enthält, das dem Paket gehört
      */
-    public function start(string $product, array $buyer = [], ?string $returnUrl = null, array|PaymentDetails $details = []): ?CheckoutResult
+    public function start(string|array $products, array $buyer = [], ?string $returnUrl = null, array|PaymentDetails $details = [], ?Discount $discount = null): ?CheckoutResult
     {
         $details = PaymentDetails::from($details);
+
+        // Der Rhythmus hängt am ersten Handle, nicht am Korb. Alles Weitere
+        // darin ist Beiwerk der ersten Zahlung.
+        $product = is_array($products)
+            ? (string) ($products[0] ?? '')
+            : $products;
 
         $plan = $this->planFor($product);
 
@@ -137,10 +240,10 @@ class Subscriptions
         // `startFromPayment()` sah dann kein `subscription_intent`, tat nichts,
         // und niemand erfuhr, dass ein bezahltes Abo keines wurde.
         return $this->checkout->start(
-            $product,
+            $products,
             $buyer,
             $returnUrl,
-            $this->trialDiscount($product, $plan),
+            $this->trialDiscount($product, $plan) ?? $discount,
             $details->plus([
                 'subscription_intent' => [
                     'product' => $product,

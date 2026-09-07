@@ -79,6 +79,20 @@ return [
     'subscription_cancelled_bulk' => 'The subscription was cancelled.|:count subscriptions were cancelled.',
     'subscription_cancel_failed' => 'The provider would not cancel :failed of :total subscriptions. Those are unchanged; check them in your provider dashboard.',
 
+    // What stands next to the product name on an invoice when the whole price
+    // did not change hands. The invoice still bills the amount of this one
+    // payment; the note only says what it belongs to.
+    'invoice_line_installment' => ':name — instalment :number of :times (total :total)',
+    'invoice_line_subscription' => ':name — :interval',
+    'interval_1 month' => 'monthly',
+    'interval_3 months' => 'quarterly',
+    'interval_6 months' => 'twice a year',
+    'interval_12 months' => 'yearly',
+    'interval_1 year' => 'yearly',
+    'interval_1 week' => 'weekly',
+
+    'trial_discount' => 'Trial period, :days days',
+
     // Withdrawals (§ 356a BGB) and cancellations (§ 312k BGB) — the Control
     // Panel screens and what both share.
     'permission_group' => 'Payments',

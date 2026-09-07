@@ -209,10 +209,36 @@ class Fulfilment
         // A line, like every other payment has. Without one
         // `Payment::itemsTotalCent()` reads zero for a cycle, and any report
         // built over lines silently leaves out all recurring revenue.
+        //
+        // **Der Name stand bis 07.09.2026 als roher Handle darin.** Auf der
+        // Rechnung eines Zyklus las der Käufer damit `offer:choiraccelerator-raten`
+        // statt „ChoirAccelerator" — die Erstzahlung nimmt den Namen aus dem
+        // Katalog, und ab der zweiten Rate wechselte die Beschriftung stumm.
+        // `InvoiceWriter` druckt `item.name` unverändert, holt für eine
+        // vorhandene Position also nichts nach.
+        //
+        // Dazu die Zuordnung: die wievielte Rate von wie vielen. `times` am Abo
+        // ist die Zahl der **verbleibenden** Einzüge nach der ersten (siehe
+        // `Subscriptions::startFromPayment()`), das Ganze also `times + 1`. Und
+        // `times_charged` zählt die bereits verbuchten Zyklen; die erste Rate
+        // war die Erstzahlung, diese hier ist somit `times_charged + 2`.
+        // Gezählt wird vor `recordCycle()`, das gleich danach hochzählt.
+        $katalog = app(Catalogue::class)->find($subscription->product);
+        $name = is_string($katalog['name'] ?? null) && $katalog['name'] !== ''
+            ? $katalog['name']
+            : $subscription->product;
+
         PaymentItem::create([
             'payment_id' => $payment->getKey(),
             'product' => $subscription->product,
-            'name' => $subscription->product,
+            'name' => Subscriptions::lineLabel(
+                $name,
+                (string) $subscription->interval,
+                $subscription->times === null ? null : ((int) $subscription->times) + 1,
+                ((int) $subscription->times_charged) + 2,
+                (int) $subscription->amount_cent,
+                $subscription->currency,
+            ),
             'amount_cent' => $subscription->amount_cent,
             'quantity' => 1,
             'kind' => PaymentItem::KIND_PRIMARY,

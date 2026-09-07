@@ -117,7 +117,14 @@ class Checkout
                         ?? (is_string($line['offer'] ?? null) && $line['offer'] !== '' ? $line['offer'] : null),
                     // The name as it is today. A product renamed next year must
                     // not change what an old order says was bought.
-                    'name' => $line['name'],
+                    //
+                    // Traegt diese Zahlung die Absicht, eine Vereinbarung zu
+                    // beginnen, sagt die **erste** Zeile das auch: „Rate 1 von
+                    // 3 (Gesamt 1.560,00 €)". Nur die erste — ein Bump daneben
+                    // ist einmal gekauft und wird nie wieder abgebucht.
+                    'name' => $index === 0
+                        ? self::planLabel($payment, $line)
+                        : $line['name'],
                     'amount_cent' => $line['amount_cent'],
                     'quantity' => $line['quantity'],
                     'discount_cent' => $anteile[$index] ?? 0,
@@ -163,10 +170,6 @@ class Checkout
         // API's own.
         $methods = PaymentMethods::configured();
 
-        if ($methods !== []) {
-            $payload['method'] = count($methods) === 1 ? $methods[0] : $methods;
-        }
-
         // Only if the site asked for it. Asking the provider to remember
         // somebody's payment method is a thing that buyer has to be told about
         // on the checkout page; doing it by default would decide that for every
@@ -179,6 +182,26 @@ class Checkout
             $payload['customerId'] = $reference;
             $payload['sequenceType'] = 'first';
             $payment->forceFill(['customer_reference' => $reference])->save();
+
+            // **Von den konfigurierten bleiben nur die, die ein Mandat
+            // hinterlassen.** `canHoldMandate()` oben fragt „ist wenigstens
+            // eine dabei" — das reicht, um den Weg zu gehen, aber nicht, um
+            // die Liste unverändert weiterzureichen. Stünde Klarna neben der
+            // Karte in der Konfiguration, sähe der Käufer beide, wählte
+            // Klarna, und der Anbieter lehnte die `sequenceType: first` ab:
+            // ein Abbruch mitten in der Kasse, an einer Stelle, an der schon
+            // alles ausgefüllt war.
+            //
+            // Eine **leere** Konfiguration bleibt leer. Sie heißt „Mollie
+            // entscheidet", und Mollie zeigt bei einer ersten Zahlung von
+            // selbst nur, was ein Mandat kann. Hier eine Liste zu erfinden
+            // würde eine Zahlungsart abschalten, die der Anbieter morgen
+            // freischaltet.
+            $methods = array_values(array_intersect($methods, PaymentMethods::MANDATE_FIRST));
+        }
+
+        if ($methods !== []) {
+            $payload['method'] = count($methods) === 1 ? $methods[0] : $methods;
         }
 
         $session = $this->gateway->createPayment($payload);
@@ -508,6 +531,49 @@ class Checkout
         return new CheckoutResult(
             $payment,
             $this->safeReturnUrl($returnUrl, $payment),
+        );
+    }
+
+    /**
+     * Die Beschriftung der Hauptzeile, wenn diese Zahlung eine Vereinbarung
+     * beginnt — sonst schlicht der Name des Produkts.
+     *
+     * Gelesen wird die Absicht von der Zahlung, nicht vom Katalog. Der Katalog
+     * sagt, was ein Handle **heute** für einen Rhythmus hat; die Zahlung sagt,
+     * was der Käufer **gewählt** hat. Sobald es Preis-Optionen gibt (ein
+     * Angebot, mehrere Zahlweisen), sind das zwei verschiedene Antworten, und
+     * die Rechnung schuldet die zweite.
+     *
+     * Fehlt die Absicht oder ist sie unvollständig, bleibt es beim Namen. Ein
+     * halber Zusatz („Rate 1 von") wäre schlimmer als keiner.
+     *
+     * @param  array<string, mixed>  $line
+     */
+    protected static function planLabel(Payment $payment, array $line): ?string
+    {
+        $name = $line['name'] ?? null;
+        $meta = is_array($payment->meta) ? $payment->meta : [];
+        $intent = $meta['subscription_intent'] ?? null;
+
+        if (! is_string($name) || $name === '' || ! is_array($intent)) {
+            return is_string($name) ? $name : null;
+        }
+
+        $interval = $intent['interval'] ?? null;
+
+        if (! is_string($interval) || trim($interval) === '') {
+            return $name;
+        }
+
+        $times = $intent['times'] ?? null;
+
+        return Subscriptions::lineLabel(
+            $name,
+            $interval,
+            is_int($times) ? $times : null,
+            1,
+            (int) ($line['amount_cent'] ?? 0),
+            $payment->currency,
         );
     }
 

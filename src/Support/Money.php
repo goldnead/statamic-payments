@@ -51,4 +51,44 @@ final class Money
 
         return number_format($minorUnits / (10 ** $decimals), $decimals, '.', '');
     }
+
+    /**
+     * Derselbe Betrag, aber für einen Menschen.
+     *
+     * `format()` schreibt für die Leitung: Punkt als Dezimaltrennzeichen, kein
+     * Tausenderpunkt, kein Zeichen. Das ist richtig gegenüber einem Anbieter
+     * und falsch auf einer Rechnungszeile, wo „1560.00 EUR" wie ein Auszug aus
+     * einem Log aussieht. Zwei Methoden statt eines Schalters, weil die beiden
+     * Aufgaben nichts miteinander zu tun haben und ein Schalter irgendwann
+     * falsch gestellt wird.
+     *
+     * Die Stellenzahl kommt weiter aus derselben Tabelle oben — ein Yen-Betrag
+     * bekommt hier so wenig Nachkommastellen wie dort.
+     */
+    public static function display(int $minorUnits, ?string $currency): string
+    {
+        $decimals = self::decimals($currency);
+
+        return number_format($minorUnits / (10 ** $decimals), $decimals, ',', '.')
+            .' '.self::symbol($currency);
+    }
+
+    /**
+     * Das Zeichen, oder der Code, wenn es keins gibt.
+     *
+     * Bewusst kurz gehalten: die Liste nennt die Währungen, in denen dieses
+     * Paket tatsächlich abgerechnet wird. Ein Code ist eine richtige Antwort,
+     * ein falsches Zeichen nicht — deshalb fällt alles Unbekannte auf den Code
+     * zurück und wird nicht geraten.
+     */
+    public static function symbol(?string $currency): string
+    {
+        return match (strtoupper(trim((string) $currency))) {
+            'EUR' => '€',
+            'CHF' => 'CHF',
+            'GBP' => '£',
+            'USD' => '$',
+            default => strtoupper(trim((string) $currency)),
+        };
+    }
 }

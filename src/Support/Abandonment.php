@@ -4,6 +4,8 @@ namespace Goldnead\StatamicPayments\Support;
 
 use Goldnead\StatamicPayments\Events\CheckoutAbandoned;
 use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Models\Subscription;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 
 /**
@@ -50,6 +52,7 @@ class Abandonment
             ->whereNull('abandoned_notified_at')
             ->whereNull('fulfilled_at')
             ->where('created_at', '<=', $grenze)
+            ->tap(fn ($abfrage) => $this->ohneAboRaten($abfrage))
             ->orderBy('id')
             ->chunkById(200, function ($stapel) use (&$gezaehlt) {
                 foreach ($stapel as $zahlung) {
@@ -58,6 +61,33 @@ class Abandonment
             });
 
         return $gezaehlt;
+    }
+
+    /**
+     * Die Rate eines laufenden Abos ist kein liegengebliebener Einkauf.
+     *
+     * Dieselbe Wache wie in `payments:prune-unpaid`, aus demselben Grund und an
+     * derselben Zeile: ein gescheiterter Stripe-Zyklus wird als `open` angelegt
+     * und bleibt `open`, passt also genau in diese Abfrage. Es gibt aber keinen
+     * Warenkorb, den jemand noch abschliessen koennte — es gibt ein Abo, dessen
+     * Karte nicht mehr geht, und dafuer schreibt die Mahnstrecke. Ein „Sie haben
+     * etwas vergessen" daneben verbrennt den Kanal genau in dem Augenblick, in
+     * dem der Kunde einen ernsten Brief bekommen soll.
+     *
+     * Zwei Merkmale, weil eines nicht reicht: `meta.cycle_of` steht ab dem
+     * Anlegen der Zyklus-Zeile da und gilt auch, wenn die Mahnstrecke
+     * abgeschaltet ist; der Verweis aus `dunning_payment_id` faengt jede Zeile,
+     * an der eine Strecke haengt, egal wie sie entstanden ist.
+     *
+     * @param  Builder<Payment>  $abfrage
+     */
+    protected function ohneAboRaten($abfrage): void
+    {
+        $abfrage
+            ->whereNull('meta->cycle_of')
+            ->whereNotIn('id', Subscription::query()
+                ->whereNotNull('dunning_payment_id')
+                ->select('dunning_payment_id'));
     }
 
     /**
@@ -74,6 +104,9 @@ class Abandonment
             ->whereNull('abandoned_notified_at')
             ->whereNull('fulfilled_at')
             ->whereIn('status', self::OFFEN)
+            // Auch hier, nicht nur im Sweep: `announce()` ist oeffentlich, und
+            // eine Wache, die nur auf dem einen Weg steht, ist keine.
+            ->tap(fn ($abfrage) => $this->ohneAboRaten($abfrage))
             ->update(['abandoned_notified_at' => Carbon::now(), 'updated_at' => Carbon::now()]);
 
         if ($beansprucht === 0) {

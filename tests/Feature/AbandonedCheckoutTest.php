@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Tests\Feature;
 
 use Goldnead\StatamicPayments\Events\CheckoutAbandoned;
 use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\Abandonment;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use Illuminate\Support\Carbon;
@@ -138,6 +139,61 @@ class AbandonedCheckoutTest extends TestCase
         $this->zahlung(['created_at' => Carbon::now()->subMinutes(20)]);
 
         $this->assertSame(1, app(Abandonment::class)->sweep());
+    }
+
+    #[Test]
+    public function a_failed_cycle_of_a_running_agreement_is_not_an_abandoned_purchase(): void
+    {
+        // Ein gescheiterter Stripe-Zyklus wird als `open` angelegt und bleibt
+        // `open` — die Form, auf die diese Bereinigung genau passt. Er ist aber
+        // kein liegengebliebener Einkauf: es gibt keinen Warenkorb, den jemand
+        // noch abschliessen koennte, sondern ein laufendes Abo, dessen Karte
+        // nicht mehr geht. Dafuer schreibt die Mahnstrecke. Ein „Sie haben
+        // etwas vergessen" daneben verbrennt den Kanal genau in dem Moment, in
+        // dem der Kunde einen ernsten Brief bekommen soll — und `prune-unpaid`
+        // haelt aus demselben Grund die Finger davon.
+        Event::fake([CheckoutAbandoned::class]);
+
+        $abo = Subscription::create([
+            'provider' => 'stripe',
+            'provider_id' => 'sub_1',
+            'customer_reference' => 'cus_1',
+            'product' => 'kurs',
+            'amount_cent' => 24900,
+            'currency' => 'EUR',
+            'interval' => '1 month',
+            'times_charged' => 4,
+            'status' => Subscription::STATUS_ACTIVE,
+            'starts_at' => Carbon::now()->subMonths(4),
+            'email' => 'wer@example.com',
+        ]);
+
+        $rate = $this->zahlung([
+            'provider' => 'stripe',
+            'meta' => ['cycle_of' => ['subscription_id' => $abo->getKey()]],
+        ]);
+
+        $abo->forceFill(['dunning_started_at' => Carbon::now(), 'dunning_payment_id' => $rate->getKey()])->save();
+
+        $this->assertSame(0, app(Abandonment::class)->sweep());
+        Event::assertNotDispatched(CheckoutAbandoned::class);
+        $this->assertNull($rate->fresh()->abandoned_notified_at);
+    }
+
+    #[Test]
+    public function a_cycle_is_left_alone_even_without_a_sequence_running(): void
+    {
+        // Die Wache haengt nicht an der Mahnstrecke. Ist sie abgeschaltet, ist
+        // der Zyklus trotzdem kein abgebrochener Kauf.
+        Event::fake([CheckoutAbandoned::class]);
+
+        $this->zahlung([
+            'provider' => 'stripe',
+            'meta' => ['cycle_of' => ['subscription_id' => 7, 'first_payment_id' => 3]],
+        ]);
+
+        $this->assertSame(0, app(Abandonment::class)->sweep());
+        Event::assertNotDispatched(CheckoutAbandoned::class);
     }
 
     #[Test]

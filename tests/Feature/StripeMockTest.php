@@ -44,9 +44,17 @@ class StripeMockTest extends TestCase
         }
     }
 
+    /**
+     * Ten seconds, not two.
+     *
+     * A short probe turns a busy machine into a silent skip: the container is
+     * running, the suite says nothing, and the one test set that checks the
+     * wire format against Stripe's own spec quietly does not run. A skip that
+     * depends on load is worse than a slow test.
+     */
     protected function reachable(string $base): bool
     {
-        $context = stream_context_create(['http' => ['timeout' => 2, 'ignore_errors' => true]]);
+        $context = stream_context_create(['http' => ['timeout' => 10, 'ignore_errors' => true]]);
 
         return @file_get_contents(rtrim($base, '/').'/v1/customers', false, $context) !== false;
     }

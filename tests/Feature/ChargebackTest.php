@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Tests\Feature;
 
 use Goldnead\StatamicPayments\Events\PaymentChargedBack;
 use Goldnead\StatamicPayments\Events\PaymentPaid;
+use Goldnead\StatamicPayments\Integrations\EntitlementsBridge;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Support\Chargebacks;
 use Goldnead\StatamicPayments\Tests\TestCase;
@@ -272,6 +273,36 @@ class ChargebackTest extends TestCase
         $this->assertNull($payment->fulfilled_at, 'a charged-back payment must not be fulfilled');
         Event::assertNotDispatched(PaymentPaid::class);
         Event::assertDispatched(PaymentChargedBack::class);
+    }
+
+    #[Test]
+    public function the_access_is_withdrawn_with_its_own_reason(): void
+    {
+        // „Zugang entziehen" is a ticket requirement, and the event firing does
+        // not prove it — the listener has to be discovered and has to call the
+        // bridge. The reason matters too: sharing the refund wording would tell
+        // a support reader that somebody here decided to give the money back,
+        // when in fact it was taken.
+        $bridge = new class extends EntitlementsBridge
+        {
+            public array $revoked = [];
+
+            public function revokeFor(Payment $payment, bool $isFull, string $reason = 'Zahlung erstattet'): void
+            {
+                $this->revoked[] = ['payment' => $payment->getKey(), 'full' => $isFull, 'reason' => $reason];
+            }
+        };
+
+        $this->app->instance(EntitlementsBridge::class, $bridge);
+
+        $payment = $this->paidPayment('mollie', 'tr_access');
+
+        app(Chargebacks::class)->record($payment, 'chb_access', 1900);
+
+        $this->assertSame(
+            [['payment' => $payment->getKey(), 'full' => true, 'reason' => 'Rückbuchung']],
+            $bridge->revoked,
+        );
     }
 
     #[Test]

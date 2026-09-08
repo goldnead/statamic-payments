@@ -60,6 +60,7 @@ checkout.session.expired
 invoice.paid
 invoice.payment_failed
 charge.refunded
+charge.dispute.created
 ```
 
 Add `payment_intent.succeeded` and `payment_intent.payment_failed` **only if the site uses follow-up
@@ -580,7 +581,7 @@ wrong about both. So it gets its own state, `charged_back_at`, next to the statu
 instead of it: a disputed order is still `paid`, because the money did move and the thing was
 delivered.
 
-Both providers feed it, and neither needs configuring beyond the webhook that is already there:
+Both providers feed it, and neither needs configuring beyond the webhook — though Stripe needs one more event subscribed:
 
 | Provider | How it arrives |
 |---|---|
@@ -639,6 +640,13 @@ Each letter carries a **signed, short-lived link into the customer portal**, whe
 method can be changed. Short-lived is the point — it is minutes, not days. An expired one lands on
 the portal's own "send me a link" page rather than nowhere, so a letter read the next morning still
 works, with one extra click.
+
+**On Stripe the sequence starts from the event, not the invoice status.** An invoice whose charge
+failed stays `open` through Stripe's whole smart-retry window and only becomes `uncollectible`
+afterwards, if the account is set up that way — so a sequence that waited for the status would
+never start at all. `invoice.payment_failed` is therefore read as what it says. It can only make a
+payment the provider already reports as **unpaid** count as failed; nothing in a webhook can make
+anything paid. Subscribe the endpoint to that event.
 
 **The sequence hangs on the provider, not on the calendar.** Before every letter the payment is
 asked about at the provider. If the money arrived in the meantime the sequence ends **silently** —

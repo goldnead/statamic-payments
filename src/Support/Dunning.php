@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Events\SubscriptionEnded;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\LazyCollection;
 use Throwable;
@@ -90,6 +91,21 @@ class Dunning
             return false;
         }
 
+        // Und nicht wieder aufmachen, was das Geld schon geschlossen hat.
+        //
+        // `whereNull('dunning_started_at')` allein wehrt nur eine **laufende**
+        // Strecke ab, nicht eine beendete. Auf Mollie bleibt eine gescheiterte
+        // Zahlung fuer immer gescheitert: wird ihr Webhook spaeter noch einmal
+        // zugestellt — nach einem 5xx, oder von Hand aus dem Dashboard —, oeffnet
+        // das eine **neue** Strecke mit spaeterem Startdatum, und `paidSince()`
+        // sieht die Ersatzzahlung davor dann nicht mehr. Der Kunde hat bezahlt
+        // und wird trotzdem dreimal gemahnt und gekuendigt.
+        //
+        // Dieselbe Falle wie zuvor, nur durch die andere Tuer.
+        if ($this->settledAfter($subscription, $payment)) {
+            return false;
+        }
+
         $opened = Subscription::query()
             ->whereKey($subscription->getKey())
             ->whereNull('dunning_started_at')
@@ -137,6 +153,24 @@ class Dunning
             ->where('subscription_id', $subscription->getKey())
             ->whereNotNull('fulfilled_at')
             ->where('fulfilled_at', '>=', $subscription->dunning_started_at)
+            ->exists();
+    }
+
+    /**
+     * Ob nach dieser gescheiterten Zahlung schon wieder Geld angekommen ist.
+     *
+     * Gemessen am Zeitpunkt der **Zahlung**, nicht der Strecke: eine Strecke,
+     * die dazu gehoert haette, kann laengst gestoppt sein, und genau darum geht
+     * es hier. Die gescheiterte Zahlung selbst zaehlt nicht mit — sie wurde nie
+     * erfuellt.
+     */
+    protected function settledAfter(Subscription $subscription, Payment $payment): bool
+    {
+        return Payment::query()
+            ->where('subscription_id', $subscription->getKey())
+            ->whereKeyNot($payment->getKey())
+            ->whereNotNull('fulfilled_at')
+            ->where('fulfilled_at', '>=', $payment->created_at ?? Carbon::now()->subCentury())
             ->exists();
     }
 
@@ -288,16 +322,29 @@ class Dunning
         // method would report failure every single time. The dunning columns
         // are the ones only this class writes, which makes them the honest
         // claim: whoever clears `dunning_started_at` is the one ending it.
-        $claimed = Subscription::query()
-            ->whereKey($subscription->getKey())
-            ->whereNotNull('dunning_started_at')
-            ->update([
-                'dunning_started_at' => null,
-                'dunning_payment_id' => null,
-                'updated_at' => Carbon::now(),
-            ]);
+        // Anspruch **und** Endzustand in einer Transaktion. Getrennt geschrieben
+        // waere zwischen ihnen ein Fenster, in dem ein Absturz die Strecke aus
+        // `running()` nimmt und die Vereinbarung trotzdem `active` laesst: nie
+        // wieder ein Brief, nie ein Ende, kein Zugangsentzug, und keine Zeile
+        // irgendwo. Rollt die Transaktion zurueck, steht die Strecke wieder da
+        // und der naechste Lauf versucht es erneut.
+        $claimed = DB::transaction(function () use ($subscription): bool {
+            $genommen = Subscription::query()
+                ->whereKey($subscription->getKey())
+                ->whereNotNull('dunning_started_at')
+                ->update([
+                    'dunning_started_at' => null,
+                    'dunning_payment_id' => null,
+                    'status' => Subscription::STATUS_CANCELLED,
+                    'ended_at' => $subscription->ended_at ?? Carbon::now(),
+                    'next_payment_at' => null,
+                    'updated_at' => Carbon::now(),
+                ]);
 
-        if ($claimed === 0) {
+            return $genommen > 0;
+        });
+
+        if (! $claimed) {
             return false;
         }
 
@@ -317,18 +364,13 @@ class Dunning
             ]);
         }
 
-        // Whatever the provider did, the row ends. `cancel()` may have written
-        // most of this already; this is the part that must be true either way.
+        // Der Endzustand steht schon oben, in derselben Transaktion wie der
+        // Anspruch. Hier bleibt nur, was `cancel()` zusaetzlich gesetzt haben
+        // kann und was ohne ihn fehlt: der Kuendigungszeitpunkt.
         Subscription::query()
             ->whereKey($subscription->getKey())
-            ->update([
-                'status' => Subscription::STATUS_CANCELLED,
-                // Whatever `cancel()` wrote stands; only a row it did not reach
-                // gets the time from here.
-                'ended_at' => ($subscription->fresh() ?? $subscription)->ended_at ?? Carbon::now(),
-                'next_payment_at' => null,
-                'updated_at' => Carbon::now(),
-            ]);
+            ->whereNull('cancelled_at')
+            ->update(['cancelled_at' => Carbon::now(), 'updated_at' => Carbon::now()]);
 
         // What takes the access away, through the listener that already exists
         // for an agreement running out.

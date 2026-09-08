@@ -11,7 +11,7 @@ return [
     'order' => 'Bestellung',
     // Neben dem Status auf dem Zahlungs-Bildschirm, nie an seiner Stelle: eine
     // zurueckgebuchte Bestellung ist weiter bezahlt.
-    'charged_back' => 'Zurueckgebucht',
+    'charged_back' => 'Zurückgebucht',
     'utility_title' => 'Zahlungen',
     'utility_nav' => 'Zahlungen',
     // Der Abschnitt der CP-Navigation, unter dem die Verkaufs-Bildschirme der

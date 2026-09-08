@@ -7,7 +7,9 @@ use Goldnead\StatamicPayments\Events\SubscriptionEnded;
 use Goldnead\StatamicPayments\Mail\DunningMail;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Portal\LinkTokenizer;
 use Goldnead\StatamicPayments\Support\Dunning;
+use Goldnead\StatamicPayments\Support\DunningNotice;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
@@ -159,6 +161,103 @@ class DunningTest extends TestCase
     }
 
     #[Test]
+    public function a_redelivered_old_failure_does_not_reopen_a_sequence_the_money_closed(): void
+    {
+        // The same trap as before, through the other door. `begin()` guarding
+        // only against a *running* sequence leaves the *stopped* one open: on
+        // Mollie a failed payment is failed for ever, so a redelivery of its
+        // webhook — after a 5xx, or from the dashboard — would open a fresh
+        // sequence with a later start date, and the replacement payment sits
+        // before it and is never seen again. Three letters and a cancellation,
+        // to somebody who paid.
+        // Die Uhr **vor** den Zeilen, sonst traegt die gescheiterte Zahlung das
+        // echte Heute und die Ersatzzahlung liegt davor.
+        Carbon::setTestNow(Carbon::parse('2026-09-01 09:00:00'));
+
+        $subscription = $this->agreement();
+        $this->failedCycle('tr_reopen');
+        $this->gateway->markFailedCycle('tr_reopen', 'sub_1');
+
+        $this->postJson('/!/statamic-payments/webhook', ['id' => 'tr_reopen'])->assertOk();
+        $this->assertNotNull($subscription->fresh()->dunning_started_at);
+
+        // Day two: the customer fixes their card, a new cycle is paid, and the
+        // sequence closes.
+        Carbon::setTestNow(Carbon::parse('2026-09-03 09:00:00'));
+        Payment::create([
+            'provider' => 'fake',
+            'provider_id' => 'tr_replacement',
+            'subscription_id' => $subscription->getKey(),
+            'product' => 'noten-paket',
+            'amount_cent' => 1900,
+            'currency' => 'EUR',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => now(),
+            'fulfilled_at' => now(),
+            'email' => 'kaeufer@example.com',
+        ]);
+        app(Dunning::class)->stop($subscription->fresh());
+        $this->assertNull($subscription->fresh()->dunning_started_at);
+
+        // Day four: the old, still-failed webhook is delivered again.
+        Carbon::setTestNow(Carbon::parse('2026-09-05 09:00:00'));
+        $this->postJson('/!/statamic-payments/webhook', ['id' => 'tr_reopen'])->assertOk();
+
+        $this->assertNull(
+            $subscription->fresh()->dunning_started_at,
+            'a paid agreement must not be dunned again by a redelivery of the old failure',
+        );
+
+        Carbon::setTestNow();
+    }
+
+    #[Test]
+    public function a_voided_cycle_does_not_start_a_sequence(): void
+    {
+        // Voiding a Stripe invoice is somebody's hand in the dashboard, not a
+        // failed collection. Three dunning letters would be the wrong answer to
+        // a deliberate cancellation.
+        $subscription = $this->agreement();
+        $this->failedCycle('tr_void');
+
+        $this->gateway->markFailedCycle('tr_void', 'sub_1', Payment::STATUS_CANCELED);
+
+        $this->postJson('/!/statamic-payments/webhook', ['id' => 'tr_void'])->assertOk();
+
+        $this->assertNull($subscription->fresh()->dunning_started_at);
+    }
+
+    #[Test]
+    public function a_suppressed_address_gets_no_letter_and_the_sequence_runs_on(): void
+    {
+        // The gate the ticket names. Somebody who asked never to be written to
+        // meant it, even about their own money — and the sequence still has to
+        // reach its end rather than stalling on a stage nobody may send.
+        [$subscription] = $this->openSequence();
+        Mail::fake();
+
+        $notice = new class(app(LinkTokenizer::class)) extends DunningNotice
+        {
+            public function suppressed(string $email, int $brandId): bool
+            {
+                return true;
+            }
+        };
+
+        $this->app->instance(DunningNotice::class, $notice);
+
+        Carbon::setTestNow(Carbon::parse('2026-09-04 10:00:00'));
+        $this->artisan('payments:dunning')->assertSuccessful();
+
+        Mail::assertNothingSent();
+        // The stage still counts as done, or a suppressed customer would hold a
+        // sequence open for ever.
+        $this->assertSame(1, (int) $subscription->fresh()->dunning_stage);
+
+        Carbon::setTestNow();
+    }
+
+    #[Test]
     public function a_failed_stripe_invoice_announces_itself_over_the_signed_webhook(): void
     {
         // The other provider, over its own signed endpoint. Without this the
@@ -200,7 +299,14 @@ class DunningTest extends TestCase
         Http::fake(['api.stripe.com/v1/invoices/in_stripe_failed*' => Http::response([
             'id' => 'in_stripe_failed',
             'object' => 'invoice',
-            'status' => 'uncollectible',
+            // Offen, und das ist der Punkt: eine Rechnung, deren Abbuchung
+            // scheiterte, bleibt bei Stripe waehrend des ganzen
+            // Wiederholungsfensters offen und wird erst danach uneinbringlich,
+            // wenn das Konto so eingestellt ist. Mit dem spaeteren Zustand
+            // gestellt haette dieser Test die eine Form geprueft, die es in der
+            // Praxis selten gibt — und die Mahnstrecke waere auf Stripe nie
+            // angelaufen, ohne dass es je aufgefallen waere.
+            'status' => 'open',
             'subscription' => 'sub_stripe_1',
             'customer_email' => 'kaeufer@example.com',
         ])]);
@@ -292,6 +398,45 @@ class DunningTest extends TestCase
 
         Mail::assertSent(DunningMail::class, 1);
         $this->assertSame(1, (int) $subscription->fresh()->dunning_stage);
+
+        Carbon::setTestNow();
+    }
+
+    #[Test]
+    public function a_stage_can_only_be_claimed_once(): void
+    {
+        // The property the ticket names as the trap, asked of the claim
+        // directly. Two sequential command runs do not prove it: the second one
+        // never reaches `claimStage()`, because no stage is due yet. This test
+        // would go red if the conditional UPDATE were rewritten as an
+        // unconditional one, which is exactly what a test for it must do.
+        [$subscription] = $this->openSequence();
+
+        $dunning = app(Dunning::class);
+
+        $this->assertTrue($dunning->claimStage($subscription->fresh(), 1));
+        $this->assertFalse($dunning->claimStage($subscription->fresh(), 1), 'a second worker must not get the same stage');
+
+        $this->assertSame(1, (int) $subscription->fresh()->dunning_stage);
+
+        // And giving it back makes it available again — otherwise a letter lost
+        // to a broken relay would cost the customer a stage of their sequence.
+        $dunning->releaseStage($subscription->fresh(), 1);
+        $this->assertTrue($dunning->claimStage($subscription->fresh(), 1));
+
+        Carbon::setTestNow();
+    }
+
+    #[Test]
+    public function a_stage_out_of_order_is_refused(): void
+    {
+        // Stage three cannot be taken while stage one is unsent. Without the
+        // `dunning_stage = n-1` condition the counter could jump and the
+        // customer would get the final notice first.
+        [$subscription] = $this->openSequence();
+
+        $this->assertFalse(app(Dunning::class)->claimStage($subscription->fresh(), 3));
+        $this->assertSame(0, (int) $subscription->fresh()->dunning_stage);
 
         Carbon::setTestNow();
     }

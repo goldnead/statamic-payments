@@ -126,16 +126,33 @@ class Chargebacks
         return true;
     }
 
+    /**
+     * Take this chargeback, or find it is already taken.
+     *
+     * Der Einsatz steht in einer **eigenen, verschachtelten** Transaktion, und
+     * das ist kein Zierrat: auf Postgres bricht eine fehlgeschlagene Anweisung
+     * die ganze Transaktion ab, und jede weitere Abfrage darin scheitert mit
+     * `25P02`, bis zurueckgerollt wird. Ohne den Sicherungspunkt starb der
+     * Aufrufer also genau dann, wenn die Rueckbuchung schon bekannt war — der
+     * haeufigste Fall ueberhaupt, weil beide Anbieter erneut zustellen.
+     *
+     * Laravel legt fuer eine verschachtelte `DB::transaction()` einen
+     * SAVEPOINT an und rollt bei einer Ausnahme nur bis dorthin zurueck. Die
+     * aeussere Transaktion bleibt damit brauchbar, auf jeder Engine.
+     *
+     * SQLite und MySQL verzeihen das Fehlen; Postgres nicht. Gefunden hat es
+     * der Treiber-Job in der CI, nicht das Nachdenken.
+     */
     protected function claim(Payment $payment, string $reference, int $amountCent, ?string $reason): bool
     {
         try {
-            DB::table('payment_chargebacks')->insert([
+            DB::transaction(fn () => DB::table('payment_chargebacks')->insert([
                 'payment_id' => $payment->getKey(),
                 'reference' => mb_substr($reference, 0, 191),
                 'amount_cent' => $amountCent,
                 'reason' => $reason === null ? null : mb_substr($reason, 0, 191),
                 'created_at' => Carbon::now(),
-            ]);
+            ]));
 
             return true;
         } catch (UniqueConstraintViolationException) {

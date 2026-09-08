@@ -282,6 +282,24 @@ class StripeGateway implements SubscriptionGateway
         return $refunds;
     }
 
+    /**
+     * The invoice a charge paid, if it paid one.
+     *
+     * A subscription cycle's row is stamped with the invoice id (`in_…`), not
+     * with a Checkout Session and not with the PaymentIntent. Without this a
+     * dispute on a renewal charge matches no row at all — and renewals are
+     * exactly the population a dunning release is about.
+     */
+    public function invoiceForCharge(string $chargeId): ?string
+    {
+        $charge = $this->get("/v1/charges/{$chargeId}");
+
+        $invoice = $charge['invoice'] ?? null;
+        $invoice = is_array($invoice) ? ($invoice['id'] ?? null) : $invoice;
+
+        return is_string($invoice) && $invoice !== '' ? $invoice : null;
+    }
+
     // ----------------------------------------------------------- follow-up
 
     public function rememberBuyer(array $buyer): string

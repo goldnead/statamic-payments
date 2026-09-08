@@ -36,7 +36,10 @@ class Fulfilment
 {
     public function __construct(protected PaymentGateway $gateway) {}
 
-    public function handle(string $providerId): ?Payment
+    /**
+     * @param  bool  $announcedFailure  whether the provider's own event said this charge failed
+     */
+    public function handle(string $providerId, bool $announcedFailure = false): ?Payment
     {
         $payment = Payment::query()
             ->where('provider', $this->gateway->provider())
@@ -102,7 +105,7 @@ class Fulfilment
         if (! $remote || ! $remote->isPaid()) {
             if ($remote) {
                 $this->recordUnpaid($payment, $remote);
-                $this->announceFailedCycle($payment, $remote);
+                $this->announceFailedCycle($payment, $remote, $announcedFailure);
             }
 
             return $payment;
@@ -158,7 +161,7 @@ class Fulfilment
      * fuer eine Vereinbarung anstossen, die es wirklich gibt und deren Zahlung
      * der Anbieter wirklich als nicht bezahlt fuehrt.
      */
-    protected function announceFailedCycle(Payment $payment, RemotePayment $remote): void
+    protected function announceFailedCycle(Payment $payment, RemotePayment $remote, bool $announcedFailure = false): void
     {
         if (! $remote->subscriptionId) {
             return;
@@ -166,7 +169,27 @@ class Fulfilment
 
         // `open` ist kein Fehlschlag. Eine Lastschrift unterwegs ist genau das,
         // und wer sie anmahnt, mahnt jemanden, dessen Geld gerade fliesst.
-        if (! in_array($remote->status, [Payment::STATUS_FAILED, Payment::STATUS_EXPIRED, Payment::STATUS_CANCELED], true)) {
+        //
+        // **Ausser der Anbieter sagt ausdruecklich, dass sie gescheitert ist.**
+        // Und das ist bei Stripe der Normalfall, nicht die Ausnahme: eine
+        // Rechnung, deren Abbuchung fehlschlug, bleibt waehrend des ganzen
+        // Wiederholungsfensters `open` und wird erst danach `uncollectible` —
+        // wenn das Konto so eingestellt ist. Nur auf den Status zu sehen hiess
+        // also: auf Stripe beginnt nie eine Mahnstrecke. Gefunden, weil der
+        // Test die eine Form gestellt hatte, die funktioniert.
+        //
+        // Der Behauptung des Aufrufers wird dabei nichts geglaubt, was ihm
+        // nuetzt: das Ereignis ist signiert, und es entscheidet nur, ob eine
+        // **nicht bezahlte** Zahlung als Fehlschlag gilt. Ein „bezahlt" kann es
+        // nicht herbeifuehren — das steht drei Zeilen weiter oben und kommt
+        // weiter allein vom Anbieter.
+        // `canceled` gehoert **nicht** dazu, anders als bei `recordUnpaid()`.
+        // Eine abgebrochene Zahlung ist kein gescheiterter Einzug: bei Stripe
+        // ist eine `void` gesetzte Rechnung genau das, ein Handgriff im
+        // Dashboard. Wer sie storniert, will keine drei Mahnbriefe ausloesen.
+        $failed = in_array($remote->status, [Payment::STATUS_FAILED, Payment::STATUS_EXPIRED], true);
+
+        if (! $failed && ! $announcedFailure) {
             return;
         }
 

@@ -173,6 +173,23 @@ class StripeWebhookController
             return;
         }
 
+        // Which of these say "this charge failed" in so many words.
+        //
+        // It matters because Stripe's own object often does not. An invoice
+        // whose charge failed stays `open` through the whole smart-retry
+        // window and only becomes `uncollectible` afterwards, if the account is
+        // set up that way — so a dunning sequence that waited for the status
+        // would never start on Stripe at all.
+        //
+        // The event type is only ever allowed to make a **not paid** payment
+        // count as failed. It cannot make anything paid; that still comes from
+        // asking Stripe.
+        $announcesFailure = in_array($type, [
+            'checkout.session.async_payment_failed',
+            'invoice.payment_failed',
+            'payment_intent.payment_failed',
+        ], true);
+
         match ($type) {
             'checkout.session.completed',
             'checkout.session.async_payment_succeeded',
@@ -182,7 +199,7 @@ class StripeWebhookController
             'invoice.payment_succeeded',
             'invoice.payment_failed',
             'payment_intent.succeeded',
-            'payment_intent.payment_failed' => $this->fulfil($gateway, $object),
+            'payment_intent.payment_failed' => $this->fulfil($gateway, $object, $announcesFailure),
 
             'charge.refunded' => $this->refund($gateway, $object),
 
@@ -202,7 +219,7 @@ class StripeWebhookController
     }
 
     /** @param  array<string, mixed>  $object */
-    protected function fulfil(StripeGateway $gateway, array $object): void
+    protected function fulfil(StripeGateway $gateway, array $object, bool $announcedFailure = false): void
     {
         $id = $object['id'] ?? null;
 
@@ -236,7 +253,7 @@ class StripeWebhookController
         // This is what stops a Stripe delivery from being looked up among
         // Mollie's rows: `Fulfilment` scopes every query to the gateway's own
         // handle, and this one says `stripe`.
-        app()->makeWith(Fulfilment::class, ['gateway' => $gateway])->handle($id);
+        app()->makeWith(Fulfilment::class, ['gateway' => $gateway])->handle($id, $announcedFailure);
     }
 
     /**
@@ -260,6 +277,7 @@ class StripeWebhookController
     {
         $reference = $dispute['id'] ?? null;
         $intentId = $dispute['payment_intent'] ?? null;
+        $chargeId = is_string($dispute['charge'] ?? null) ? $dispute['charge'] : null;
 
         if (! is_string($reference) || $reference === '' || ! is_string($intentId) || $intentId === '') {
             Log::warning('statamic-payments: a Stripe dispute arrived without an id or a payment intent; it could not be matched to an order.', [
@@ -269,7 +287,12 @@ class StripeWebhookController
             return;
         }
 
-        $payment = $this->paymentFor($gateway, $intentId);
+        // A subscription cycle's row carries the **invoice** id, not a session
+        // and not the intent — so a dispute on a renewal would otherwise match
+        // nothing at all. Asked of Stripe only when the two cheaper lookups
+        // came up empty.
+        $payment = $this->paymentFor($gateway, $intentId)
+            ?? ($chargeId === null ? null : $this->paymentForInvoice($gateway, $chargeId));
 
         if (! $payment) {
             // Loud. Money left the account for an order this site cannot name,
@@ -288,6 +311,21 @@ class StripeWebhookController
             (int) ($dispute['amount'] ?? 0),
             is_string($dispute['reason'] ?? null) ? $dispute['reason'] : null,
         );
+    }
+
+    /** The row for the invoice this charge paid, where it paid one. */
+    protected function paymentForInvoice(StripeGateway $gateway, string $chargeId): ?Payment
+    {
+        $invoiceId = $gateway->invoiceForCharge($chargeId);
+
+        if ($invoiceId === null) {
+            return null;
+        }
+
+        return Payment::query()
+            ->where('provider', $gateway->provider())
+            ->where('provider_id', $invoiceId)
+            ->first();
     }
 
     /** Whether this provider id is one this site actually stamped on a row. */

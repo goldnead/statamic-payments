@@ -86,6 +86,12 @@ class Gateways
         // bound its own subclass of a shipped adapter means *that* object when
         // it says the handle. A registered factory would otherwise quietly
         // hand back the stock class instead.
+        //
+        // ponytail: asking the default what it calls itself means building it,
+        // on every resolve, even when a factory ends up answering. Cheap for
+        // both shipped adapters and correct as written; give the registry a
+        // configured default handle if a listing of many rows ever shows up in
+        // a profile.
         if ($handle === '' || $handle === $this->defaultHandle()) {
             return $this->default();
         }

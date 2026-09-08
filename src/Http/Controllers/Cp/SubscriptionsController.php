@@ -6,6 +6,8 @@ use Goldnead\StatamicPayments\Http\Resources\Cp\SubscriptionsCollection;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Statamic\Facades\Scope;
 use Statamic\Http\Controllers\CP\CpController;
@@ -43,6 +45,17 @@ class SubscriptionsController extends CpController
             return $this->json($request);
         }
 
+        // `composer require` puts this screen in the nav; `php artisan migrate`
+        // puts the table in the database, and there is a gap between the two. A
+        // query in that gap is an HTTP 500 on somebody's first five minutes
+        // with the addon, so the screen asks first, says so in the log, and
+        // renders its empty state with the missing piece named.
+        $ready = Schema::hasTable((new Subscription)->getTable());
+
+        if (! $ready) {
+            Log::warning('statamic-payments: the subscriptions screen was opened before `php artisan migrate` ran; the `subscriptions` table does not exist.');
+        }
+
         return Inertia::render('statamic-payments::Subscriptions/Index', [
             'listingUrl' => cp_route('utilities.subscriptions'),
             // Without an action URL the Listing renders no checkboxes and no
@@ -57,7 +70,13 @@ class SubscriptionsController extends CpController
             // Whether anything exists at all, which is a different question
             // from whether this search found anything. Driven off the filtered
             // result, a fruitless search would claim the webhook is broken.
-            'hasAny' => Subscription::query()->exists(),
+            //
+            // The table is checked first. Between `composer require` and
+            // `php artisan migrate` this screen is in the nav and the table is
+            // not in the database; without the guard it answers 500 instead of
+            // the one sentence that says what is missing.
+            'hasAny' => $ready && Subscription::query()->exists(),
+            'ready' => $ready,
             // Every label on the screen, translated here. Building them in the
             // template works right up until this addon is installed somewhere
             // its language files are not part of the Control Panel dictionary,

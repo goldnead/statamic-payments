@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Support;
 
 use Goldnead\StatamicPayments\Events\PaymentRefunded;
 use Goldnead\StatamicPayments\Models\Payment;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -38,51 +39,33 @@ class Refunds
             return false;
         }
 
-        // Gelesen und geschrieben unter derselben Zeilensperre, in einer
-        // Transaktion.
+        // Der Anspruch wird eingetragen, nicht erfragt.
         //
-        // Vorher lag die Pruefung ausserhalb: „steht die Referenz schon drin,
-        // und wieviel ist noch offen" wurde auf dem Objekt beantwortet, das der
-        // Aufrufer in der Hand hielt, und danach blind gespeichert. Solange nur
-        // Mollie erstattete, kam nie mehr als eine Meldung gleichzeitig an.
-        // Stripe schickt zwei Teilerstattungen als zwei Ereignisse, die
-        // parallel in zwei Prozessen landen koennen — und dann gewinnt der
-        // zweite Schreibvorgang ueber den ersten hinweg: der erste Betrag ist
-        // aus `refunded_cent` verschwunden, seine Referenz aus `meta`, und die
-        // naechste Meldung bucht ihn ein zweites Mal. Am Ende steht in der
-        // Jahresauswertung eine Zahl, die nie jemand ueberwiesen hat.
-        $betrag = DB::transaction(function () use ($payment, $amountCent, $reference): int {
-            $zeile = Payment::query()->whereKey($payment->getKey())->lockForUpdate()->first();
+        // Vorher stand die Duplikatpruefung auf `meta['refunds']` und lief als
+        // Lesen-dann-Schreiben auf dem Objekt, das der Aufrufer in der Hand
+        // hielt. Solange nur Mollie erstattete, kam nie mehr als eine Meldung
+        // gleichzeitig an. Stripe schickt zwei Teilerstattungen als zwei
+        // Ereignisse, die parallel in zwei Prozessen landen koennen — und dann
+        // gewinnt der zweite Schreibvorgang ueber den ersten hinweg: dessen
+        // Betrag ist aus `refunded_cent` verschwunden, seine Referenz aus
+        // `meta`, und weil ein Stripe-Ereignis die GANZE Erstattungsliste der
+        // Belastung mitbringt, bucht die naechste Meldung ihn ein zweites Mal.
+        //
+        // Eine Zeilensperre reicht dafuer nicht: `lockForUpdate()` erzeugt auf
+        // SQLite gar keine Sperrklausel. Ein Unique-Index ist kein Hinweis,
+        // sondern eine Bedingung, und die setzt jede Datenbank gleich durch.
+        if ($reference !== null && ! $this->claim($payment, $amountCent, $reference)) {
+            return false;
+        }
 
-            if (! $zeile) {
-                return 0;
-            }
-
-            if ($reference !== null && $this->alreadyRecorded($zeile, $reference)) {
-                return 0;
-            }
-
-            // Nie mehr zurueck als vorne rein. Eine Ueberzahlung ist ein Fehler
-            // beim Anbieter oder beim Aufrufer, und sie hier durchzulassen
-            // erzeugte eine Bestellung mit negativem Erloes, die jede Auswertung
-            // still verfaelscht.
-            $offen = max(0, $zeile->amount_cent - $zeile->refunded_cent);
-            $betrag = min($amountCent, $offen);
-
-            if ($betrag <= 0) {
-                return 0;
-            }
-
-            $zeile->forceFill([
-                'refunded_cent' => $zeile->refunded_cent + $betrag,
-                'refunded_at' => Carbon::now(),
-                'meta' => $this->withReference($zeile, $reference),
-            ])->save();
-
-            return $betrag;
-        });
+        $betrag = $this->book($payment, $amountCent);
 
         if ($betrag <= 0) {
+            // Der Anspruch bleibt stehen. Er sagt wahrheitsgemaess, dass diese
+            // Erstattung dieser Bestellung bekannt ist — sie war nur ganz oder
+            // teilweise nicht mehr unterzubringen, weil vorne nie so viel
+            // hereinkam. Ihn wieder zu loeschen hiesse, dieselbe Meldung beim
+            // naechsten Mal erneut zu pruefen.
             return false;
         }
 
@@ -97,7 +80,85 @@ class Refunds
         return true;
     }
 
-    /** Was this exact refund already noted? */
+    /**
+     * Take this refund, or find it is already taken.
+     *
+     * The insert is the claim. Bestandszeilen aus der Zeit vor dieser Tabelle
+     * fuehren ihre Referenzen noch in `meta['refunds']`; die werden weiter
+     * beachtet, damit eine alte Erstattung nach dem Update nicht als neu
+     * durchgeht.
+     */
+    protected function claim(Payment $payment, int $amountCent, string $reference): bool
+    {
+        if ($this->alreadyRecorded($payment->fresh() ?? $payment, $reference)) {
+            return false;
+        }
+
+        try {
+            DB::table('payment_refunds')->insert([
+                'payment_id' => $payment->getKey(),
+                'reference' => mb_substr($reference, 0, 191),
+                'amount_cent' => $amountCent,
+                'created_at' => Carbon::now(),
+            ]);
+
+            return true;
+        } catch (UniqueConstraintViolationException) {
+            return false;
+        }
+    }
+
+    /**
+     * Den Betrag gutschreiben, ohne ihn vorher zu lesen.
+     *
+     * Ein bedingtes UPDATE statt Lesen-Rechnen-Schreiben: die Bedingung haelt
+     * die Regel „nie mehr zurueck als vorne rein" auch dann ein, wenn zwei
+     * Erstattungen gleichzeitig gutgeschrieben werden. Passt der volle Betrag
+     * nicht mehr, wird der Rest gebucht — und wo gar nichts mehr offen ist,
+     * bleibt es bei null.
+     */
+    protected function book(Payment $payment, int $amountCent): int
+    {
+        return (int) DB::transaction(function () use ($payment, $amountCent): int {
+            $offen = (int) (Payment::query()->whereKey($payment->getKey())->value('amount_cent') ?? 0)
+                - (int) (Payment::query()->whereKey($payment->getKey())->value('refunded_cent') ?? 0);
+
+            $betrag = min($amountCent, max(0, $offen));
+
+            if ($betrag <= 0) {
+                return 0;
+            }
+
+            $gebucht = Payment::query()
+                ->whereKey($payment->getKey())
+                ->whereRaw('refunded_cent + ? <= amount_cent', [$betrag])
+                ->update([
+                    'refunded_cent' => DB::raw('refunded_cent + '.$betrag),
+                    'refunded_at' => Carbon::now(),
+                    'updated_at' => Carbon::now(),
+                ]);
+
+            if ($gebucht === 0) {
+                // Zwischen Lesen und Schreiben hat jemand anders gebucht. Die
+                // Bedingung hat das abgefangen, statt die Bestellung mit einem
+                // negativen Erloes zurueckzulassen.
+                return 0;
+            }
+
+            // Nur noch eine Anzeige: die Wahrheit ueber Doppelmeldungen steht
+            // jetzt in `payment_refunds`. Deshalb darf ein verlorener Eintrag
+            // hier auch nichts mehr doppelt buchen.
+            $zeile = Payment::query()->whereKey($payment->getKey())->first();
+
+            if ($zeile) {
+                $zeile->forceFill(['meta' => $this->withReferences($zeile)])->saveQuietly();
+            }
+
+            return $betrag;
+        });
+    }
+
+    /** Was this exact refund already noted, by an older version of this class? */
     protected function alreadyRecorded(Payment $payment, string $reference): bool
     {
         $meta = $payment->meta ?? [];
@@ -106,21 +167,30 @@ class Refunds
     }
 
     /**
-     * The provider's refund ids, kept so a redelivery is recognisable.
+     * Die Referenzen, wie sie in der Anspruchstabelle stehen, plus was eine
+     * aeltere Fassung schon in `meta` hinterlassen hat.
+     *
+     * Abgeleitet und nicht angehaengt: ein Anhaengen an ein JSON-Feld ist
+     * Lesen-dann-Schreiben und verliert bei zwei gleichzeitigen Erstattungen
+     * einen Eintrag. Aus der Tabelle gelesen kommt immer die vollstaendige
+     * Liste heraus, egal wer zuerst fertig war.
      *
      * @return array<string, mixed>
      */
-    protected function withReference(Payment $payment, ?string $reference): array
+    protected function withReferences(Payment $payment): array
     {
         $meta = $payment->meta ?? [];
 
-        if ($reference === null) {
-            return $meta;
-        }
+        $referenzen = DB::table('payment_refunds')
+            ->where('payment_id', $payment->getKey())
+            ->orderBy('id')
+            ->pluck('reference')
+            ->all();
 
-        $meta['refunds'] = array_values(array_unique(
-            array_merge((array) ($meta['refunds'] ?? []), [$reference]),
-        ));
+        $meta['refunds'] = array_values(array_unique(array_merge(
+            array_values(array_filter((array) ($meta['refunds'] ?? []), 'is_string')),
+            $referenzen,
+        )));
 
         return $meta;
     }

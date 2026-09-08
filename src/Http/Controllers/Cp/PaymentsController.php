@@ -8,6 +8,8 @@ use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Support\Brands;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use Statamic\Facades\Scope;
 use Statamic\Http\Controllers\CP\CpController;
@@ -49,6 +51,17 @@ class PaymentsController extends CpController
             return $this->json($request);
         }
 
+        // `composer require` puts this screen in the nav; `php artisan migrate`
+        // puts the table in the database, and there is a gap between the two. A
+        // query in that gap is an HTTP 500 on somebody's first five minutes
+        // with the addon, so the screen asks first, says so in the log, and
+        // renders its empty state with the missing piece named.
+        $ready = Schema::hasTable((new Payment)->getTable());
+
+        if (! $ready) {
+            Log::warning('statamic-payments: the payments screen was opened before `php artisan migrate` ran; the `payments` table does not exist.');
+        }
+
         return Inertia::render('statamic-payments::Payments/Index', [
             'listingUrl' => cp_route('utilities.payments'),
             'filters' => Scope::filters(self::SCOPE),
@@ -60,7 +73,13 @@ class PaymentsController extends CpController
             // Whether anything exists at all, which is a different question
             // from whether this search found anything. Driven off the filtered
             // result, a fruitless search claimed the webhook was misconfigured.
-            'hasAny' => Payment::query()->exists(),
+            //
+            // The table is checked first. Between `composer require` and
+            // `php artisan migrate` this screen is reachable from the nav, and
+            // without the guard it answers 500 — an error page instead of the
+            // one sentence that says what is missing.
+            'hasAny' => $ready && Payment::query()->exists(),
+            'ready' => $ready,
         ]);
     }
 

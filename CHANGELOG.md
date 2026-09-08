@@ -61,7 +61,21 @@ from `meta['refunds']`. And because a Stripe refund event carries the charge's *
 list, the next delivery saw the lost reference as new and booked it a second time. Nothing failed,
 nothing was logged, and the wrong number reached the annual figures.
 
-Read and write now happen under one row lock inside the transaction.
+A refund reference is now claimed by inserting it into `payment_refunds`, which carries a unique
+index — the same shape as the webhook replay guard, and for the same reason. A row lock would not
+have done: Laravel's `lockForUpdate()` compiles to an empty string on SQLite, and this addon asks
+for "a database", not for one that can lock a row. The amount goes on with a conditional `UPDATE`
+that cannot take back more than came in, and `meta['refunds']` is now derived from the claim rows
+rather than appended to.
+
+Existing references in `meta['refunds']` are still honoured, so a refund booked before this version
+is not booked again after it. Run `php artisan migrate`.
+
+### Fixed: the Control Panel screens answered 500 before the migrations ran
+
+`composer require` puts the payments and subscriptions screens in the navigation; `php artisan
+migrate` puts their tables in the database. Opening either in the gap between the two hit an
+unguarded query. Both now check the table first, say so in the log, and render their empty state.
 
 ### Fixed: a yen subscription went out at a hundredth of its price
 

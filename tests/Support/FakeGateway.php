@@ -306,6 +306,40 @@ class FakeGateway implements SubscriptionGateway
         );
     }
 
+    /**
+     * Der Anbieter meldet eine Rueckbuchung an einer Zahlung.
+     *
+     * Mollies Form, und deshalb die, die hier steht: kein eigenes Ereignis,
+     * sondern ein Betrag an der Zahlung selbst. Der Zustand bleibt `paid` —
+     * genau die Falle, wegen der die Rueckbuchung vor der Statusfrage gelesen
+     * werden muss.
+     */
+    public function markChargedBack(string $providerId, int $amountCent, string $reference): void
+    {
+        $bisher = $this->remote[$providerId] ?? null;
+
+        $this->remote[$providerId] = new RemotePayment(
+            providerId: $providerId,
+            status: $bisher?->status ?? Payment::STATUS_PAID,
+            metadata: $bisher?->metadata ?? ($this->metadata[$providerId] ?? []),
+            email: $bisher?->email,
+            subscriptionId: $bisher?->subscriptionId,
+            chargedBackCent: $amountCent,
+            chargebackReference: $reference,
+        );
+    }
+
+    /** Der Anbieter meldet einen Zyklus, der zu einer Vereinbarung gehoert und scheiterte. */
+    public function markFailedCycle(string $providerId, string $subscriptionId, string $status = Payment::STATUS_FAILED): void
+    {
+        $this->remote[$providerId] = new RemotePayment(
+            providerId: $providerId,
+            status: $status,
+            metadata: $this->metadata[$providerId] ?? [],
+            subscriptionId: $subscriptionId,
+        );
+    }
+
     public function markStatus(string $providerId, string $status): void
     {
         $this->remote[$providerId] = new RemotePayment(

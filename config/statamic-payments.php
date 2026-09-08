@@ -42,6 +42,46 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Dunning
+    |--------------------------------------------------------------------------
+    |
+    | What happens when a cycle of a running agreement is not paid. Off by
+    | default, like everything here that writes to a customer.
+    |
+    | `stages` is days after the failure. Three letters spread far enough apart
+    | that the provider's own retries have happened in between — the sequence
+    | must not talk over them, which is why every letter asks the provider
+    | first whether the money arrived after all. If it did, the sequence ends
+    | and nobody is told anything: a card that failed on Tuesday and worked on
+    | Thursday is an ordinary week.
+    |
+    | `grace_days` is how long after the last letter the agreement is given up
+    | on. Then it is ended and the access goes with it — a sequence that only
+    | ever sends leaves a free customer behind for ever.
+    |
+    | The letter carries a signed, short-lived link into the customer portal,
+    | where the card can be replaced. Short-lived is the point: it is minutes,
+    | not days, and an expired one lands on the portal's own "send me a link"
+    | page rather than nowhere.
+    |
+    | Nothing is scheduled for you:
+    |
+    |     Schedule::command('payments:dunning')->daily();
+    |
+    */
+
+    'dunning' => [
+        'enabled' => env('STATAMIC_PAYMENTS_DUNNING', false),
+        'stages' => [3, 7, 14],
+        'grace_days' => 7,
+        'mail' => [
+            'template' => env('STATAMIC_PAYMENTS_DUNNING_TEMPLATE'),
+            'subject' => null,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Products
     |--------------------------------------------------------------------------
     |

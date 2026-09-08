@@ -5,6 +5,7 @@ namespace Goldnead\StatamicPayments\Support;
 use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Events\PaymentFailed;
 use Goldnead\StatamicPayments\Events\PaymentPaid;
+use Goldnead\StatamicPayments\Events\SubscriptionCycleFailed;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\PaymentItem;
 use Goldnead\StatamicPayments\Models\Subscription;
@@ -74,15 +75,94 @@ class Fulfilment
             return null;
         }
 
+        // Vor der Statusfrage, und mit Absicht: eine zurueckgebuchte Zahlung
+        // steht beim Anbieter weiter auf `paid`. Wer erst unten einsteigt,
+        // erfuellt sie noch einmal und merkt von der Rueckbuchung nichts.
+        $this->noteChargeback($payment, $remote);
+
         if (! $remote || ! $remote->isPaid()) {
             if ($remote) {
                 $this->recordUnpaid($payment, $remote);
+                $this->announceFailedCycle($payment, $remote);
             }
 
             return $payment;
         }
 
         return $this->fulfilOnce($payment, $remote);
+    }
+
+    /**
+     * Eine Rueckbuchung, wenn der Anbieter eine meldet.
+     *
+     * Mollie kuendigt sie nicht als eigenes Ereignis an, sondern als
+     * Zustandsaenderung an der Zahlung — der Webhook traegt wie immer nur deren
+     * Kennung, und der Betrag steht in der Antwort. Stripe hat ein eigenes
+     * Ereignis und geht deshalb gar nicht hier durch.
+     *
+     * Ohne Kennung wird nichts gebucht: {@see Chargebacks::record()} ist ueber
+     * genau die idempotent, und eine Buchung ohne sie entzieht bei jeder
+     * weiteren Zustellung erneut den Zugang.
+     */
+    protected function noteChargeback(Payment $payment, ?RemotePayment $remote): void
+    {
+        if (! $remote || ! $remote->chargedBackCent || $remote->chargedBackCent <= 0) {
+            return;
+        }
+
+        $reference = trim((string) ($remote->chargebackReference ?? ''));
+
+        if ($reference === '') {
+            Log::warning('statamic-payments: the provider reported money charged back but named no reference for it; nothing was recorded.', [
+                'payment_id' => $payment->getKey(),
+                'provider_id' => $payment->provider_id,
+            ]);
+
+            return;
+        }
+
+        app(Chargebacks::class)->record($payment, $reference, $remote->chargedBackCent);
+    }
+
+    /**
+     * Ein Zyklus eines laufenden Abos, der nicht bezahlt wurde.
+     *
+     * `SubscriptionStartFailed` deckt das andere Ende ab — Geld kam an und es
+     * entstand keine Vereinbarung. Das hier ist der Fall, der viel oefter
+     * eintritt und bisher unsichtbar war: ein Abo laeuft seit Monaten, die
+     * Karte laeuft ab, und dieses Paket spiegelte den Anbieterstatus, ohne je
+     * etwas dazu zu sagen.
+     *
+     * Erkannt an der Vereinbarung, die der **Anbieter** nennt, nicht an einer
+     * Behauptung des Aufrufers: `subscriptionId` steht auf der Antwort des
+     * Anbieters. Ein gefaelschter Aufruf kann damit hoechstens eine Mahnstrecke
+     * fuer eine Vereinbarung anstossen, die es wirklich gibt und deren Zahlung
+     * der Anbieter wirklich als nicht bezahlt fuehrt.
+     */
+    protected function announceFailedCycle(Payment $payment, RemotePayment $remote): void
+    {
+        if (! $remote->subscriptionId) {
+            return;
+        }
+
+        // `open` ist kein Fehlschlag. Eine Lastschrift unterwegs ist genau das,
+        // und wer sie anmahnt, mahnt jemanden, dessen Geld gerade fliesst.
+        if (! in_array($remote->status, [Payment::STATUS_FAILED, Payment::STATUS_EXPIRED, Payment::STATUS_CANCELED], true)) {
+            return;
+        }
+
+        $subscription = Subscription::query()
+            ->where('provider', $payment->provider)
+            ->where('provider_id', $remote->subscriptionId)
+            ->first();
+
+        if (! $subscription || ! $subscription->isLive()) {
+            // Eine beendete Vereinbarung wird nicht angemahnt. Ohne diese Zeile
+            // bekaeme jemand, der gerade gekuendigt hat, drei Mahnungen.
+            return;
+        }
+
+        SubscriptionCycleFailed::dispatch($subscription, $payment->fresh() ?? $payment, $remote->status);
     }
 
     /** The provider's own answer, or null if it would not give one. */

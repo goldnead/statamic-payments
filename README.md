@@ -213,8 +213,10 @@ knows whether the buyer got anything for it. The **Filters** menu has one entry 
 case: *Paid, not fulfilled*. It survives sorting, paging and a reload, and it can be kept as a saved
 view.
 
-Read-only. Refunds and disputes belong at Mollie, where they are complete and where the audit trail
-is.
+Read-only. *Making* a refund and *defending* a dispute belong at the provider, where the record is
+complete and where somebody with the authority to move money does it. What this screen shows is
+what happened afterwards: a refund recorded, a chargeback recorded, and whether the access went
+with it.
 
 Access is the `access payments utility` permission, which appears in Statamic's own permission list
 once the addon is installed.
@@ -568,6 +570,108 @@ line of the order is revoked with a reason. This is the one place in the bridge 
 cancelled subscription keeps its paid period, because it *was* paid for; a refund is the opposite
 fact. A **partial** refund leaves access alone: half the money back is not half a course, and there
 is no honest way to withdraw half an access.
+
+## Chargebacks
+
+A chargeback is not a refund, and it does not go in `refunded_cent`. A refund is a decision
+somebody here made; a chargeback is one made against them. It carries a fee, it has a deadline for
+evidence, and it may still be won — counting the two together would make every revenue figure
+wrong about both. So it gets its own state, `charged_back_at`, next to the status rather than
+instead of it: a disputed order is still `paid`, because the money did move and the thing was
+delivered.
+
+Both providers feed it, and neither needs configuring beyond the webhook that is already there:
+
+| Provider | How it arrives |
+|---|---|
+| Stripe | `charge.dispute.created`, its own event. Subscribe the endpoint to it. |
+| Mollie | As a change on the payment. The ordinary webhook carries the id; the amount is read back from the provider. |
+
+**`created`, not `closed`.** A dispute that has been opened has already removed the money. Waiting
+for the outcome would leave the buyer with their access and the seller with neither the goods nor
+the payment, for weeks. If the dispute is later won, restoring access is a human decision — the
+same line this package holds on cancelling an invoice.
+
+**The invoice is never cancelled automatically.** Cancelling one says the sale did not happen, and
+nothing here may quietly decide that.
+
+Recording is idempotent over the provider's own id, through a unique index — the same mechanism as
+refunds, and for the same reason: a redelivered dispute must not revoke access twice.
+
+One caveat written down rather than discovered: Mollie announces a chargeback on the payment rather
+than as its own object, so **a second, separate Mollie chargeback on the same payment is seen as
+the same one**. That is the trade for not making an extra API call on every ordinary webhook.
+Stripe has a real per-dispute id and does not have this limit.
+
+`PaymentChargedBack` carries the payment, the reference, the amount and the provider's own reason.
+With the entitlements bridge on, the access is withdrawn in full.
+
+## Dunning
+
+What happens when a cycle of a running agreement is not paid. **Off by default**, like everything
+here that writes to a customer.
+
+```php
+// config/statamic-payments.php
+'dunning' => [
+    'enabled' => true,
+    'stages' => [3, 7, 14],   // days after the failure
+    'grace_days' => 7,
+],
+```
+
+Then schedule the pass. Nothing is scheduled for you, the same line this package holds for the
+abandoned-checkout sweep:
+
+```php
+Schedule::command('payments:dunning')->daily();
+```
+
+`payments:dunning --dry-run` says what would happen and changes nothing.
+
+### What it does
+
+A failed cycle fires `SubscriptionCycleFailed` — new, and the counterpart to `SubscriptionStartFailed`
+at the other end. Nothing is sent on the spot: the first letter is due days later, because a
+sequence that wrote immediately would be writing before the provider has made its own retry.
+
+Each letter carries a **signed, short-lived link into the customer portal**, where the payment
+method can be changed. Short-lived is the point — it is minutes, not days. An expired one lands on
+the portal's own "send me a link" page rather than nowhere, so a letter read the next morning still
+works, with one extra click.
+
+**The sequence hangs on the provider, not on the calendar.** Before every letter the payment is
+asked about at the provider. If the money arrived in the meantime the sequence ends **silently** —
+no further letter, and no "we could not reach you" either. A card that failed on Tuesday and worked
+on Thursday is an ordinary week at a payment provider, and nobody needs to hear about it. A
+provider that will not answer sends nothing that run rather than writing on a guess.
+
+**It ends.** After the last stage plus `grace_days` the agreement is ended and the access goes with
+it, through the `SubscriptionEnded` listener that already exists. A sequence that only ever sends
+leaves a free customer behind for ever.
+
+### The gates
+
+Every letter goes through the same three, in this order:
+
+1. **Suppression.** Somebody who asked never to be written to meant it. A dunning letter is
+   transactional, and the suppression list knows no such exemption. The sequence still ends on its
+   own schedule; they simply are not told.
+2. **The frequency cap** does *not* hold it — not warning somebody because they had a newsletter
+   this week would be the wrong economy. It is still counted afterwards, so the Control Panel can
+   say "three marketing mails and one payment notice".
+3. **The brand.** Where `statamic-brand-context` is installed and configured, the letter leaves
+   through that brand's own sender, so on a multi-brand install the second brand's letter does not
+   arrive under the first brand's name.
+
+Each stage is claimed with a conditional `UPDATE` before the mail is built, so two workers on one
+schedule cannot both write to the same customer. If the send then fails, the claim goes back and
+the next run tries the same stage again — a letter lost to a broken relay must not cost somebody a
+stage of their own sequence. A missed week does not send three letters at once either; the customer
+gets them one run at a time.
+
+The mail is `resources/views/dunning/mail`, publishable, or an email-templates slug in
+`dunning.mail.template`.
 
 ## Deleting checkouts that were never paid
 

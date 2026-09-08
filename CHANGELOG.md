@@ -1,5 +1,60 @@
 # Changelog
 
+## 1.23.0 — 2026-09-08
+
+Two silent holes closed, both provider-neutral.
+
+### Dunning: a failed cycle is no longer the end of a customer
+
+A cycle of a running agreement that was not paid produced `STATUS_SUSPENDED` mirrored from the
+provider and nothing else — no retry of our own, no letter, no way back. On a subscription product
+that is a lost customer who never finds out they were one.
+
+`SubscriptionCycleFailed` is the new event, the counterpart to `SubscriptionStartFailed` at the
+other end. It opens a configurable sequence — three letters at 3, 7 and 14 days by default, each
+carrying a signed, short-lived link into the customer portal where the card can be replaced.
+
+Three properties it was built for:
+
+- **Each letter goes out once.** The stage is claimed with a conditional `UPDATE` before the mail
+  is built, so two workers on one schedule cannot both write to the same customer. A missed week
+  does not send three letters at once either.
+- **The provider decides when it is over, not the calendar.** Before every letter the payment is
+  asked about at the provider. If the money arrived meanwhile the sequence ends *silently* — a card
+  that failed on Tuesday and worked on Thursday is an ordinary week, and nobody needs to hear about
+  it. A provider that will not answer sends nothing that run rather than writing on a guess.
+- **It ends.** After the last stage plus `grace_days` the agreement is ended and the access goes
+  with it. A sequence that only ever sends leaves a free customer behind for ever.
+
+Suppression still applies — a dunning letter is transactional, and the frequency cap therefore lets
+it through, but somebody who asked never to be written to meant it. Where
+`statamic-brand-context` is installed and configured the letter leaves through that brand's own
+sender.
+
+Off by default. `Schedule::command('payments:dunning')->daily();` — nothing is scheduled for you.
+
+### Chargebacks: a disputed order no longer keeps its access
+
+Chargebacks appeared in this addon only as a word in a comment. A dispute left a paid purchase with
+open access and nothing anywhere to notice it by — the same shape of hole `WithdrawOnRefund` closed
+for refunds, without even the way to see it.
+
+Now both providers feed it: Stripe through `charge.dispute.created`, Mollie through the ordinary
+payment webhook, where the charged-back amount is read back from the provider. Recording is
+idempotent over the provider's own id through a unique index, like refunds.
+
+**Its own state**, `charged_back_at`, and not `refunded_cent`. A refund is a decision somebody here
+made; a chargeback is one made against them, it carries a fee and it may still be won — counting
+them together would make every revenue figure wrong about both. The order stays `paid`: the money
+did move and the thing was delivered.
+
+`PaymentChargedBack` withdraws the access in full. **The invoice is never cancelled** — that says
+the sale did not happen, and it is a human decision.
+
+One limit written down rather than left to be discovered: Mollie announces a chargeback on the
+payment rather than as its own object, so a second, separate Mollie chargeback on the same payment
+is seen as the same one. Stripe has a real per-dispute id and does not have this limit.
+
 ## 1.22.0 — 2026-09-08
 
 The two things 1.21.1 knowingly left open.

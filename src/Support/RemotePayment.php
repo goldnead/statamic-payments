@@ -70,6 +70,31 @@ final readonly class RemotePayment
          * bisherigen Verhalten, und der Anbieter wählt selbst.
          */
         public ?string $mandateId = null,
+        /**
+         * Wieviel von dieser Zahlung die Bank zurueckgeholt hat, in kleinsten
+         * Einheiten.
+         *
+         * Null heisst „der Anbieter sagt dazu nichts", nicht „null Euro". Der
+         * Unterschied entscheidet, ob ueberhaupt etwas gebucht wird.
+         *
+         * Getrennt von der Erstattung gefuehrt, weil es etwas anderes ist: eine
+         * Erstattung hat jemand hier entschieden, eine Rueckbuchung jemand
+         * dagegen. Sie kostet eine Gebuehr, hat eine Widerspruchsfrist und kann
+         * noch gewonnen werden. In `refunded_cent` mitgezaehlt waere jede
+         * Auswertung ueber beides falsch.
+         *
+         * Vom Anbieter gelesen, nie vom Aufrufer — wer sie behaupten duerfte,
+         * duerfte fremden Zugang entziehen.
+         */
+        public ?int $chargedBackCent = null,
+        /**
+         * Die Kennung des Anbieters fuer diesen Widerspruch.
+         *
+         * Sie ist der Anspruch: `Chargebacks::record()` traegt sie in einen
+         * Unique-Index ein, und eine zweite Zustellung derselben Rueckbuchung
+         * faellt daran ab, statt den Zugang ein zweites Mal zu entziehen.
+         */
+        public ?string $chargebackReference = null,
     ) {}
 
     public function isPaid(): bool

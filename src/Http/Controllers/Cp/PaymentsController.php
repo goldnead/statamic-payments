@@ -20,10 +20,10 @@ use Statamic\Statamic;
 /**
  * The payments screen in the Control Panel.
  *
- * Read-only, and not a replacement for the Mollie dashboard: refunds, disputes
- * and payout detail live at the provider and are more complete there. What this
- * screen answers is the question only the site can answer — was this order
- * fulfilled, and when.
+ * Read-only, and not a replacement for the provider dashboard: making a refund,
+ * defending a dispute and payout detail live there and are more complete there.
+ * What this screen answers is the question only the site can answer — was this
+ * order fulfilled, was it disputed, and when.
  *
  * The Inertia response carries no rows. The Listing fetches them itself, which
  * is what core's own listings do; sending them along as well would query the

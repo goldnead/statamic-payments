@@ -15,6 +15,7 @@ use Goldnead\StatamicPayments\Support\Invoices;
 use Goldnead\StatamicPayments\Support\Money;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -40,6 +41,15 @@ class PaymentDetail extends JsonResource
         /** @var Payment $payment */
         $payment = $this->resource;
         $meta = (array) ($payment->meta ?? []);
+
+        // The most recent dispute, and only when there is one. A payment nobody
+        // charged back does not pay for a query on every screen.
+        $chargeback = $payment->charged_back_at === null
+            ? null
+            : DB::table('payment_chargebacks')
+                ->where('payment_id', $payment->getKey())
+                ->orderByDesc('id')
+                ->first();
 
         return [
             'id' => $payment->id,
@@ -106,6 +116,18 @@ class PaymentDetail extends JsonResource
                 'last4' => $payment->card_last4,
             ],
 
+            // Next to the refunds, not inside them. A chargeback is not a
+            // refund: it carries a fee, it has a deadline for evidence, and it
+            // may still be won. Counting the two together would make every
+            // revenue figure wrong about both.
+            'chargeback' => [
+                'at' => $payment->charged_back_at?->toIso8601String(),
+                'amount' => $chargeback && (int) $chargeback->amount_cent > 0
+                    ? Money::format((int) $chargeback->amount_cent, $payment->currency)
+                    : null,
+                'reason' => $chargeback->reason ?? null,
+                'reference' => $chargeback->reference ?? null,
+            ],
             'refunds' => [
                 'amount' => $payment->refunded_cent ? Money::format((int) $payment->refunded_cent, $payment->currency) : null,
                 'at' => $payment->refunded_at?->toIso8601String(),

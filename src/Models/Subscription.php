@@ -45,6 +45,10 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $next_payment_at
  * @property Carbon|null $cancelled_at
  * @property Carbon|null $ended_at
+ * @property Carbon|null $dunning_started_at
+ * @property int $dunning_stage
+ * @property Carbon|null $dunning_last_at
+ * @property int|null $dunning_payment_id
  * @property string|null $email
  * @property string|null $name
  * @property array<string, mixed>|null $meta
@@ -96,6 +100,8 @@ class Subscription extends Model
             'next_payment_at' => 'datetime',
             'cancelled_at' => 'datetime',
             'ended_at' => 'datetime',
+            'dunning_started_at' => 'datetime',
+            'dunning_last_at' => 'datetime',
             'meta' => 'array',
         ];
     }

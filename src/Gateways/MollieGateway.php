@@ -7,6 +7,7 @@ use Goldnead\StatamicPayments\Contracts\SubscriptionGateway;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\CheckoutSession;
+use Goldnead\StatamicPayments\Support\Money;
 use Goldnead\StatamicPayments\Support\RemotePayment;
 use Goldnead\StatamicPayments\Support\RemoteSubscription;
 use Illuminate\Support\Facades\Log;
@@ -238,6 +239,17 @@ class MollieGateway implements MandateGateway, SubscriptionGateway
             subscriptionId: isset($payment->subscriptionId) && $payment->subscriptionId
                 ? (string) $payment->subscriptionId
                 : null,
+            chargedBackCent: $this->chargedBackCent($payment),
+            // Mollie kuendigt eine Rueckbuchung nicht als eigenes Ereignis an,
+            // sondern als Zustandsaenderung an der Zahlung — der Webhook traegt
+            // wie immer nur deren Kennung. Die steht deshalb hier als Anspruch.
+            //
+            // Der Preis dieser Wahl, offen gesagt: eine **zweite** Rueckbuchung
+            // auf derselben Zahlung sieht aus wie dieselbe und wird nicht noch
+            // einmal gebucht. Die Alternative waere ein zusaetzlicher Aufruf
+            // gegen `/payments/{id}/chargebacks` bei jeder gewoehnlichen
+            // Zustellung, fuer einen Fall, den Mollie praktisch nicht kennt.
+            chargebackReference: $this->chargedBackCent($payment) > 0 ? (string) $payment->id : null,
         );
     }
 
@@ -346,6 +358,27 @@ class MollieGateway implements MandateGateway, SubscriptionGateway
         return is_string($kandidat) && trim($kandidat) !== ''
             ? trim($kandidat)
             : null;
+    }
+
+    /**
+     * Wieviel die Bank von dieser Zahlung zurueckgeholt hat, in kleinsten Einheiten.
+     *
+     * Mollie fuehrt es als Betrag mit Waehrung an der Zahlung selbst
+     * (`amountChargedBack`). Umgerechnet ueber {@see Money}, nicht ueber eine
+     * hartcodierte 100 — dieselbe Regel wie auf dem Hinweg.
+     *
+     * Null heisst „Mollie sagt dazu nichts", und das ist nicht dasselbe wie
+     * null Euro: nur beim ersten wird gar nicht erst gebucht.
+     */
+    protected function chargedBackCent(mixed $payment): ?int
+    {
+        $betrag = $payment->amountChargedBack ?? null;
+
+        if (! is_object($betrag) || ! isset($betrag->value)) {
+            return null;
+        }
+
+        return Money::toMinorUnits((string) $betrag->value, (string) ($betrag->currency ?? ''));
     }
 
     /** Die Marke der Karte („Mastercard"), soweit der Anbieter sie nennt. */

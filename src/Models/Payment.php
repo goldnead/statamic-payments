@@ -42,6 +42,7 @@ use LogicException;
  * @property Carbon|null $failed_notified_at
  * @property int $refunded_cent
  * @property Carbon|null $refunded_at
+ * @property Carbon|null $charged_back_at
  * @property Carbon|null $abandoned_notified_at
  * @property Carbon|null $recovered_at
  * @property Carbon|null $paid_at
@@ -184,6 +185,7 @@ class Payment extends Model
             'abandoned_notified_at' => 'datetime',
             'recovered_at' => 'datetime',
             'refunded_at' => 'datetime',
+            'charged_back_at' => 'datetime',
             'paid_at' => 'datetime',
         ];
     }

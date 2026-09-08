@@ -1,0 +1,324 @@
+<?php
+
+namespace Goldnead\StatamicPayments\Support;
+
+use Goldnead\StatamicPayments\Events\SubscriptionEnded;
+use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Models\Subscription;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
+use Throwable;
+
+/**
+ * Trying to keep a customer whose card stopped working.
+ *
+ * Before this, a failed cycle was `Subscription::STATUS_SUSPENDED` mirrored
+ * from the provider and nothing else — no retry of our own, no letter, no way
+ * back. On a subscription product that is a lost customer who never finds out
+ * they were one.
+ *
+ * Three properties this class exists for, and all three are the kind that only
+ * a test which *tries* to break them shows:
+ *
+ * 1. **Each letter goes out once.** The stage is claimed with a conditional
+ *    UPDATE before the mail is built, so two workers on the same schedule
+ *    cannot both write to the same customer. Read-then-write loses that race,
+ *    and "your payment failed" twice is a support ticket.
+ * 2. **The provider decides when it is over, not the calendar.** The card may
+ *    go through between two letters — the provider retries on its own rhythm,
+ *    and this sequence must not talk over it. So before every letter the
+ *    payment is asked about at the provider, and a payment that has since been
+ *    paid ends the sequence silently. No further letter, and no "we could not
+ *    reach you" either: nothing happened worth telling anybody.
+ * 3. **It ends.** After the last stage plus a grace period the agreement is
+ *    ended and the access goes with it. A sequence that only ever sends is a
+ *    sequence that leaves a free customer behind for ever.
+ */
+class Dunning
+{
+    /** Whether the site wants a sequence at all. */
+    public function enabled(): bool
+    {
+        return (bool) config('statamic-payments.dunning.enabled', false);
+    }
+
+    /**
+     * The schedule, in days after the failure.
+     *
+     * Three letters by default — soon enough to catch an expired card, spread
+     * far enough that the provider's own retries have happened in between.
+     * A site that wants two, or five, says so.
+     *
+     * @return array<int, int> one-based stage number => days after the failure
+     */
+    public function stages(): array
+    {
+        $configured = config('statamic-payments.dunning.stages', [3, 7, 14]);
+
+        $days = collect(is_array($configured) ? $configured : [])
+            ->map(fn ($day) => (int) $day)
+            ->filter(fn (int $day) => $day >= 0)
+            ->unique()
+            ->sort()
+            ->values();
+
+        // An empty or nonsense schedule is not "send everything now". It is a
+        // site that has not configured this, and it gets the default.
+        return $days->isEmpty()
+            ? [1 => 3, 2 => 7, 3 => 14]
+            : $days->mapWithKeys(fn (int $day, int $index) => [$index + 1 => $day])->all();
+    }
+
+    /** How long after the last letter the agreement is given up on. */
+    public function graceDays(): int
+    {
+        return max(0, (int) config('statamic-payments.dunning.grace_days', 7));
+    }
+
+    /**
+     * Open a sequence for an agreement whose cycle was not paid.
+     *
+     * Idempotent by conditional UPDATE: a provider may say "not paid" about the
+     * same cycle several times, and each delivery would otherwise restart the
+     * clock — which is a sequence that never reaches its end and a customer who
+     * is never let go.
+     */
+    public function begin(Subscription $subscription, Payment $payment): bool
+    {
+        if (! $this->enabled()) {
+            return false;
+        }
+
+        $opened = Subscription::query()
+            ->whereKey($subscription->getKey())
+            ->whereNull('dunning_started_at')
+            ->update([
+                'dunning_started_at' => Carbon::now(),
+                'dunning_stage' => 0,
+                'dunning_payment_id' => $payment->getKey(),
+                'updated_at' => Carbon::now(),
+            ]);
+
+        return $opened > 0;
+    }
+
+    /**
+     * End a sequence because the money arrived after all.
+     *
+     * Silent on purpose. Nothing happened that a customer or an operator needs
+     * to hear about: a card that failed on Tuesday and worked on Thursday is
+     * an ordinary week at a payment provider.
+     */
+    public function stop(Subscription $subscription): void
+    {
+        Subscription::query()
+            ->whereKey($subscription->getKey())
+            ->whereNotNull('dunning_started_at')
+            ->update([
+                'dunning_started_at' => null,
+                'dunning_stage' => 0,
+                'dunning_last_at' => null,
+                'dunning_payment_id' => null,
+                'updated_at' => Carbon::now(),
+            ]);
+    }
+
+    /** Every agreement with a sequence running. */
+    public function running(): Collection
+    {
+        return Subscription::query()
+            ->whereNotNull('dunning_started_at')
+            ->orderBy('dunning_started_at')
+            ->get();
+    }
+
+    /**
+     * Which letter is due now, if any.
+     *
+     * Null where nothing is due yet, or where every stage has been sent — the
+     * end of the sequence is a separate question, asked by {@see dueToEnd()}.
+     */
+    public function stageDue(Subscription $subscription, ?Carbon $now = null): ?int
+    {
+        $now ??= Carbon::now();
+        $started = $subscription->dunning_started_at;
+
+        if (! $started) {
+            return null;
+        }
+
+        $sent = (int) $subscription->dunning_stage;
+
+        foreach ($this->stages() as $stage => $days) {
+            if ($stage <= $sent) {
+                continue;
+            }
+
+            if ($now->greaterThanOrEqualTo($started->copy()->addDays($days))) {
+                // The earliest unsent stage that is due. Not the latest: if a
+                // scheduler was down for a week, the customer gets the letters
+                // one run at a time rather than three at once.
+                return $stage;
+            }
+
+            break;
+        }
+
+        return null;
+    }
+
+    /**
+     * Take a stage, or find somebody else took it.
+     *
+     * The move from `n-1` to `n` **is** the claim. Checking first and updating
+     * afterwards loses to a second worker that checks before the first writes,
+     * which is exactly what two schedulers on one database are.
+     */
+    public function claimStage(Subscription $subscription, int $stage): bool
+    {
+        $claimed = Subscription::query()
+            ->whereKey($subscription->getKey())
+            ->whereNotNull('dunning_started_at')
+            ->where('dunning_stage', $stage - 1)
+            ->update([
+                'dunning_stage' => $stage,
+                'dunning_last_at' => Carbon::now(),
+                'updated_at' => Carbon::now(),
+            ]);
+
+        return $claimed > 0;
+    }
+
+    /** Give the claim back, so the next run tries again. */
+    public function releaseStage(Subscription $subscription, int $stage): void
+    {
+        Subscription::query()
+            ->whereKey($subscription->getKey())
+            ->where('dunning_stage', $stage)
+            ->update(['dunning_stage' => $stage - 1, 'updated_at' => Carbon::now()]);
+    }
+
+    /** Whether the last letter plus the grace period is behind us. */
+    public function dueToEnd(Subscription $subscription, ?Carbon $now = null): bool
+    {
+        $now ??= Carbon::now();
+        $started = $subscription->dunning_started_at;
+        $stages = $this->stages();
+
+        if (! $started || (int) $subscription->dunning_stage < count($stages)) {
+            return false;
+        }
+
+        $last = (int) (end($stages) ?: 0);
+
+        return $now->greaterThanOrEqualTo($started->copy()->addDays($last + $this->graceDays()));
+    }
+
+    /**
+     * Give up on the agreement.
+     *
+     * The provider is told first where it can be. Ending the row and leaving a
+     * live agreement at the provider is how somebody keeps being charged for a
+     * thing their account says is over — the same rule {@see Subscriptions::cancel()}
+     * follows. But unlike a cancellation this must not stall on a provider that
+     * will not answer: the money has not arrived for weeks either way, and an
+     * agreement nobody can end is not a reason to keep giving access away.
+     *
+     * `SubscriptionEnded` is what withdraws the access, through the listener
+     * that already exists for an agreement running out.
+     */
+    public function end(Subscription $subscription): bool
+    {
+        // The claim is the sequence, not the agreement — and the order matters.
+        // `Subscriptions::cancel()` writes `ended_at` itself, so claiming on
+        // that column afterwards would find the work already done and this
+        // method would report failure every single time. The dunning columns
+        // are the ones only this class writes, which makes them the honest
+        // claim: whoever clears `dunning_started_at` is the one ending it.
+        $claimed = Subscription::query()
+            ->whereKey($subscription->getKey())
+            ->whereNotNull('dunning_started_at')
+            ->update([
+                'dunning_started_at' => null,
+                'dunning_payment_id' => null,
+                'updated_at' => Carbon::now(),
+            ]);
+
+        if ($claimed === 0) {
+            return false;
+        }
+
+        try {
+            // The provider first where it will listen. Ending the row and
+            // leaving a live agreement at the provider is how somebody keeps
+            // being charged for a thing their account says is over.
+            app(Subscriptions::class)->cancel($subscription->fresh() ?? $subscription);
+        } catch (Throwable $e) {
+            // Logged, not swallowed into silence, and not fatal. Unlike an
+            // ordinary cancellation this must not stall: the money has not
+            // arrived for weeks either way, and an agreement nobody can end is
+            // not a reason to keep giving the access away.
+            Log::warning('statamic-payments: the provider would not end an agreement the dunning sequence gave up on; the row was ended anyway.', [
+                'subscription_id' => $subscription->getKey(),
+                'exception' => $e->getMessage(),
+            ]);
+        }
+
+        // Whatever the provider did, the row ends. `cancel()` may have written
+        // most of this already; this is the part that must be true either way.
+        Subscription::query()
+            ->whereKey($subscription->getKey())
+            ->update([
+                'status' => Subscription::STATUS_CANCELLED,
+                // Whatever `cancel()` wrote stands; only a row it did not reach
+                // gets the time from here.
+                'ended_at' => ($subscription->fresh() ?? $subscription)->ended_at ?? Carbon::now(),
+                'next_payment_at' => null,
+                'updated_at' => Carbon::now(),
+            ]);
+
+        // What takes the access away, through the listener that already exists
+        // for an agreement running out.
+        SubscriptionEnded::dispatch($subscription->fresh() ?? $subscription);
+
+        return true;
+    }
+
+    /**
+     * Whether the payment that opened this sequence has since been paid.
+     *
+     * Asked of the provider, not of the row: the provider retries on its own
+     * rhythm and may have collected the money without this site hearing a
+     * webhook yet. That is the whole of "the sequence hangs on the provider's
+     * state" — and asking the local row instead would keep writing to somebody
+     * who has already paid.
+     *
+     * A provider that will not answer is not an answer. The sequence pauses for
+     * this run rather than sending on a guess.
+     */
+    public function settledMeanwhile(Subscription $subscription): ?bool
+    {
+        $payment = $subscription->dunning_payment_id
+            ? Payment::find($subscription->dunning_payment_id)
+            : null;
+
+        if (! $payment || ! $payment->hasProviderId()) {
+            return null;
+        }
+
+        try {
+            $remote = app(Gateways::class)->for($payment)->fetch((string) $payment->provider_id);
+        } catch (Throwable $e) {
+            Log::warning('statamic-payments: the provider would not say whether a dunned payment has been settled; no letter was sent this run.', [
+                'subscription_id' => $subscription->getKey(),
+                'payment_id' => $payment->getKey(),
+                'exception' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        return $remote->isPaid();
+    }
+}

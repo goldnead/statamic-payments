@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Http\Controllers;
 
 use Goldnead\StatamicPayments\Gateways\StripeGateway;
 use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Support\Chargebacks;
 use Goldnead\StatamicPayments\Support\Fulfilment;
 use Goldnead\StatamicPayments\Support\Gateways;
 use Goldnead\StatamicPayments\Support\ProviderUnavailable;
@@ -185,6 +186,14 @@ class StripeWebhookController
 
             'charge.refunded' => $this->refund($gateway, $object),
 
+            // The bank taking money back. `created` and not `closed`: a dispute
+            // that has been opened has already removed the money, and waiting
+            // for the outcome would leave the buyer with their access and the
+            // seller with neither the goods nor the payment for weeks. If the
+            // dispute is later won, restoring access is a human decision — the
+            // same line this package holds on cancelling an invoice.
+            'charge.dispute.created' => $this->chargeback($gateway, $object),
+
             // Everything else Stripe sends, and it sends a lot. Ignored on
             // purpose and answered 200, so Stripe stops retrying something this
             // package was never going to act on.
@@ -228,6 +237,57 @@ class StripeWebhookController
         // Mollie's rows: `Fulfilment` scopes every query to the gateway's own
         // handle, and this one says `stripe`.
         app()->makeWith(Fulfilment::class, ['gateway' => $gateway])->handle($id);
+    }
+
+    /**
+     * A dispute, which is not a refund.
+     *
+     * Stripe has its own event for it, so unlike Mollie nothing has to be
+     * inferred from a payment's state. The dispute's own id (`dp_…`) is the
+     * claim: `Chargebacks::record()` puts it in a unique index, so Stripe's
+     * redeliveries — and it redelivers until it gets a 2xx — revoke access once
+     * and fire the event once.
+     *
+     * Read from the event body rather than fetched back, and that is a
+     * deliberate exception: the body is signed, a dispute has no "current
+     * status" worth re-asking for at this moment, and the amount is the one
+     * Stripe has already removed. The row it belongs to is still looked up the
+     * hard way, scoped to this provider.
+     *
+     * @param  array<string, mixed>  $dispute
+     */
+    protected function chargeback(StripeGateway $gateway, array $dispute): void
+    {
+        $reference = $dispute['id'] ?? null;
+        $intentId = $dispute['payment_intent'] ?? null;
+
+        if (! is_string($reference) || $reference === '' || ! is_string($intentId) || $intentId === '') {
+            Log::warning('statamic-payments: a Stripe dispute arrived without an id or a payment intent; it could not be matched to an order.', [
+                'charge' => $dispute['charge'] ?? null,
+            ]);
+
+            return;
+        }
+
+        $payment = $this->paymentFor($gateway, $intentId);
+
+        if (! $payment) {
+            // Loud. Money left the account for an order this site cannot name,
+            // and somebody still has whatever it bought.
+            Log::warning('statamic-payments: Stripe reported a dispute for a charge this site has no payment for.', [
+                'dispute' => $reference,
+                'payment_intent' => $intentId,
+            ]);
+
+            return;
+        }
+
+        app(Chargebacks::class)->record(
+            $payment,
+            $reference,
+            (int) ($dispute['amount'] ?? 0),
+            is_string($dispute['reason'] ?? null) ? $dispute['reason'] : null,
+        );
     }
 
     /** Whether this provider id is one this site actually stamped on a row. */

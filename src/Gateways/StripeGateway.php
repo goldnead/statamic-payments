@@ -47,7 +47,19 @@ use RuntimeException;
  */
 class StripeGateway implements SubscriptionGateway
 {
-    /** Pinned, so Stripe changing its default shape is a decision and not a Tuesday. */
+    /**
+     * Pinned, so Stripe changing its default shape is a decision and not a Tuesday.
+     *
+     * **Two reads are load-bearing on this number**, and both moved in
+     * `2025-03-31.basil`: `invoice.subscription` (which tells a cycle payment
+     * which agreement it belongs to) and `charge.invoice` (which finds the row
+     * for a dispute on a renewal). Both were relocated under
+     * `invoice.parent.subscription_details.subscription`.
+     *
+     * A missing key is not an error — it reads as null — so raising this
+     * constant without following those two would make Stripe renewals quietly
+     * stop being recognised. {@see fetchInvoice()} and {@see invoiceForCharge()}.
+     */
     public const API_VERSION = '2024-06-20';
 
     public function __construct(

@@ -98,10 +98,26 @@ class DunningNotice
             $mailable = new DunningMail($subscription, $stage, $rendered['subject'], $rendered['html'], $rendered['variables']);
 
             if (! $this->deliver($subscription, $email, $mailable)) {
-                // The brand refused to send — no verified sender, usually. It
-                // is logged there, and it is a configuration fault rather than
-                // a transient one, so the stage goes back and the next run says
-                // so again instead of silently skipping a letter.
+                // The brand refused to send — no verified sender, usually.
+                //
+                // Said here, not left to the sibling: its own refusal log is
+                // throttled per brand, so it speaks once and then goes quiet.
+                // And a refusal is not transient: without a line of our own the
+                // stage goes back for ever, `dunning_stage` never reaches the
+                // last one, `dueToEnd()` never becomes true, and the agreement
+                // is never ended — a customer with paid access, indefinitely,
+                // and nothing in this package's log to find it by. Exactly what
+                // `Dunning` says it exists to prevent.
+                Log::error('statamic-payments: the brand refused to send a dunning letter; the sequence cannot advance until that is fixed.', [
+                    'subscription_id' => $subscription->getKey(),
+                    'brand_id' => $brand,
+                    'stage' => $stage,
+                ]);
+
+                if ($payment) {
+                    PaymentLog::mail($payment, 'dunning_'.$stage, $email, null, PaymentCommunication::STATUS_FAILED, ['error' => 'brand refused to send']);
+                }
+
                 return false;
             }
 

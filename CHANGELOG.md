@@ -55,6 +55,24 @@ One limit written down rather than left to be discovered: Mollie announces a cha
 payment rather than as its own object, so a second, separate Mollie chargeback on the same payment
 is seen as the same one. Stripe has a real per-dispute id and does not have this limit.
 
+### What the review rounds changed, because none of it was cosmetic
+
+- **On Stripe the sequence would never have started.** An invoice whose charge failed stays `open`
+  through Stripe's whole retry window and only becomes uncollectible afterwards, if the account is
+  set up that way — and `open` was excluded as "not a failure". So nothing happened on Stripe: no
+  letter, no log. The signed event type now carries the answer, and it may only make a payment the
+  provider already reports as unpaid count as failed. The test that should have caught this had been
+  written with the one status that works.
+- **A paying customer could still be dunned to cancellation.** Guarding only against a *running*
+  sequence left the *stopped* one open: a redelivery of the old, permanently failed Mollie payment
+  opened a fresh sequence dated later, and the replacement payment then sat before it, invisible.
+- **Postgres answered 500 to every redelivered chargeback.** A failed statement aborts the whole
+  transaction there, so the catch-up query died. The claim insert now sits behind a savepoint.
+- **A dispute on a subscription renewal found no row**, because that row carries the invoice id
+  rather than a session or an intent — and renewals are the population this release is about.
+- Voiding a Stripe invoice no longer starts a dunning sequence: that is a hand in the dashboard, not
+  a failed collection.
+
 ## 1.22.0 — 2026-09-08
 
 The two things 1.21.1 knowingly left open.

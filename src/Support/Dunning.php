@@ -58,6 +58,10 @@ class Dunning
         $configured = config('statamic-payments.dunning.stages', [3, 7, 14]);
 
         $days = collect(is_array($configured) ? $configured : [])
+            // `is_numeric` vor dem Cast, sonst wird aus `'bald'` der Tag 0 und
+            // der erste Brief geht im Augenblick des Fehlschlags raus — bevor
+            // der Anbieter seinen eigenen Wiederholungsversuch gemacht hat.
+            ->filter(fn ($day) => is_numeric($day))
             ->map(fn ($day) => (int) $day)
             ->filter(fn (int $day) => $day >= 0)
             ->unique()
@@ -304,12 +308,13 @@ class Dunning
     /**
      * Give up on the agreement.
      *
-     * The provider is told first where it can be. Ending the row and leaving a
-     * live agreement at the provider is how somebody keeps being charged for a
-     * thing their account says is over — the same rule {@see Subscriptions::cancel()}
-     * follows. But unlike a cancellation this must not stall on a provider that
-     * will not answer: the money has not arrived for weeks either way, and an
-     * agreement nobody can end is not a reason to keep giving access away.
+     * Der Anspruch zuerst, dann der Anbieter — und das ist die umgekehrte
+     * Reihenfolge zu {@see Subscriptions::cancel()}, mit Absicht. Dort darf der
+     * Anbieter fuehren, weil eine Kuendigung scheitern darf. Hier nicht: das
+     * Geld ist seit Wochen nicht angekommen, und eine Vereinbarung, die niemand
+     * erreichen kann, ist kein Grund, den Zugang weiter zu verschenken. Also
+     * wird lokal beendet und die Antwort des Anbieters protokolliert, statt auf
+     * ihn zu warten.
      *
      * `SubscriptionEnded` is what withdraws the access, through the listener
      * that already exists for an agreement running out.
@@ -349,10 +354,20 @@ class Dunning
         }
 
         try {
-            // The provider first where it will listen. Ending the row and
-            // leaving a live agreement at the provider is how somebody keeps
-            // being charged for a thing their account says is over.
-            app(Subscriptions::class)->cancel($subscription->fresh() ?? $subscription);
+            // Der Anbieter wird danach gefragt, nicht davor — die Begruendung
+            // steht oben beim Anspruch. Wichtig ist, dass seine **Antwort**
+            // gelesen wird: `cancel()` gibt `false` zurueck, wenn es die
+            // Vereinbarung dort nicht beenden konnte, und ohne diese Pruefung
+            // meldete der Lauf „eine Vereinbarung beendet", waehrend sie beim
+            // Anbieter weiterlaeuft und weiter abbucht. Die Zeile sagt gekuendigt,
+            // der Zugang ist weg, und das Geld fliesst trotzdem.
+            if (! app(Subscriptions::class)->cancel($subscription->fresh() ?? $subscription)) {
+                Log::error('statamic-payments: the dunning sequence ended an agreement locally but the provider did not cancel it; it may still be charging. Cancel it by hand.', [
+                    'subscription_id' => $subscription->getKey(),
+                    'provider' => $subscription->provider,
+                    'provider_id' => $subscription->provider_id,
+                ]);
+            }
         } catch (Throwable $e) {
             // Logged, not swallowed into silence, and not fatal. Unlike an
             // ordinary cancellation this must not stall: the money has not

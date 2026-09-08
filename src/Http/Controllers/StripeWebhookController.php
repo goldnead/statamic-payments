@@ -276,12 +276,22 @@ class StripeWebhookController
     protected function chargeback(StripeGateway $gateway, array $dispute): void
     {
         $reference = $dispute['id'] ?? null;
-        $intentId = $dispute['payment_intent'] ?? null;
-        $chargeId = is_string($dispute['charge'] ?? null) ? $dispute['charge'] : null;
+        $intentId = is_string($dispute['payment_intent'] ?? null) && $dispute['payment_intent'] !== '' ? $dispute['payment_intent'] : null;
+        $chargeId = is_string($dispute['charge'] ?? null) && $dispute['charge'] !== '' ? $dispute['charge'] : null;
 
-        if (! is_string($reference) || $reference === '' || ! is_string($intentId) || $intentId === '') {
-            Log::warning('statamic-payments: a Stripe dispute arrived without an id or a payment intent; it could not be matched to an order.', [
-                'charge' => $dispute['charge'] ?? null,
+        // Der Anspruch braucht die Widerspruchskennung, und gefunden werden muss
+        // die Zeile ueber **eines** von beidem.
+        //
+        // `payment_intent` zu verlangen war falsch: in Stripes eigenem Schema
+        // ist `charge` nicht nullbar und `payment_intent` ausdruecklich schon,
+        // und ihr Beispiel-Widerspruch zeigt genau das — ein `ch_…` neben einem
+        // `"payment_intent": null`. Ein Widerspruch zu einer Belastung ohne
+        // PaymentIntent wurde damit protokolliert und weggeworfen: Geld weg,
+        // Zugang bleibt. Und die Rechnungs-Ersatzsuche darunter, die es fuer
+        // Abo-Raten gibt, war hinter derselben Wache unerreichbar.
+        if (! is_string($reference) || $reference === '' || ($intentId === null && $chargeId === null)) {
+            Log::warning('statamic-payments: a Stripe dispute arrived with neither a charge nor a payment intent; it could not be matched to an order.', [
+                'dispute' => is_string($reference) ? $reference : null,
             ]);
 
             return;
@@ -289,9 +299,9 @@ class StripeWebhookController
 
         // A subscription cycle's row carries the **invoice** id, not a session
         // and not the intent — so a dispute on a renewal would otherwise match
-        // nothing at all. Asked of Stripe only when the two cheaper lookups
-        // came up empty.
-        $payment = $this->paymentFor($gateway, $intentId)
+        // nothing at all. Asked of Stripe only when the cheaper lookups came up
+        // empty.
+        $payment = ($intentId === null ? null : $this->paymentFor($gateway, $intentId))
             ?? ($chargeId === null ? null : $this->paymentForInvoice($gateway, $chargeId));
 
         if (! $payment) {
@@ -350,22 +360,23 @@ class StripeWebhookController
      */
     protected function refund(StripeGateway $gateway, array $charge): void
     {
-        $chargeId = $charge['id'] ?? null;
-        $intentId = $charge['payment_intent'] ?? null;
+        $chargeId = is_string($charge['id'] ?? null) && $charge['id'] !== '' ? $charge['id'] : null;
+        $intentId = is_string($charge['payment_intent'] ?? null) && $charge['payment_intent'] !== '' ? $charge['payment_intent'] : null;
 
-        if (! is_string($chargeId) || $chargeId === '' || ! is_string($intentId) || $intentId === '') {
-            // A charge made outside Checkout — through the dashboard, or the
-            // older API — carries no payment intent, and there is then nothing
-            // to match it to. Money went back and this package cannot say for
-            // which order: exactly the thing that must not pass in silence.
-            Log::warning('statamic-payments: a Stripe refund arrived on a charge with no payment intent; it could not be matched to an order.', [
-                'charge' => is_string($chargeId) ? $chargeId : null,
-            ]);
+        if ($chargeId === null) {
+            Log::warning('statamic-payments: a Stripe refund arrived on a charge with no id; it could not be matched to an order.');
 
             return;
         }
 
-        $payment = $this->paymentFor($gateway, $intentId);
+        // Dieselbe Auflösung wie beim Widerspruch, und aus demselben Grund: die
+        // Zeile einer Abo-Rate traegt die Rechnungskennung, nicht die Session
+        // und nicht den Intent. Bis hierher fand eine Erstattung auf eine Rate
+        // gar keine Zeile — und die beiden Geschwister-Behandlungen
+        // unterschiedlich zu lassen waere ein Unterschied, den niemand gewollt
+        // hat.
+        $payment = ($intentId === null ? null : $this->paymentFor($gateway, $intentId))
+            ?? $this->paymentForInvoice($gateway, $chargeId);
 
         if (! $payment) {
             // Loud, because the alternative is silence about money that left

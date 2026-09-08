@@ -306,11 +306,69 @@ class ChargebackTest extends TestCase
     }
 
     #[Test]
-    public function the_invoice_is_not_cancelled(): void
+    public function a_dispute_on_a_subscription_renewal_finds_its_row(): void
     {
-        // A cancellation says the sale did not happen, and that is a human
-        // decision — the same line this package holds on refunds. Nothing here
-        // may quietly make it.
+        // The population this release is about, and the branch that was written
+        // for it. A renewal's row carries the **invoice** id — not a session and
+        // not the intent — so without the charge-to-invoice lookup a dispute on
+        // a renewal matched nothing at all: money gone, access kept.
+        //
+        // And Stripe's dispute has `charge` non-nullable while `payment_intent`
+        // is nullable, so this fixture is the shape that actually arrives.
+        $payment = $this->paidPayment('stripe', 'in_renewal_1');
+        Event::fake([PaymentChargedBack::class]);
+
+        Http::fake([
+            'api.stripe.com/v1/charges/ch_renewal*' => Http::response([
+                'id' => 'ch_renewal',
+                'object' => 'charge',
+                'invoice' => 'in_renewal_1',
+            ]),
+        ]);
+
+        $this->deliverStripe('evt_renewal_dispute', 'charge.dispute.created', [
+            'id' => 'dp_renewal_1',
+            'object' => 'dispute',
+            'charge' => 'ch_renewal',
+            'payment_intent' => null,
+            'amount' => 1900,
+            'reason' => 'product_not_received',
+        ])->assertOk();
+
+        $this->assertNotNull($payment->fresh()->charged_back_at);
+        Event::assertDispatched(PaymentChargedBack::class, fn ($e) => $e->reference === 'dp_renewal_1');
+    }
+
+    #[Test]
+    public function a_dispute_naming_neither_a_charge_nor_an_intent_is_refused(): void
+    {
+        $this->paidPayment('stripe', 'cs_test_orphan');
+        Event::fake([PaymentChargedBack::class]);
+        Http::fake();
+
+        $this->deliverStripe('evt_orphan', 'charge.dispute.created', [
+            'id' => 'dp_orphan',
+            'object' => 'dispute',
+            'amount' => 1900,
+        ])->assertOk();
+
+        Event::assertNotDispatched(PaymentChargedBack::class);
+    }
+
+    #[Test]
+    public function the_payment_is_not_marked_refunded_and_stays_billable(): void
+    {
+        // Der Name sagt jetzt, was die Zusicherung sieht. Vorher hiess er „die
+        // Rechnung wird nicht storniert" und pruefte drei Felder an der
+        // Zahlung — ueber eine Rechnung sagte er nichts, und waere gruen
+        // geblieben, wenn ein Listener genau das getan haette. Dass keine
+        // Rechnung angefasst wird, steht als Abwesenheit im Code: kein Aufruf
+        // irgendwo in diesem Pfad beruehrt die Rechnungs-Naht.
+        //
+        // Was hier wirklich geprueft wird: eine zurueckgebuchte Bestellung
+        // bleibt bezahlt und erfuellt, weil das Geld geflossen und die Sache
+        // geliefert ist. Ein Status, der zwischen beidem waehlen muesste, waere
+        // ueber die andere Haelfte falsch.
         $payment = $this->paidPayment('mollie', 'tr_invoice');
 
         app(Chargebacks::class)->record($payment, 'chb_invoice', 1900);

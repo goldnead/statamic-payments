@@ -226,6 +226,9 @@ class MollieGateway implements MandateGateway, SubscriptionGateway
     {
         $payment = $this->client->payments->get($providerId);
 
+        // Einmal gelesen, zweimal gebraucht.
+        $chargedBack = $this->chargedBackCent($payment);
+
         return new RemotePayment(
             providerId: (string) $payment->id,
             status: $this->normalise((string) $payment->status),
@@ -239,7 +242,7 @@ class MollieGateway implements MandateGateway, SubscriptionGateway
             subscriptionId: isset($payment->subscriptionId) && $payment->subscriptionId
                 ? (string) $payment->subscriptionId
                 : null,
-            chargedBackCent: $this->chargedBackCent($payment),
+            chargedBackCent: $chargedBack,
             // Mollie kuendigt eine Rueckbuchung nicht als eigenes Ereignis an,
             // sondern als Zustandsaenderung an der Zahlung — der Webhook traegt
             // wie immer nur deren Kennung. Die steht deshalb hier als Anspruch.
@@ -249,7 +252,7 @@ class MollieGateway implements MandateGateway, SubscriptionGateway
             // einmal gebucht. Die Alternative waere ein zusaetzlicher Aufruf
             // gegen `/payments/{id}/chargebacks` bei jeder gewoehnlichen
             // Zustellung, fuer einen Fall, den Mollie praktisch nicht kennt.
-            chargebackReference: $this->chargedBackCent($payment) > 0 ? (string) $payment->id : null,
+            chargebackReference: ($chargedBack ?? 0) > 0 ? (string) $payment->id : null,
         );
     }
 

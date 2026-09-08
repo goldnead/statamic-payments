@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Tests\Feature;
 
+use Goldnead\StatamicPayments\Events\PaymentFailed;
 use Goldnead\StatamicPayments\Events\PaymentPaid;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
@@ -334,6 +335,76 @@ class StripeWebhookTest extends TestCase
 
         $this->assertSame(1, DB::table('payment_webhook_events')
             ->where('event_id', 'evt_404')->count(), 'an answered delivery keeps its claim');
+    }
+
+    // ------------------------------------------------ a delayed payment
+
+    #[Test]
+    public function a_sepa_debit_that_was_refused_marks_the_order_failed(): void
+    {
+        // The whole path, not just the mapping: Stripe announces
+        // `checkout.session.async_payment_failed`, the endpoint asks Stripe what
+        // actually happened, and the row ends up failed with the event that
+        // downstream listeners react to.
+        $payment = $this->stripePayment();
+
+        Event::fake([PaymentFailed::class]);
+
+        Http::fake(['api.stripe.com/*' => Http::response([
+            'id' => 'cs_test_a1b2c3',
+            'object' => 'checkout.session',
+            // Days after the buyer left the page, and still not paid.
+            'status' => 'complete',
+            'payment_status' => 'unpaid',
+            'customer_details' => ['email' => 'kaeufer@example.com'],
+            'payment_intent' => [
+                'id' => 'pi_test_sepa',
+                'status' => 'requires_payment_method',
+                'last_payment_error' => [
+                    'type' => 'invalid_request_error',
+                    'code' => 'debit_not_authorized',
+                    'message' => 'The customer has not authorized this debit.',
+                ],
+            ],
+        ])]);
+
+        $this->deliver($this->body('evt_sepa_failed', 'checkout.session.async_payment_failed', [
+            'id' => 'cs_test_a1b2c3',
+        ]))->assertOk();
+
+        $payment->refresh();
+
+        $this->assertSame(Payment::STATUS_FAILED, $payment->status);
+        $this->assertNull($payment->fulfilled_at);
+        $this->assertNotNull($payment->failed_notified_at);
+        Event::assertDispatched(PaymentFailed::class);
+    }
+
+    #[Test]
+    public function an_ordinary_open_checkout_is_not_failed_by_the_same_path(): void
+    {
+        // The buyer opened the page and has not paid yet. Reading that as a
+        // failure would cancel every checkout somebody merely looked at.
+        $payment = $this->stripePayment();
+
+        Event::fake([PaymentFailed::class]);
+
+        Http::fake(['api.stripe.com/*' => Http::response([
+            'id' => 'cs_test_a1b2c3',
+            'object' => 'checkout.session',
+            'status' => 'open',
+            'payment_status' => 'unpaid',
+            'payment_intent' => ['id' => 'pi_open', 'status' => 'requires_payment_method'],
+        ])]);
+
+        $this->deliver($this->body('evt_still_open', 'checkout.session.completed', ['id' => 'cs_test_a1b2c3']))
+            ->assertOk();
+
+        $payment->refresh();
+
+        $this->assertSame(Payment::STATUS_OPEN, $payment->status);
+        $this->assertNull($payment->failed_notified_at);
+        Event::assertNotDispatched(PaymentFailed::class);
     }
 
     // --------------------------------------------- the twin of a purchase

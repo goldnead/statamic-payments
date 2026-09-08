@@ -518,12 +518,29 @@ class StripeGateway implements SubscriptionGateway
     }
 
     /**
-     * A Checkout Session's two words, read together.
+     * A Checkout Session's three words, read together.
      *
      * `payment_status` is the one that says whether money moved; `status` says
      * whether the buyer is still on the page. Read separately, either one alone
      * gets an order wrong: a `complete` session can be unpaid, and an `open`
      * one is simply somebody still typing.
+     *
+     * **The third word is the PaymentIntent's**, and it is what tells a failure
+     * apart from a wait. SEPA, Sofort and the other delayed methods leave the
+     * page complete and the payment unpaid for days, and then either settle or
+     * do not. Both outcomes look identical at the session level — Stripe
+     * announces the difference as an event type
+     * (`checkout.session.async_payment_failed`), and a webhook's own claim about
+     * what happened is exactly what this package refuses to believe.
+     *
+     * So the intent is asked instead, on the object that was fetched anyway:
+     * `requires_payment_method` **with a `last_payment_error`** on a completed
+     * session is a payment that was attempted and refused. Without the error it
+     * is a session nobody has paid yet, which is an ordinary `open`.
+     *
+     * Left as `open`, a failed direct debit sat in the till for ever: no
+     * fulfilment, no failure, no `PaymentFailed` for anything downstream to
+     * react to, and an order that looks like it is still coming.
      *
      * @param  array<string, mixed>  $session
      */
@@ -536,10 +553,47 @@ class StripeGateway implements SubscriptionGateway
             return Payment::STATUS_PAID;
         }
 
+        if ($status === 'complete' && ($settled = $this->settledLate($session))) {
+            return $settled;
+        }
+
         return match ($status) {
             'expired' => Payment::STATUS_EXPIRED,
             'open', 'complete' => Payment::STATUS_OPEN,
             default => $this->unknown('checkout session status', $status.'/'.$payment),
+        };
+    }
+
+    /**
+     * What became of a delayed payment, read off the intent.
+     *
+     * Null where the intent says nothing decisive — then the session's own
+     * words stand and the answer is `open`. Never `paid`: a session that got
+     * here is one `payment_status` already said was not paid, and an intent
+     * cannot overrule that.
+     *
+     * @param  array<string, mixed>  $session
+     */
+    protected function settledLate(array $session): ?string
+    {
+        $intent = is_array($session['payment_intent'] ?? null) ? $session['payment_intent'] : [];
+
+        if ($intent === []) {
+            // Not expanded, or a session without one. `fetchSession()` always
+            // expands it; another caller might not, and guessing from an id
+            // string would be worse than saying nothing.
+            return null;
+        }
+
+        $status = (string) ($intent['status'] ?? '');
+        $failed = ($intent['last_payment_error'] ?? null) !== null;
+
+        return match (true) {
+            // Attempted and refused. Without the error this is simply a session
+            // whose buyer has not paid yet.
+            $status === 'requires_payment_method' && $failed => Payment::STATUS_FAILED,
+            $status === 'canceled' => Payment::STATUS_CANCELED,
+            default => null,
         };
     }
 

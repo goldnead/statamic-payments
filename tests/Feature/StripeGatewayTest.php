@@ -147,6 +147,107 @@ class StripeGatewayTest extends TestCase
     }
 
     #[Test]
+    public function a_delayed_payment_that_was_refused_is_failed_and_not_left_waiting(): void
+    {
+        // SEPA, Sofort and the rest leave the page complete and the payment
+        // unpaid for days, then either settle or do not. Both look identical at
+        // the session level; the intent is where the difference is written.
+        //
+        // Left as `open` a failed direct debit sat in the till for ever: no
+        // fulfilment, no `PaymentFailed`, and an order that looks like it is
+        // still coming.
+        Http::fake(['api.stripe.com/*' => Http::response($this->checkoutSession([
+            'status' => 'complete',
+            'payment_status' => 'unpaid',
+            'payment_intent' => [
+                'id' => 'pi_test_sepa',
+                'status' => 'requires_payment_method',
+                'last_payment_error' => [
+                    'type' => 'invalid_request_error',
+                    'code' => 'debit_not_authorized',
+                    'message' => 'The customer has not authorized this debit.',
+                ],
+                'payment_method' => null,
+            ],
+        ]))]);
+
+        $this->assertSame(Payment::STATUS_FAILED, $this->stripe()->fetch('cs_test_a1b2c3')->status);
+    }
+
+    #[Test]
+    public function a_delayed_payment_still_in_flight_stays_open(): void
+    {
+        // The other half of the same page. `processing` is a direct debit on
+        // its way, and reading it as failed would cancel an order that is about
+        // to be paid.
+        Http::fake(['api.stripe.com/*' => Http::response($this->checkoutSession([
+            'status' => 'complete',
+            'payment_status' => 'unpaid',
+            'payment_intent' => ['id' => 'pi_test_sepa', 'status' => 'processing', 'payment_method' => null],
+        ]))]);
+
+        $this->assertSame(Payment::STATUS_OPEN, $this->stripe()->fetch('cs_test_a1b2c3')->status);
+    }
+
+    #[Test]
+    public function an_ordinary_unpaid_session_is_not_mistaken_for_a_failure(): void
+    {
+        // `requires_payment_method` without a `last_payment_error` is not a
+        // refusal — it is a buyer who has not typed a card yet. The error is
+        // the whole discriminator, and getting it wrong would fail every
+        // checkout somebody merely opened.
+        foreach ([
+            ['open', 'requires_payment_method'],
+            ['complete', 'requires_payment_method'],
+        ] as [$status, $intentStatus]) {
+            Http::fake(['api.stripe.com/*' => Http::response($this->checkoutSession([
+                'status' => $status,
+                'payment_status' => 'unpaid',
+                'payment_intent' => ['id' => 'pi_x', 'status' => $intentStatus, 'payment_method' => null],
+            ]))]);
+
+            $this->assertSame(
+                Payment::STATUS_OPEN,
+                $this->stripe()->fetch('cs_test_a1b2c3')->status,
+                "a [{$status}] session with no payment error must stay open",
+            );
+        }
+    }
+
+    #[Test]
+    public function a_cancelled_intent_on_a_completed_session_is_cancelled(): void
+    {
+        Http::fake(['api.stripe.com/*' => Http::response($this->checkoutSession([
+            'status' => 'complete',
+            'payment_status' => 'unpaid',
+            'payment_intent' => ['id' => 'pi_x', 'status' => 'canceled', 'payment_method' => null],
+        ]))]);
+
+        $this->assertSame(Payment::STATUS_CANCELED, $this->stripe()->fetch('cs_test_a1b2c3')->status);
+    }
+
+    #[Test]
+    public function an_intent_can_never_turn_an_unpaid_session_into_a_paid_one(): void
+    {
+        // The direction that must not exist. `payment_status` already said the
+        // money did not move; nothing read afterwards may overrule it, or a
+        // forged-looking intent would deliver an order nobody paid for.
+        foreach (['succeeded', 'requires_capture', 'something_new'] as $intentStatus) {
+            Http::fake(['api.stripe.com/*' => Http::response($this->checkoutSession([
+                'status' => 'complete',
+                'payment_status' => 'unpaid',
+                'payment_intent' => ['id' => 'pi_x', 'status' => $intentStatus, 'payment_method' => null],
+            ]))]);
+
+            $this->assertNotSame(
+                Payment::STATUS_PAID,
+                $this->stripe()->fetch('cs_test_a1b2c3')->status,
+                "an intent of [{$intentStatus}] must not pay an unpaid session",
+            );
+        }
+    }
+
+    #[Test]
     public function an_unknown_status_lands_on_open_and_never_on_paid(): void
     {
         Http::fake(['api.stripe.com/*' => Http::response($this->checkoutSession([

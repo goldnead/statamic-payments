@@ -75,6 +75,10 @@ on the internet can post to.
 limit), and gives the delivery back so Stripe redelivers it. Everything else it can act on gets a
 `200`, whatever the outcome.
 
+**Delayed methods are settled, not left waiting.** SEPA and Sofort leave the page complete and the
+payment unpaid for days. The status comes from the PaymentIntent, not from the event type: a
+refused debit becomes `failed` and fires `PaymentFailed`, a debit still in flight stays `open`.
+
 **The endpoint keeps a row per delivery** in `payment_webhook_events`, which is what makes the
 replay guard atomic — including for the many event types this package answers `200` and ignores.
 Stripe stops retrying after about three days, so anything older is dead weight. There is no prune

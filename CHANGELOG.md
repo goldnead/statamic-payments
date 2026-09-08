@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.22.0 — 2026-09-08
+
+The two things 1.21.1 knowingly left open.
+
+### A delayed payment that was refused is now `failed`, not `open` for ever
+
+SEPA, Sofort and the other delayed methods leave the Checkout Session `complete` and the payment
+`unpaid` for days, then either settle or do not. Both outcomes look identical at the session level.
+Stripe announces the difference as an event type (`checkout.session.async_payment_failed`) — and a
+webhook's claim about what happened is exactly what this package refuses to believe.
+
+So the PaymentIntent is read instead, on the object that was fetched anyway:
+`requires_payment_method` **with a `last_payment_error`** on a completed session is a payment that
+was attempted and refused. Without the error it is a buyer who has not paid yet, which stays `open`;
+a `canceled` intent is `canceled`. Nothing an intent says can turn an unpaid session into a paid
+one — `payment_status` already settled that, and there is a test for the direction that must not
+exist.
+
+Left as `open`, a failed direct debit sat in the till for ever: no fulfilment, no `PaymentFailed`
+for a listener to react to, and an order that looked like it was still coming.
+
+### CI proves the claims on MySQL and Postgres, not only SQLite
+
+Two money paths are guarded by a unique index rather than a row lock, because `lockForUpdate()`
+compiles to an empty string on SQLite. That a unique index holds everywhere was an argument, not a
+measurement, while CI only ever ran SQLite.
+
+A new job runs the claim tests again against `mysql:8` and `postgres:16` as services. Not the whole
+suite, and that is measured rather than assumed: testbench migrates and rolls back per test, which
+costs about three seconds on SQLite, twenty on Postgres and two minutes on MySQL for these tests —
+the full suite would be well over twenty minutes on MySQL for a property none of the other tests are
+about. What runs there is what the engine actually decides: both claim tables, the fulfilment claim,
+and the resolution that keeps one provider's ids out of the other's rows.
+
+`tests/TestCase.php` takes the connection from `DB_CONNECTION` and still defaults to in-memory
+SQLite, so nothing changes for a local run.
+
 ## 1.21.1 — 2026-09-08
 
 Two defects in 1.21.0's Stripe endpoint, both found by review rather than by anything failing.

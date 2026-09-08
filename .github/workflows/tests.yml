@@ -100,6 +100,85 @@ jobs:
       - name: Run addon-lint
         run: php studio/tools/addon-lint/bin/addon-lint addon --no-color --fail-on=major -v
 
+  # The claims, on engines that can actually disagree about them.
+  #
+  # Two money paths are guarded by a unique index rather than a row lock, and
+  # that was a deliberate choice: `lockForUpdate()` compiles to an empty string
+  # on SQLite (`Query\Grammars\SQLiteGrammar::compileLock()`), so a lock proved
+  # on the default suite would be a lock nobody had seen work. A unique index is
+  # a condition every engine enforces — but "every engine" was an argument, not
+  # a measurement, as long as CI only ever ran SQLite.
+  #
+  # So the same tests run again on MySQL and Postgres. Both services start; the
+  # matrix picks which one the suite talks to.
+  #
+  # **Not the whole suite, and that is measured rather than assumed.** Testbench
+  # migrates and rolls back per test, which costs about three seconds on SQLite,
+  # twenty on Postgres and two minutes on MySQL for these forty-odd tests — the
+  # full 570 would be well over twenty minutes on MySQL for a property none of
+  # the other tests are about. What runs here is what the engine actually
+  # decides: both claim tables, the fulfilment claim, and the resolution that
+  # keeps one provider's ids out of the other's rows.
+  claims:
+    runs-on: ubuntu-latest
+    name: Claims on ${{ matrix.driver }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - driver: mysql
+            port: 3306
+          - driver: pgsql
+            port: 5432
+
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: secret
+          MYSQL_DATABASE: payments
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -uroot -psecret --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: secret
+          POSTGRES_USER: root
+          POSTGRES_DB: payments
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U root"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, intl, fileinfo, pdo_mysql, pdo_pgsql
+          coverage: none
+
+      - run: composer install --prefer-dist --no-interaction
+
+      - name: Run the claim tests
+        env:
+          DB_CONNECTION: ${{ matrix.driver }}
+          DB_HOST: 127.0.0.1
+          DB_PORT: ${{ matrix.port }}
+          DB_DATABASE: payments
+          DB_USERNAME: root
+          DB_PASSWORD: secret
+        run: >-
+          php -d memory_limit=-1 ./vendor/bin/phpunit
+          --filter 'StripeWebhookTest|RefundsTest|GatewayRegistryTest|WebhookTrustTest'
+
   analyse:
     runs-on: ubuntu-latest
     name: Static analysis

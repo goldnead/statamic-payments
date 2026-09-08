@@ -20,7 +20,16 @@ abstract class TestCase extends AddonTestCase
     {
         parent::defineEnvironment($app);
 
-        $app['config']->set('database.default', 'testing');
+        // SQLite in memory unless something says otherwise, which is what every
+        // local run and most of CI wants.
+        //
+        // The exception is the one property SQLite cannot demonstrate: this
+        // package guards two money paths with unique indexes rather than row
+        // locks, precisely because `lockForUpdate()` compiles to nothing on
+        // SQLite. A claim that is only ever exercised on the engine with the
+        // weakest guarantees is a claim nobody has actually seen work. So CI
+        // runs the same tests again with `DB_CONNECTION=mysql` and `=pgsql`.
+        $app['config']->set('database.default', env('DB_CONNECTION', 'testing'));
         $app['config']->set('statamic.system.multisite', false);
         $app['config']->set('statamic-payments.products', [
             'noten-paket' => ['name' => 'Notenpaket', 'amount_cent' => 1900],

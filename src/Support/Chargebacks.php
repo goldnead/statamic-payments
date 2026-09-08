@@ -7,6 +7,7 @@ use Goldnead\StatamicPayments\Models\Payment;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Recording that the bank took the money back.
@@ -48,20 +49,46 @@ class Chargebacks
             return false;
         }
 
-        if (! $this->claim($payment, $reference, max(0, $amountCent), $reason)) {
+        $amountCent = max(0, $amountCent);
+
+        // Der Anspruch und der Zustand in **einer** Transaktion.
+        //
+        // Getrennt geschrieben waeren es zwei Schritte, und der Prozess kann
+        // zwischen ihnen sterben — ein OOM-Kill, ein Timeout, ein Deploy
+        // mitten im Webhook-Request. Dann staende die Anspruchszeile, aber
+        // `charged_back_at` bliebe fuer immer null, das Ereignis feuerte nie,
+        // der Zugang bliebe bestehen. Und jede weitere Zustellung faende den
+        // Anspruch belegt und gaebe still `false` zurueck: ein Kaeufer mit
+        // zurueckgeholtem Geld und offenem Zugang, ohne eine einzige Zeile
+        // irgendwo.
+        $gebucht = DB::transaction(function () use ($payment, $reference, $amountCent, $reason): bool {
+            if (! $this->claim($payment, $reference, $amountCent, $reason)) {
+                // Schon beansprucht. Das heisst normalerweise „schon erledigt",
+                // aber nicht immer: ein abgebrochener frueherer Versuch aus der
+                // Zeit vor dieser Transaktion kann eine Anspruchszeile ohne
+                // Zustand hinterlassen haben. Steht der Zustand noch aus, wird
+                // er hier nachgeholt, statt den Fall fuer immer zu verschweigen.
+                return $this->finishUnclaimed($payment);
+            }
+
+            // Set once. A second dispute on the same payment does not move the
+            // date — the first is when this order stopped being money.
+            Payment::query()
+                ->whereKey($payment->getKey())
+                ->whereNull('charged_back_at')
+                ->update(['charged_back_at' => Carbon::now(), 'updated_at' => Carbon::now()]);
+
+            return true;
+        });
+
+        if (! $gebucht) {
             return false;
         }
 
-        // Set once. A second dispute on the same payment does not move the
-        // date — the first is when this order stopped being money.
-        Payment::query()
-            ->whereKey($payment->getKey())
-            ->whereNull('charged_back_at')
-            ->update(['charged_back_at' => Carbon::now(), 'updated_at' => Carbon::now()]);
-
-        $frisch = $payment->fresh() ?? $payment;
-
-        PaymentChargedBack::dispatch($frisch, $reference, max(0, $amountCent), $reason);
+        // Nach dem Commit, nie darin. Ein Listener, der den Zugang entzieht,
+        // darf nicht in einer Transaktion laufen, die noch zurueckgerollt
+        // werden koennte.
+        PaymentChargedBack::dispatch($payment->fresh() ?? $payment, $reference, $amountCent, $reason);
 
         return true;
     }
@@ -70,6 +97,33 @@ class Chargebacks
     public function chargedBack(Payment $payment): bool
     {
         return $payment->charged_back_at !== null;
+    }
+
+    /**
+     * Einen halb erledigten Anspruch zu Ende bringen.
+     *
+     * Die Anspruchszeile steht, der Zustand nicht — der Rest eines Versuchs,
+     * der zwischen den beiden Schreibvorgaengen abgebrochen ist. Das bedingte
+     * UPDATE entscheidet: setzt es die Zeit, war dieser Aufruf derjenige, der
+     * die Rueckbuchung wirksam gemacht hat, und das Ereignis gehoert gefeuert.
+     * Findet es die Zeit gesetzt, war wirklich schon alles getan.
+     */
+    protected function finishUnclaimed(Payment $payment): bool
+    {
+        $nachgeholt = Payment::query()
+            ->whereKey($payment->getKey())
+            ->whereNull('charged_back_at')
+            ->update(['charged_back_at' => Carbon::now(), 'updated_at' => Carbon::now()]);
+
+        if ($nachgeholt === 0) {
+            return false;
+        }
+
+        Log::warning('statamic-payments: a chargeback had been claimed but never applied; it was completed on a later delivery.', [
+            'payment_id' => $payment->getKey(),
+        ]);
+
+        return true;
     }
 
     protected function claim(Payment $payment, string $reference, int $amountCent, ?string $reason): bool

@@ -367,8 +367,11 @@ class MollieGateway implements MandateGateway, SubscriptionGateway
      * (`amountChargedBack`). Umgerechnet ueber {@see Money}, nicht ueber eine
      * hartcodierte 100 — dieselbe Regel wie auf dem Hinweg.
      *
-     * Null heisst „Mollie sagt dazu nichts", und das ist nicht dasselbe wie
-     * null Euro: nur beim ersten wird gar nicht erst gebucht.
+     * Null heisst „Mollie sagt dazu nichts". Praktisch wird auch eine
+     * Rueckbuchung ueber null gar nicht gebucht — sie kommt bei einem echten
+     * Anbieter nicht vor, und ein Anspruch ohne Betrag entzoege einen Zugang
+     * fuer nichts. Beide Faelle laufen deshalb gleich aus, und das steht hier,
+     * damit es niemand fuer ein Versehen haelt.
      */
     protected function chargedBackCent(mixed $payment): ?int
     {

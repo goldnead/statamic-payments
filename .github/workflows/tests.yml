@@ -117,8 +117,9 @@ jobs:
   # twenty on Postgres and two minutes on MySQL for these forty-odd tests — the
   # full 570 would be well over twenty minutes on MySQL for a property none of
   # the other tests are about. What runs here is what the engine actually
-  # decides: both claim tables, the fulfilment claim, and the resolution that
-  # keeps one provider's ids out of the other's rows.
+  # decides: all three claim tables, the fulfilment claim, the dunning stage
+  # claim, and the resolution that keeps one provider's ids out of the
+  # other's rows.
   claims:
     runs-on: ubuntu-latest
     name: Claims on ${{ matrix.driver }}
@@ -184,7 +185,7 @@ jobs:
         run: >-
           php -d memory_limit=-1 ./vendor/bin/phpunit
           --fail-on-empty-test-suite
-          --filter 'StripeWebhookTest|RefundsTest|GatewayRegistryTest|WebhookTrustTest|FulfilmentOnceTest|DatabaseDriverTest'
+          --filter 'StripeWebhookTest|RefundsTest|GatewayRegistryTest|WebhookTrustTest|FulfilmentOnceTest|DatabaseDriverTest|ChargebackTest|DunningTest'
 
   analyse:
     runs-on: ubuntu-latest

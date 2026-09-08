@@ -6,8 +6,8 @@ use Goldnead\StatamicPayments\Events\SubscriptionEnded;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\LazyCollection;
 use Throwable;
 
 /**
@@ -140,13 +140,43 @@ class Dunning
             ->exists();
     }
 
-    /** Every agreement with a sequence running. */
-    public function running(): Collection
+    /**
+     * Every agreement with a sequence running.
+     *
+     * Erst die Kennungen, dann je eine Zeile — und beides mit Grund.
+     *
+     * `get()` holt alles auf einmal in den Speicher, und die Zahl gleichzeitig
+     * fehlgeschlagener Abos hat keine Obergrenze. `cursor()` ist die uebliche
+     * Antwort darauf und hier **falsch**: der Aufrufer schreibt in genau die
+     * Tabelle, die er gerade streamt (`dunning_stage`, `dunning_started_at`),
+     * und eine noch offene Ergebnismenge liefert dieselbe Zeile danach erneut.
+     * Gemessen, nicht vermutet — mit `cursor()` verschickte der Test „eine
+     * ausgefallene Woche schickt nicht drei Briefe auf einmal" genau drei.
+     *
+     * Also: die Kennungen einmal einsammeln (eine Spalte, kein ganzes Modell),
+     * die Lesung damit abschliessen, und danach je Kennung eine frische Zeile
+     * laden. Der Speicher bleibt beschraenkt, und der Schreibvorgang kann die
+     * Lesung nicht mehr stoeren, weil es keine mehr gibt.
+     *
+     * @return LazyCollection<int, Subscription>
+     */
+    public function running(): LazyCollection
     {
-        return Subscription::query()
+        $ids = Subscription::query()
             ->whereNotNull('dunning_started_at')
             ->orderBy('dunning_started_at')
-            ->get();
+            ->pluck('id');
+
+        return LazyCollection::make(function () use ($ids) {
+            foreach ($ids as $id) {
+                // Frisch geladen, nicht aus einem Schnappschuss: zwischen dem
+                // Einsammeln und dieser Zeile kann ein Webhook die Strecke
+                // beendet haben.
+                if ($subscription = Subscription::find($id)) {
+                    yield $subscription;
+                }
+            }
+        });
     }
 
     /**

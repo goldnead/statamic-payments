@@ -6,7 +6,9 @@ use Goldnead\BrandContext\Settings\SettingsRegistry;
 use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Cp\SuiteLicence;
 use Goldnead\StatamicPayments\Cp\SuiteNav;
+use Goldnead\StatamicPayments\Gateways\FreeGateway;
 use Goldnead\StatamicPayments\Gateways\MollieGateway;
+use Goldnead\StatamicPayments\Gateways\StripeGateway;
 use Goldnead\StatamicPayments\Http\Controllers\Cp\CancellationActionsController;
 use Goldnead\StatamicPayments\Http\Controllers\Cp\CancellationsController;
 use Goldnead\StatamicPayments\Http\Controllers\Cp\PaymentsController;
@@ -22,6 +24,7 @@ use Goldnead\StatamicPayments\Integrations\Insights\RefundRate;
 use Goldnead\StatamicPayments\Integrations\Insights\RevenueGross;
 use Goldnead\StatamicPayments\Integrations\Insights\RevenueNet;
 use Goldnead\StatamicPayments\Integrations\InvoiceBridge;
+use Goldnead\StatamicPayments\Support\Gateways;
 use Goldnead\StatamicPayments\Support\Invoices;
 use Goldnead\StatamicPayments\Support\Settings;
 use Illuminate\Support\Facades\Log;
@@ -73,6 +76,36 @@ class ServiceProvider extends AddonServiceProvider
         // the network — which is what makes the security properties testable at
         // all.
         $this->app->bind(PaymentGateway::class, MollieGateway::class);
+
+        // Which provider a row belongs to, decided by the row's own `provider`
+        // column rather than by whatever the binding above happens to be. A
+        // singleton, so a host registering a fifth provider registers it once.
+        $this->app->singleton(Gateways::class, function ($app) {
+            $gateways = new Gateways;
+
+            // Zero-price orders. No provider was involved and none ever will
+            // be, but the handle is in the column like any other and something
+            // resolving by handle has to have an answer for it.
+            $gateways->register('free', fn () => new FreeGateway);
+
+            // Registered by name as well as being the default binding. The
+            // binding is what a `mollie` row resolves through on an ordinary
+            // site; this entry is what keeps a site's **existing Mollie rows**
+            // answerable after it switches its default to another provider.
+            // Without it, moving to Stripe would make every historic order
+            // throw in the customer portal.
+            $gateways->register('mollie', fn () => $app->make(MollieGateway::class));
+
+            // Ships with the package, costs nothing where it is unused: the
+            // class is only built when a row actually says `stripe`, and it
+            // refuses to talk to Stripe without a key.
+            $gateways->register('stripe', fn () => new StripeGateway(
+                (string) config('statamic-payments.stripe.key', ''),
+                (string) config('statamic-payments.stripe.api_base', 'https://api.stripe.com'),
+            ));
+
+            return $gateways;
+        });
 
         // The SDK, built here rather than pulled from Mollie's Laravel wrapper:
         // that wrapper does not support Laravel 13, which Statamic 6 does.

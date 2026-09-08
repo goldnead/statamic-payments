@@ -2,6 +2,13 @@
 
 return [
     'missing_payment_id' => 'Zahlungs-ID fehlt.',
+    // Absichtlich unbestimmt: ein fehlendes Geheimnis, eine falsche Signatur
+    // und ein zu alter Zeitstempel sehen von aussen gleich aus, damit ein
+    // Faelscher nicht erfaehrt, an welcher Haelfte er gescheitert ist.
+    'webhook_not_verified' => 'Diese Zustellung konnte nicht geprueft werden.',
+    // Die Zeile, die ein Anbieter in seinem eigenen Dashboard druckt, wenn eine
+    // Kasse keine eigene Beschreibung mitbringt.
+    'order' => 'Bestellung',
     'utility_title' => 'Zahlungen',
     'utility_nav' => 'Zahlungen',
     // Der Abschnitt der CP-Navigation, unter dem die Verkaufs-Bildschirme der

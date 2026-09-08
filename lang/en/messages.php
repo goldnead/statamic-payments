@@ -2,6 +2,13 @@
 
 return [
     'missing_payment_id' => 'Missing payment id.',
+    // Deliberately vague: a missing secret, a wrong signature and a stale
+    // timestamp all look the same from outside, so a forger learns nothing
+    // about which half of the check they failed.
+    'webhook_not_verified' => 'Could not verify this delivery.',
+    // The line a provider prints on its own dashboard when a checkout carries
+    // no description of its own.
+    'order' => 'Order',
     'utility_title' => 'Payments',
     'utility_nav' => 'Payments',
     // The CP navigation section the suite's selling screens live under. Shared

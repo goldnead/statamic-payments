@@ -60,6 +60,36 @@ class Subscriptions
     }
 
     /**
+     * The provider that speaks for this particular agreement.
+     *
+     * Read off the row's own `provider` column rather than taken from the
+     * binding. On a site with one provider the two are the same value; on a
+     * site with two, asking the wrong one about an agreement id gets "no such
+     * agreement" and this class would then write that down as the truth.
+     *
+     * Returns null where the resolved provider cannot run agreements at all —
+     * the caller then leaves the row alone, which is what it already did when
+     * the site had no subscription provider.
+     */
+    protected function agreementGateway(Payment|Subscription $row): ?SubscriptionGateway
+    {
+        return $this->asAgreementGateway(app(Gateways::class)->for($row));
+    }
+
+    /** The site's own provider, for an agreement that has no row to read it off yet. */
+    protected function defaultAgreementGateway(): ?SubscriptionGateway
+    {
+        return $this->asAgreementGateway($this->gateway);
+    }
+
+    protected function asAgreementGateway(PaymentGateway $gateway): ?SubscriptionGateway
+    {
+        return $gateway instanceof SubscriptionGateway && $gateway->supportsSubscriptions()
+            ? $gateway
+            : null;
+    }
+
+    /**
      * What a product says about its rhythm, or null if it has none.
      *
      * @return array{interval: string, times: int|null, trial_days: int, trial_amount_cent: int|null}|null
@@ -310,7 +340,19 @@ class Subscriptions
         // swapped, a config switched off between the checkout and the webhook.
         // Money was taken for a subscription either way, so it is said out loud
         // rather than returned as a quiet null.
-        if (! $this->available()) {
+        // The provider of the payment that started it, not the container's
+        // default: this runs inside a webhook, where the first payment's own
+        // row is the only thing that knows who took the money.
+        //
+        // With one exception, and it is not a special case so much as an absence
+        // of information: a zero-price first payment was settled by this package
+        // without a provider at all, so `free` says nothing about who will
+        // charge the cycles after it. That is the site's own provider.
+        $gateway = $payment->provider === 'free'
+            ? $this->defaultAgreementGateway()
+            : $this->agreementGateway($payment);
+
+        if (! $gateway) {
             return $this->startFailed($payment, 'this provider cannot run subscriptions');
         }
 
@@ -368,7 +410,10 @@ class Subscriptions
             // Käufers, wo die Marke gesetzt war; dieses Abo entsteht im
             // Webhook, wo sie es nicht ist.
             'brand_id' => $payment->brand_id,
-            'provider' => $this->gateway->provider(),
+            // The provider that will actually charge the cycles — the same one
+            // resolved above, so a free first payment leaves an agreement
+            // stamped with the site's provider rather than with `free`.
+            'provider' => $gateway->provider(),
             // Unique per payment, so a redelivery cannot make a second.
             'provider_id' => Payment::PLACEHOLDER_PROVIDER_PREFIX.$payment->getKey(),
             'customer_reference' => $payment->customer_reference,
@@ -383,9 +428,6 @@ class Subscriptions
             'email' => $payment->email,
             'name' => $payment->name,
         ]);
-
-        /** @var SubscriptionGateway $gateway */
-        $gateway = $this->gateway;
 
         try {
             $remote = $gateway->createSubscription($payment->customer_reference, array_filter([
@@ -475,8 +517,11 @@ class Subscriptions
      */
     public function recordCycle(Payment $payment, string $providerSubscriptionId): ?Subscription
     {
+        // Scoped to the provider of the payment that carried this cycle, not to
+        // whatever the container happens to bind. A cycle id from one provider
+        // must not be able to match an agreement row from another.
         $subscription = Subscription::query()
-            ->where('provider', $this->gateway->provider())
+            ->where('provider', $payment->provider)
             ->where('provider_id', $providerSubscriptionId)
             ->first();
 
@@ -552,12 +597,15 @@ class Subscriptions
      */
     public function refresh(Subscription $subscription): ?Subscription
     {
-        if (! $this->available() || Payment::isPlaceholderProviderId($subscription->provider_id)) {
+        if (Payment::isPlaceholderProviderId($subscription->provider_id)) {
             return null;
         }
 
-        /** @var SubscriptionGateway $gateway */
-        $gateway = $this->gateway;
+        $gateway = $this->agreementGateway($subscription);
+
+        if (! $gateway) {
+            return null;
+        }
 
         try {
             $remote = $gateway->fetchSubscription($subscription->customer_reference, $subscription->provider_id);
@@ -598,12 +646,11 @@ class Subscriptions
      */
     public function cancel(Subscription $subscription): bool
     {
-        if (! $this->available()) {
+        $gateway = $this->agreementGateway($subscription);
+
+        if (! $gateway) {
             return false;
         }
-
-        /** @var SubscriptionGateway $gateway */
-        $gateway = $this->gateway;
 
         try {
             $remote = $gateway->cancelSubscription($subscription->customer_reference, $subscription->provider_id);

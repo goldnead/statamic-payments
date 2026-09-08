@@ -102,6 +102,45 @@ class RefundsTest extends TestCase
         $this->assertSame(10000, $zahlung->fresh()->refunded_cent);
     }
 
+    /**
+     * Zwei Meldungen, die beide eine veraltete Zeile in der Hand halten.
+     *
+     * Das ist die Nebenlaeufigkeit, die mit Stripe erst entsteht: zwei
+     * Teilerstattungen auf derselben Belastung kommen als zwei Ereignisse und
+     * koennen in zwei Prozessen parallel landen. Beide lasen frueher ihren
+     * eigenen, vor dem Commit des anderen geladenen Stand und speicherten blind
+     * darueber — der erste Betrag verschwand, seine Referenz aus `meta`, und
+     * die naechste Meldung buchte ihn ein zweites Mal.
+     *
+     * Zwei Instanzen derselben Zeile ohne `fresh()` dazwischen sind genau
+     * dieser Zustand, in einem Prozess nachgestellt.
+     */
+    #[Test]
+    public function two_stale_copies_of_the_same_payment_cannot_overwrite_each_other(): void
+    {
+        $zahlung = $this->zahlung();
+        $dienst = app(Refunds::class);
+
+        $veraltet = Payment::find($zahlung->getKey());
+
+        $this->assertTrue($dienst->record($zahlung, 5000, 're_1'));
+        // Diese Instanz weiss noch nichts von den 5000 oben.
+        $this->assertSame(0, $veraltet->refunded_cent);
+        $this->assertTrue($dienst->record($veraltet, 4000, 're_2'));
+
+        $frisch = $zahlung->fresh();
+
+        // 9000, nicht 4000: die zweite Buchung hat die erste nicht ueberschrieben.
+        $this->assertSame(9000, $frisch->refunded_cent);
+        $this->assertSame(['re_1', 're_2'], $frisch->meta['refunds']);
+
+        // Und `re_1` gilt weiter als gebucht, auch von einer veralteten
+        // Instanz aus gefragt. Sonst kaeme es beim naechsten Ereignis, das die
+        // ganze Liste der Belastung mitbringt, ein zweites Mal.
+        $this->assertFalse($dienst->record($veraltet, 5000, 're_1'));
+        $this->assertSame(9000, $zahlung->fresh()->refunded_cent);
+    }
+
     #[Test]
     public function nothing_and_negative_amounts_are_refused(): void
     {

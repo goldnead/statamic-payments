@@ -9,6 +9,7 @@ use Goldnead\StatamicPayments\Http\Controllers\Portal\MagicLinkController as Por
 use Goldnead\StatamicPayments\Http\Controllers\Portal\OrdersController;
 use Goldnead\StatamicPayments\Http\Controllers\Portal\PaymentMethodController;
 use Goldnead\StatamicPayments\Http\Controllers\ResumeController;
+use Goldnead\StatamicPayments\Http\Controllers\StripeWebhookController;
 use Goldnead\StatamicPayments\Http\Controllers\WebhookController;
 use Goldnead\StatamicPayments\Http\Middleware\SetBrandFromPortalSession;
 use Goldnead\StatamicPayments\Portal\TrackingParameters;
@@ -47,6 +48,26 @@ Route::post('/!/statamic-payments/webhook', WebhookController::class)
         'Illuminate\Foundation\Http\Middleware\PreventRequestForgery',
     ])
     ->name('statamic-payments.webhook');
+
+/*
+ * Stripe's own endpoint.
+ *
+ * Separate from the one above and not a branch inside it: Stripe signs its
+ * bodies and Mollie does not, Stripe sends events and Mollie sends an id, and
+ * the URL is what tells this package which provider a delivery belongs to. Same
+ * CSRF exclusion for the same reason — the caller is Stripe's server, not a
+ * browser — and the endpoint trusts nothing in the request beyond a signature
+ * it verifies itself. See StripeWebhookController.
+ */
+Route::post('/!/statamic-payments/webhook/stripe', StripeWebhookController::class)
+    ->middleware([ThrottleRequests::class.':'.(int) config('statamic-payments.rate_limit', 60).',1'])
+    ->withoutMiddleware([
+        'App\Http\Middleware\VerifyCsrfToken',
+        'Illuminate\Foundation\Http\Middleware\VerifyCsrfToken',
+        'Illuminate\Foundation\Http\Middleware\ValidateCsrfToken',
+        'Illuminate\Foundation\Http\Middleware\PreventRequestForgery',
+    ])
+    ->name('statamic-payments.webhook.stripe');
 
 /*
  * Accepting a follow-up offer.

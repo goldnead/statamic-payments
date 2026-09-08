@@ -1,6 +1,6 @@
 {
     "name": "goldnead/statamic-payments",
-    "description": "Take payments in Statamic with Mollie: hosted checkout, a webhook that never trusts the caller, idempotent fulfilment.",
+    "description": "Take payments in Statamic with Mollie or Stripe: hosted checkout, a webhook that never trusts the caller, idempotent fulfilment.",
     "type": "statamic-addon",
     "license": "proprietary",
     "keywords": [
@@ -8,6 +8,7 @@
         "statamic-addon",
         "payments",
         "mollie",
+        "stripe",
         "checkout",
         "ecommerce"
     ],
@@ -25,7 +26,7 @@
         "statamic": {
             "slug": "statamic-payments",
             "name": "Statamic Payments",
-            "description": "Take payments in Statamic with Mollie: hosted checkout, a webhook that never trusts the caller, idempotent fulfilment.",
+            "description": "Take payments in Statamic with Mollie or Stripe: hosted checkout, a webhook that never trusts the caller, idempotent fulfilment.",
             "url": "https://github.com/goldnead/statamic-payments",
             "developer": "Adrian Goldner",
             "developer-url": "https://adriangoldner.dev"

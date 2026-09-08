@@ -17,6 +17,31 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Stripe
+    |--------------------------------------------------------------------------
+    |
+    | The second provider. Nothing here is needed on a Mollie-only site: without
+    | a key the Stripe adapter refuses to talk rather than half-working.
+    |
+    | `webhook_secret` is the signing secret of the endpoint you add in the
+    | Stripe dashboard (`whsec_…`) — not the API key. Stripe's webhook carries
+    | the whole event object, so unlike Mollie's it is signed, and an endpoint
+    | without this secret rejects everything. That is the right way round: a
+    | webhook that cannot be verified must not be believed.
+    |
+    | `api_base` exists so the test suite can point at `stripe/stripe-mock`.
+    | Leave it alone in production.
+    |
+    */
+
+    'stripe' => [
+        'key' => env('STRIPE_KEY'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+        'api_base' => env('STRIPE_API_BASE', 'https://api.stripe.com'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Products
     |--------------------------------------------------------------------------
     |

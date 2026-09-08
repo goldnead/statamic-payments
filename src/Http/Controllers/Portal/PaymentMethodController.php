@@ -3,8 +3,8 @@
 namespace Goldnead\StatamicPayments\Http\Controllers\Portal;
 
 use Goldnead\StatamicPayments\Contracts\MandateGateway;
-use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\Gateways;
 use Goldnead\StatamicPayments\Support\Money;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -48,7 +48,7 @@ class PaymentMethodController extends PortalController
 
         abort_if($subscription === null, 404);
 
-        $gateway = app(PaymentGateway::class);
+        $gateway = app(Gateways::class)->for($subscription);
 
         // Not an abort. A provider that cannot do this, or an agreement that has
         // already ended, is a button that should not have been on the page — and

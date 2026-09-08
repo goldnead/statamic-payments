@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Models;
 
 use Goldnead\StatamicPayments\Support\Brands;
+use Goldnead\StatamicPayments\Support\Money;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
@@ -147,10 +148,16 @@ class Subscription extends Model
         return $this->times === null ? null : max(0, $this->times - $this->times_charged);
     }
 
-    /** The price of one cycle, as a decimal string, for display. */
+    /** The price of one cycle, as a decimal string, for display and for the provider's API. */
     public function amount(): string
     {
-        return number_format($this->amount_cent / 100, 2, '.', '');
+        // Not a hard-coded 100, for the same reason `Payment::amount()` stopped
+        // being one in 1.11.0: how many minor units make one depends on the
+        // currency. This string is handed to the provider when an agreement is
+        // created (`Subscriptions::startFromPayment()`), so a yen plan billed
+        // through the old two-decimal arithmetic went out at a hundredth of its
+        // price. See {@see Money}.
+        return Money::format($this->amount_cent, $this->currency);
     }
 
     /** What the whole agreement comes to, when it has an end. */

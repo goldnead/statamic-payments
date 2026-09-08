@@ -9,6 +9,7 @@ use Goldnead\StatamicPayments\Models\PaymentItem;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -41,6 +42,22 @@ class FollowUp
     }
 
     /**
+     * The provider that holds this order's stored card.
+     *
+     * Read off the order's own `provider` column, not the container's binding.
+     * A card stored at one provider is not chargeable at another, and asking
+     * the wrong one would fail on a mandate that exists.
+     */
+    protected function followUpGateway(Payment $payment): ?FollowUpGateway
+    {
+        $gateway = app(Gateways::class)->for($payment);
+
+        return $gateway instanceof FollowUpGateway && $gateway->supportsFollowUp()
+            ? $gateway
+            : null;
+    }
+
+    /**
      * Whether this particular payment can carry a follow-up.
      *
      * Four conditions, and all four are refusals of the same kind: no
@@ -53,7 +70,14 @@ class FollowUp
      */
     public function eligible(Payment $payment, ?string $buyerEmail = null): bool
     {
-        return $this->available()
+        // The capability question is asked of **this payment's** provider, not
+        // of the container's default. Asking the default would let a page show
+        // an offer that the provider holding the card cannot charge — and a
+        // page that offers a thing and then fails at the till is worse than a
+        // page that never offered it (`Tags\Payments`). The config switch stays
+        // global: that one really is a property of the site.
+        return config('statamic-payments.follow_up.enabled', false)
+            && $this->followUpGateway($payment) !== null
             && $payment->isPaid()
             && is_string($payment->customer_reference)
             && $payment->customer_reference !== ''
@@ -155,7 +179,10 @@ class FollowUp
             // dem die Zahlung beim Anbieter liegt und die Anschrift noch nicht
             // in der Datenbank steht.
             $payment = Payment::create($details->onto([
-                'provider' => $this->gateway->provider(),
+                // The provider of the order this offer follows, read off its
+                // own row. The stored card is that provider's, so charging it
+                // through another one would find no mandate at all.
+                'provider' => $original->provider,
                 'provider_id' => Payment::PLACEHOLDER_PROVIDER_PREFIX.Str::uuid(),
                 // Von der ersten Bestellung geerbt. Ein Nachfassangebot wird
                 // auch aus einem Hintergrundlauf angenommen, wo keine Marke
@@ -216,8 +243,16 @@ class FollowUp
         });
 
         try {
-            /** @var FollowUpGateway $gateway */
-            $gateway = $this->gateway;
+            // Der Anbieter der Erstbestellung, aus deren eigener Spalte
+            // gelesen. Die gespeicherte Karte liegt bei ihm; ein anderer
+            // Anbieter faende zu dieser Kundenkennung gar kein Mandat.
+            $gateway = $this->followUpGateway($original);
+
+            if (! $gateway) {
+                throw new RuntimeException(
+                    "statamic-payments: the provider [{$original->provider}] cannot charge a returning buyer."
+                );
+            }
 
             // Das Mandat der Erstbestellung, ausdruecklich benannt.
             //

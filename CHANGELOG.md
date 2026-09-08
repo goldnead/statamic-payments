@@ -1,5 +1,74 @@
 # Changelog
 
+## 1.21.0 — 2026-09-08
+
+**A second payment provider, and the resolution that had to come first.** Stripe ships as an
+adapter beside Mollie. Nothing about a Mollie site changes.
+
+### The `provider` column is finally read
+
+It was written on every payment and every agreement from the first version, and read by nothing.
+The container bound `PaymentGateway` once, globally, so whatever arrived was handed to whichever
+provider happened to be bound.
+
+On a site with one provider that is invisible. On a site with two it is the worst failure this
+package can have: a webhook from the second provider asks the first about an id it has never seen,
+the lookup finds no row, and the buyer's order is never fulfilled. **No error, no alarm.**
+
+`Support\Gateways` resolves a handle to an adapter, and a host extends it:
+
+```php
+app(Gateways::class)->register('paypal', fn () => new PayPalGateway);
+```
+
+A handle nobody registered **throws** rather than falling back to the default — a silent fallback
+is the bug, not the cure. `free` (an order the catalogue priced at zero) resolves through the same
+registry to a `FreeGateway` that never reaches a provider.
+
+Read off the row now, not off the binding: which provider is asked about an agreement
+(`Subscriptions::refresh()`, `cancel()`), which one holds a buyer's stored card
+(`FollowUp::accept()`), and which one the customer portal asks whether a card can be changed.
+
+### Stripe
+
+`Gateways\StripeGateway` satisfies `PaymentGateway`, `FollowUpGateway` and `SubscriptionGateway` —
+no fourth contract. Hosted Checkout Sessions, subscriptions with the same six states
+`Subscriptions::refresh()` already mirrored from Mollie, off-session follow-up charges, and refunds
+recorded as an amount with a time.
+
+Built on Laravel's HTTP client rather than `stripe/stripe-php`: no new dependency on sites that
+only ever wanted Mollie, and the tests check the wire format instead of a mocked method call.
+
+**Its own webhook endpoint**, `/!/statamic-payments/webhook/stripe`. Mollie's body is an id and
+needs no signature; Stripe's carries an event type and a refund amount, so it is verified before it
+is parsed (HMAC-SHA256 over `<timestamp>.<raw body>`, `hash_equals`, five-minute tolerance). Stripe
+redelivers until it gets a 2xx, so the event id is claimed with a unique index — an insert, not a
+lookup, because read-then-write loses to two redeliveries milliseconds apart. A delivery whose work
+throws releases the claim so Stripe retries.
+
+Set `STRIPE_KEY` and `STRIPE_WEBHOOK_SECRET`. Without the signing secret the endpoint refuses
+everything, which is the right way round.
+
+### Fixed: two refunds arriving at once could lose one and then book it twice
+
+`Refunds::record()` read the payment, decided whether the reference was already noted and how much
+was still outstanding, and then saved — all outside any lock. With Mollie that never bit: refunds
+are entered by hand in a dashboard, one at a time. Stripe announces two partial refunds as two
+events, which can land in two processes at once.
+
+The second write then went over the first: its amount gone from `refunded_cent`, its reference gone
+from `meta['refunds']`. And because a Stripe refund event carries the charge's **whole** refund
+list, the next delivery saw the lost reference as new and booked it a second time. Nothing failed,
+nothing was logged, and the wrong number reached the annual figures.
+
+Read and write now happen under one row lock inside the transaction.
+
+### Fixed: a yen subscription went out at a hundredth of its price
+
+`Subscription::amount()` still divided by 100 and formatted two decimals, and that string is what
+is handed to the provider when an agreement is created. `Payment::amount()` stopped doing this in
+1.11.0; the agreement did not. Now both go through `Support\Money`.
+
 ## 1.20.0 — 2026-09-07
 
 **A payment plan now survives a checkout with a cart — and says on the invoice which instalment

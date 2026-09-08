@@ -53,6 +53,41 @@ final class Money
     }
 
     /**
+     * The way back: a decimal string to an integer of minor units.
+     *
+     * The inverse of {@see format()}, and it belongs here for the same reason
+     * `format()` does — the decimal count is the whole of the disagreement
+     * between currencies, and a provider adapter that did the arithmetic itself
+     * would be a second place to get the yen wrong.
+     *
+     * Parsed as text, never through a float. `(int) round(19.99 * 100)` is 1999
+     * on most inputs and 1998 on the one that matters, and the difference is a
+     * cent that disappears from somebody's takings without a trace.
+     *
+     * Anything that is not an amount throws. Returning zero would be a free
+     * order; guessing would be a wrong one.
+     */
+    public static function toMinorUnits(string|int|float $value, ?string $currency): int
+    {
+        $decimals = self::decimals($currency);
+        $text = trim((string) $value);
+
+        $negative = str_starts_with($text, '-');
+        $text = ltrim($text, '+-');
+
+        if (preg_match('/^\d+(\.\d*)?$/', $text) !== 1) {
+            throw new \InvalidArgumentException("statamic-payments: [{$value}] is not an amount.");
+        }
+
+        [$whole, $fraction] = array_pad(explode('.', $text, 2), 2, '');
+        $fraction = str_pad(substr($fraction, 0, $decimals), $decimals, '0');
+
+        $minor = (int) ($whole.$fraction);
+
+        return $negative ? -$minor : $minor;
+    }
+
+    /**
      * Derselbe Betrag, aber für einen Menschen.
      *
      * `format()` schreibt für die Leitung: Punkt als Dezimaltrennzeichen, kein

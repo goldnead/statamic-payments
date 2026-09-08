@@ -3,10 +3,10 @@
 namespace Goldnead\StatamicPayments\Http\Controllers\Portal;
 
 use Goldnead\StatamicPayments\Contracts\MandateGateway;
-use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Portal\Display;
+use Goldnead\StatamicPayments\Support\Gateways;
 use Goldnead\StatamicPayments\Support\Invoices;
 use Illuminate\Http\Request;
 
@@ -83,7 +83,7 @@ class OrdersController extends PortalController
      */
     protected function asRow(Subscription $subscription): array
     {
-        $gateway = app(PaymentGateway::class);
+        $gateway = app(Gateways::class)->for($subscription);
 
         return [
             'id' => $subscription->getKey(),

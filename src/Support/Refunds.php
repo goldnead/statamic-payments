@@ -38,28 +38,53 @@ class Refunds
             return false;
         }
 
-        if ($reference !== null && $this->alreadyRecorded($payment, $reference)) {
-            return false;
-        }
+        // Gelesen und geschrieben unter derselben Zeilensperre, in einer
+        // Transaktion.
+        //
+        // Vorher lag die Pruefung ausserhalb: „steht die Referenz schon drin,
+        // und wieviel ist noch offen" wurde auf dem Objekt beantwortet, das der
+        // Aufrufer in der Hand hielt, und danach blind gespeichert. Solange nur
+        // Mollie erstattete, kam nie mehr als eine Meldung gleichzeitig an.
+        // Stripe schickt zwei Teilerstattungen als zwei Ereignisse, die
+        // parallel in zwei Prozessen landen koennen — und dann gewinnt der
+        // zweite Schreibvorgang ueber den ersten hinweg: der erste Betrag ist
+        // aus `refunded_cent` verschwunden, seine Referenz aus `meta`, und die
+        // naechste Meldung bucht ihn ein zweites Mal. Am Ende steht in der
+        // Jahresauswertung eine Zahl, die nie jemand ueberwiesen hat.
+        $betrag = DB::transaction(function () use ($payment, $amountCent, $reference): int {
+            $zeile = Payment::query()->whereKey($payment->getKey())->lockForUpdate()->first();
 
-        // Nie mehr zurueck als vorne rein. Eine Ueberzahlung ist ein Fehler
-        // beim Anbieter oder beim Aufrufer, und sie hier durchzulassen
-        // erzeugte eine Bestellung mit negativem Erloes, die jede Auswertung
-        // still verfaelscht.
-        $offen = max(0, $payment->amount_cent - $payment->refunded_cent);
-        $betrag = min($amountCent, $offen);
+            if (! $zeile) {
+                return 0;
+            }
+
+            if ($reference !== null && $this->alreadyRecorded($zeile, $reference)) {
+                return 0;
+            }
+
+            // Nie mehr zurueck als vorne rein. Eine Ueberzahlung ist ein Fehler
+            // beim Anbieter oder beim Aufrufer, und sie hier durchzulassen
+            // erzeugte eine Bestellung mit negativem Erloes, die jede Auswertung
+            // still verfaelscht.
+            $offen = max(0, $zeile->amount_cent - $zeile->refunded_cent);
+            $betrag = min($amountCent, $offen);
+
+            if ($betrag <= 0) {
+                return 0;
+            }
+
+            $zeile->forceFill([
+                'refunded_cent' => $zeile->refunded_cent + $betrag,
+                'refunded_at' => Carbon::now(),
+                'meta' => $this->withReference($zeile, $reference),
+            ])->save();
+
+            return $betrag;
+        });
 
         if ($betrag <= 0) {
             return false;
         }
-
-        DB::transaction(function () use ($payment, $betrag, $reference) {
-            $payment->forceFill([
-                'refunded_cent' => $payment->refunded_cent + $betrag,
-                'refunded_at' => Carbon::now(),
-                'meta' => $this->withReference($payment, $reference),
-            ])->save();
-        });
 
         $frisch = $payment->fresh() ?? $payment;
 

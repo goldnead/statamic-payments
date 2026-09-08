@@ -1,15 +1,16 @@
 <!-- statamic:hide -->
 # Statamic Payments
-> Take payments in Statamic with Mollie — and never believe the caller.
+> Take payments in Statamic with Mollie or Stripe — and never believe the caller.
 <!-- /statamic:hide -->
 
 ## Requirements
 
-Statamic 6 · PHP 8.2+ · a database · a Mollie account.
+Statamic 6 · PHP 8.2+ · a database · a Mollie **or** Stripe account.
 
-Mollie rather than Stripe because this is built for a German and European audience: SEPA direct
-debit, Sofort, iDEAL and Bancontact are what people here actually reach for, and there is no
-monthly floor — which matters on a client site that takes four payments a month.
+Mollie is the default because this was built for a German and European audience: SEPA direct debit,
+Sofort, iDEAL and Bancontact are what people here actually reach for, and there is no monthly floor
+— which matters on a client site that takes four payments a month. Stripe ships alongside it for
+everyone whose answer to "which provider" was decided before they got here.
 
 ## Installation
 
@@ -20,6 +21,83 @@ php please vendor:publish --tag=statamic-payments-config
 ```
 
 Set `MOLLIE_KEY` in your environment, then list what you sell.
+
+## Providers
+
+Every payment and every agreement carries a `provider` handle, and the handle decides which adapter
+is asked about it. Two ship:
+
+| Handle | Needs | Notes |
+|---|---|---|
+| `mollie` | `MOLLIE_KEY` | The default binding. Payments, subscriptions, follow-up charges, changing the card on file. |
+| `stripe` | `STRIPE_KEY`, `STRIPE_WEBHOOK_SECRET` | Payments, subscriptions, follow-up charges. Its own webhook endpoint. |
+| `free` | nothing | Written by this package on an order the catalogue priced at zero. No provider is involved. |
+
+### Stripe
+
+```dotenv
+STRIPE_KEY=sk_test_…
+STRIPE_WEBHOOK_SECRET=whsec_…
+```
+
+`STRIPE_KEY` is the secret API key from the Stripe dashboard — a test key starts with `sk_test_`
+and moves no money, which is what you want until the whole path has run once end to end.
+
+`STRIPE_WEBHOOK_SECRET` is the **signing secret** of the endpoint, not the API key. Add the endpoint
+in the Stripe dashboard first:
+
+```
+https://your-site.example/!/statamic-payments/webhook/stripe
+```
+
+and subscribe it to `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+`checkout.session.expired`, `invoice.paid`, `payment_intent.succeeded` and `charge.refunded`.
+Stripe then shows you the `whsec_…` value. **Without it the endpoint refuses everything** — a
+webhook that cannot be verified must not be believed, and the other way round is an endpoint anybody
+on the internet can post to.
+
+**The endpoint keeps a row per delivery** in `payment_webhook_events`, which is what makes the
+replay guard atomic — including for the many event types this package answers `200` and ignores.
+Stripe stops retrying after about three days, so anything older is dead weight. There is no prune
+command: delete rows older than a month on whatever schedule the site already runs.
+
+```php
+DB::table('payment_webhook_events')->where('created_at', '<', now()->subMonth())->delete();
+```
+
+To make Stripe the site's provider, bind it:
+
+```php
+// A host service provider
+$this->app->bind(
+    \Goldnead\StatamicPayments\Contracts\PaymentGateway::class,
+    fn () => new \Goldnead\StatamicPayments\Gateways\StripeGateway(
+        config('statamic-payments.stripe.key'),
+    ),
+);
+```
+
+Existing Mollie rows keep working: they say `mollie`, and that is what is asked about them.
+
+### A third provider
+
+Register a factory against a handle. The rest of the package resolves it off the row.
+
+```php
+app(\Goldnead\StatamicPayments\Support\Gateways::class)
+    ->register('paypal', fn () => new PayPalGateway);
+```
+
+A handle nobody registered **throws**. That is deliberate: quietly handing it to the default gateway
+is how a webhook from the second provider gets asked about by the first, is told "not mine", and
+leaves a paid order undelivered with nothing in the log.
+
+### What is not in here
+
+No payment-method picker, no wallet buttons, no Klarna logic. Which methods a buyer sees is decided
+by the provider account, on both providers. And no Stripe Tax: the rates live in
+`statamic-invoices` and stay there, because two systems with an opinion about the same VAT rate is
+two invoices that disagree.
 
 ## Usage
 
@@ -830,9 +908,11 @@ every row is `0`, and `0` is right.
 | Key | Default | What happens when it is wrong |
 |---|---|---|
 | `products` | **none** | Nothing can be bought. An addon that shipped prices would be wrong about every site. |
-| `currency` | `EUR` | Must match what your Mollie account accepts. |
+| `currency` | `EUR` | Must match what your provider account accepts. |
 | `return_url` | `/danke` | Where the buyer lands after paying. **Not** where fulfilment happens. |
-| `rate_limit` | `60` | Per minute, per IP, on the webhook. |
+| `rate_limit` | `60` | Per minute, per IP, on both webhook endpoints. |
+| `stripe.key` | `STRIPE_KEY` | Empty, and the Stripe adapter refuses to talk rather than half-working. Unused on a Mollie-only site. |
+| `stripe.webhook_secret` | `STRIPE_WEBHOOK_SECRET` | Empty, and the Stripe endpoint refuses every delivery. See Security. |
 | `entitlements.enabled` | `false` | On, plus a `grants` key on a product, grants that entitlement to the buyer. |
 | `methods` | `null` | A list of Mollie method ids restricts the hosted checkout; `null` lets Mollie decide. See below. |
 | `abandoned.mail.enabled` | `false` | On, the addon mails the reminder itself. Consent first. |
@@ -863,12 +943,28 @@ instalment. `Support\PaymentMethods::RECURRING` and `::MANDATE_FIRST` are the tw
 
 ## Security
 
-**The webhook has no signature, and does not need one.** Mollie posts a payment id; this package
-reads nothing else from the request. The status is fetched from Mollie by that id, so the worst a
-forged call can do is make the server ask about a payment that is not paid.
+**Mollie's webhook has no signature, and does not need one.** Mollie posts a payment id; this
+package reads nothing else from the request. The status is fetched from Mollie by that id, so the
+worst a forged call can do is make the server ask about a payment that is not paid.
 
 That is a stronger position than a shared secret, because it does not depend on the secret staying
 secret. It is also the only design that survives someone replaying a genuine delivery.
+
+**Stripe's webhook is signed, because Stripe's body decides things.** It carries an event type and a
+refund amount, not just an id, so it is verified before it is parsed: HMAC-SHA256 over
+`<timestamp>.<raw body>` under `STRIPE_WEBHOOK_SECRET`, compared with `hash_equals`, with a
+five-minute tolerance so a captured body cannot be replayed for ever. A body that does not verify is
+not read at all — no request goes out to Stripe for it.
+
+Everything a signature does not cover still holds on both endpoints: the amount, the status and the
+subscription id are fetched from the provider, never taken from the delivery. And because Stripe
+redelivers until it gets a 2xx, the **event id itself is claimed** with a unique index before the
+work runs — an insert, not a lookup, so two redeliveries milliseconds apart cannot both win it. A
+delivery whose work throws releases the claim so Stripe retries.
+
+**A delivery cannot cross providers.** Each provider has its own endpoint, and every lookup is
+scoped to that provider's handle, so a Stripe event naming a Mollie payment finds nothing and
+changes nothing.
 
 Three consequences worth knowing:
 

@@ -127,18 +127,33 @@ class Subscriptions
     /**
      * Ob dieser Betrieb überhaupt eine Vereinbarung beginnen kann.
      *
-     * Zwei Bedingungen, die nichts miteinander zu tun haben: der Anbieter muss
-     * Abrechnungen auf Wiedervorlage können, und der Betrieb muss sich die
-     * Zahlungsart des Käufers merken dürfen. Beides ist ohne einen Kauf
-     * feststellbar — und genau dafür ist diese Methode da. Eine aufrufende
-     * Strecke, die eine Ratenoption **anzeigt**, muss vorher wissen, ob sie sie
-     * auch einlösen kann; das erst im `start()` als `null` herauszufinden ist
-     * eine Sackgasse mitten in der Kasse.
+     * Drei Bedingungen, die nichts miteinander zu tun haben: der Anbieter muss
+     * Abrechnungen auf Wiedervorlage können, der Betrieb muss sich die
+     * Zahlungsart des Käufers merken dürfen, und unter den angebotenen
+     * Zahlarten muss wenigstens eine sein, die dabei ein Mandat hinterlässt.
+     * Alle drei sind ohne einen Kauf feststellbar — und genau dafür ist diese
+     * Methode da. Eine aufrufende Strecke, die eine Ratenoption **anzeigt**,
+     * muss vorher wissen, ob sie sie auch einlösen kann; das erst im `start()`
+     * als `null` herauszufinden ist eine Sackgasse mitten in der Kasse.
+     *
+     * **Die dritte Bedingung war die stille.** Ein Betrieb, der nur Klarna und
+     * Überweisung freigeschaltet hat, kam bis hierher durch: `available()` sagt
+     * ja, das Mandat ist erlaubt, und dann setzt {@see Checkout::start()} kein
+     * `sequenceType: first`, weil keine der Methoden eines tragen kann. Die
+     * erste Rate floss, die Absicht hing an der Zahlung, und der Webhook fand
+     * kein Mandat, aus dem er eine Vereinbarung hätte bauen können. Bei
+     * „3 × 520 €" also einmal 520 € und zwei Raten, die nirgends standen.
+     *
+     * Anbieterneutral, weil die Frage es ist: gefragt sind die **konfigurierten
+     * Zahlarten**, nicht wer sie abwickelt. Eine leere Liste heißt „der Anbieter
+     * entscheidet", und der zeigt bei einer ersten Zahlung von selbst nur, was
+     * ein Mandat kann — also bleibt sie ein Ja.
      */
     public function canStart(): bool
     {
         return $this->available()
-            && (bool) config('statamic-payments.follow_up.collect_mandate', false);
+            && (bool) config('statamic-payments.follow_up.collect_mandate', false)
+            && PaymentMethods::canHoldMandate(PaymentMethods::configured());
     }
 
     /**
@@ -247,13 +262,20 @@ class Subscriptions
 
         $plan = $this->planFor($product);
 
-        if (! $plan || ! $this->available()) {
+        if (! $plan) {
             return null;
         }
 
-        if (! config('statamic-payments.follow_up.collect_mandate', false)) {
-            Log::warning('statamic-payments: a subscription was asked for while mandate collection is off; nothing was started.', [
+        // **Eine Regel, nicht zwei.** Was `canStart()` sagt, gilt hier auch:
+        // stünde die Prüfung zweimal getippt da, hätte die eine Stelle die
+        // Zahlarten irgendwann gelernt und die andere nicht — und die
+        // Abweichung wäre genau der stille Kauf, den beide verhindern sollen.
+        if (! $this->canStart()) {
+            Log::warning('statamic-payments: a subscription was asked for while this site cannot start one; nothing was started.', [
                 'product' => $product,
+                'provider_can_do_agreements' => $this->available(),
+                'collects_mandate' => (bool) config('statamic-payments.follow_up.collect_mandate', false),
+                'methods' => PaymentMethods::configured(),
             ]);
 
             return null;

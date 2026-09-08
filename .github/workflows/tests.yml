@@ -175,9 +175,16 @@ jobs:
           DB_DATABASE: payments
           DB_USERNAME: root
           DB_PASSWORD: secret
+        # `--fail-on-empty-test-suite` because the way this job fails is by
+        # going green having run nothing: a renamed class, a typo in the filter,
+        # and PHPUnit reports a clean zero. `DatabaseDriverTest` is the other
+        # half of the same guard — it asserts the suite really is on the driver
+        # the environment asked for, so a `DB_CONNECTION` that stopped reaching
+        # the suite is a red job rather than a silent return to SQLite.
         run: >-
           php -d memory_limit=-1 ./vendor/bin/phpunit
-          --filter 'StripeWebhookTest|RefundsTest|GatewayRegistryTest|WebhookTrustTest'
+          --fail-on-empty-test-suite
+          --filter 'StripeWebhookTest|RefundsTest|GatewayRegistryTest|WebhookTrustTest|FulfilmentOnceTest|DatabaseDriverTest'
 
   analyse:
     runs-on: ubuntu-latest

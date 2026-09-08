@@ -239,12 +239,48 @@ class StripeGatewayTest extends TestCase
                 'payment_intent' => ['id' => 'pi_x', 'status' => $intentStatus, 'payment_method' => null],
             ]))]);
 
-            $this->assertNotSame(
-                Payment::STATUS_PAID,
+            // `assertSame(open)`, not merely "not paid": a weaker assertion
+            // would also pass if these landed on `failed`, and a session whose
+            // buyer is mid-authentication is not a failure.
+            $this->assertSame(
+                Payment::STATUS_OPEN,
                 $this->stripe()->fetch('cs_test_a1b2c3')->status,
-                "an intent of [{$intentStatus}] must not pay an unpaid session",
+                "an intent of [{$intentStatus}] must leave an unpaid session open",
             );
         }
+    }
+
+    #[Test]
+    public function a_follow_up_charge_stripe_declined_is_failed_not_open(): void
+    {
+        // The same trap on the sibling path. An off-session charge that Stripe
+        // refused sits at `requires_payment_method`, exactly like an intent
+        // nobody has paid yet — except that on a follow-up there is no buyer on
+        // a page to pay it. Read as `open` it would be an upsell that looks
+        // like it is still going through, for ever.
+        Http::fake(['api.stripe.com/*' => Http::response([
+            'id' => 'pi_declined',
+            'object' => 'payment_intent',
+            'status' => 'requires_payment_method',
+            'last_payment_error' => [
+                'code' => 'card_declined',
+                'message' => 'Your card was declined.',
+            ],
+        ])]);
+
+        $this->assertSame(Payment::STATUS_FAILED, $this->stripe()->fetch('pi_declined')->status);
+    }
+
+    #[Test]
+    public function an_intent_awaiting_its_first_card_is_still_open(): void
+    {
+        Http::fake(['api.stripe.com/*' => Http::response([
+            'id' => 'pi_waiting',
+            'object' => 'payment_intent',
+            'status' => 'requires_payment_method',
+        ])]);
+
+        $this->assertSame(Payment::STATUS_OPEN, $this->stripe()->fetch('pi_waiting')->status);
     }
 
     #[Test]

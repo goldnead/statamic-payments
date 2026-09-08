@@ -210,7 +210,16 @@ class StripeGateway implements SubscriptionGateway
 
         return new RemotePayment(
             providerId: $id,
-            status: $this->normaliseIntent((string) ($intent['status'] ?? '')),
+            status: $this->normaliseIntent(
+                (string) ($intent['status'] ?? ''),
+                // The same discriminator as on a Checkout Session, and for the
+                // same reason: a follow-up charge that Stripe refused sits at
+                // `requires_payment_method` exactly like one nobody has paid
+                // yet. Without the error, an off-session charge that was
+                // declined would stay `open` for ever — no `PaymentFailed`, and
+                // an upsell that looks like it is still going through.
+                ($intent['last_payment_error'] ?? null) !== null,
+            ),
             metadata: $this->readMetadata($intent),
             email: $this->firstString([$intent['receipt_email'] ?? null]),
             country: $this->country([$card['country'] ?? null]),
@@ -588,13 +597,32 @@ class StripeGateway implements SubscriptionGateway
         $status = (string) ($intent['status'] ?? '');
         $failed = ($intent['last_payment_error'] ?? null) !== null;
 
-        return match (true) {
+        if ($status === 'requires_payment_method') {
             // Attempted and refused. Without the error this is simply a session
             // whose buyer has not paid yet.
-            $status === 'requires_payment_method' && $failed => Payment::STATUS_FAILED,
-            $status === 'canceled' => Payment::STATUS_CANCELED,
-            default => null,
-        };
+            return $failed ? Payment::STATUS_FAILED : null;
+        }
+
+        if ($status === 'canceled') {
+            return Payment::STATUS_CANCELED;
+        }
+
+        // Words that mean "wait", and are supposed to land on `open`.
+        if (in_array($status, ['processing', 'requires_confirmation', 'requires_action', 'requires_capture', 'succeeded'], true)) {
+            return null;
+        }
+
+        // Anything else on a completed session is a word this package has not
+        // met, on the one object that decides whether a delayed payment worked.
+        // It still lands on `open`, which is the safe answer — but silently
+        // would mean Stripe could add a status and change what happens here
+        // with nothing to find afterwards.
+        Log::warning('statamic-payments: unknown Stripe payment intent status on a completed session, treated as open.', [
+            'status' => $status,
+            'intent' => $intent['id'] ?? null,
+        ]);
+
+        return null;
     }
 
     protected function normaliseInvoice(string $status): string
@@ -608,8 +636,20 @@ class StripeGateway implements SubscriptionGateway
         };
     }
 
-    protected function normaliseIntent(string $status): string
+    /**
+     * A PaymentIntent's word, with the same failure discriminator as a session.
+     *
+     * `$refused` is whether Stripe left a `last_payment_error` on it. That is
+     * the only thing separating "this charge was declined" from "nobody has
+     * paid yet" — both sit at `requires_payment_method`, and on an off-session
+     * follow-up charge the first is the only one that can happen.
+     */
+    protected function normaliseIntent(string $status, bool $refused = false): string
     {
+        if ($status === 'requires_payment_method' && $refused) {
+            return Payment::STATUS_FAILED;
+        }
+
         return match ($status) {
             'succeeded' => Payment::STATUS_PAID,
             'canceled', 'cancelled' => Payment::STATUS_CANCELED,

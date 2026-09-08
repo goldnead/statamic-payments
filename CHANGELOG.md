@@ -35,7 +35,17 @@ about. What runs there is what the engine actually decides: both claim tables, t
 and the resolution that keeps one provider's ids out of the other's rows.
 
 `tests/TestCase.php` takes the connection from `DB_CONNECTION` and still defaults to in-memory
-SQLite, so nothing changes for a local run.
+SQLite, so nothing changes for a local run. The job runs with `--fail-on-empty-test-suite`, and
+`DatabaseDriverTest` asserts the suite really is on the driver it was told to use — the way a job
+like this fails is by going green having proved nothing.
+
+### Also
+
+A follow-up charge Stripe declined is `failed` too, not `open`. It sat at
+`requires_payment_method` exactly like an intent nobody has paid yet — except that on an
+off-session charge there is no buyer on a page to pay it, so it would have looked like it was still
+going through for ever. And an intent status this package has not met, on a completed session, now
+says so in the log instead of landing on `open` in silence.
 
 ## 1.21.1 — 2026-09-08
 

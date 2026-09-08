@@ -62,7 +62,16 @@ class Chargebacks
         // Anspruch belegt und gaebe still `false` zurueck: ein Kaeufer mit
         // zurueckgeholtem Geld und offenem Zugang, ohne eine einzige Zeile
         // irgendwo.
-        $gebucht = DB::transaction(function () use ($payment, $reference, $amountCent, $reason): bool {
+        // Der Rueckgabewert ist bewusst der **Zeitstempel dieses Aufrufs**, nicht
+        // ein blankes `true`: nur wer den Zustand selbst gesetzt hat, darf ihn
+        // spaeter zuruecknehmen. Bei einem zweiten Widerspruch auf derselben
+        // Zahlung — auf Stripe erreichbar, weil mehrere Charges einer Rechnung
+        // auf dieselbe Zeile zeigen und jeder seinen eigenen `dp_…` bekommt —
+        // steht `charged_back_at` schon vom ersten. Ein unbedingtes Zuruecknehmen
+        // loeschte dann dessen Zustand: das CP zeigte keinen Widerspruch mehr,
+        // und die Wache in `Fulfilment` waere aus, die eine zurueckgebuchte
+        // Zahlung von der Erfuellung abhaelt.
+        $gesetzt = DB::transaction(function () use ($payment, $reference, $amountCent, $reason): Carbon|false|null {
             if (! $this->claim($payment, $reference, $amountCent, $reason)) {
                 // Schon beansprucht. Das heisst normalerweise „schon erledigt",
                 // aber nicht immer: ein abgebrochener frueherer Versuch aus der
@@ -74,15 +83,20 @@ class Chargebacks
 
             // Set once. A second dispute on the same payment does not move the
             // date — the first is when this order stopped being money.
-            Payment::query()
+            $jetzt = Carbon::now();
+
+            $gesetzt = Payment::query()
                 ->whereKey($payment->getKey())
                 ->whereNull('charged_back_at')
-                ->update(['charged_back_at' => Carbon::now(), 'updated_at' => Carbon::now()]);
+                ->update(['charged_back_at' => $jetzt, 'updated_at' => $jetzt]);
 
-            return true;
+            // Null Zeilen heisst: ein frueherer Widerspruch hat den Zustand
+            // schon gesetzt. Gebucht ist dieser hier trotzdem — die
+            // Anspruchszeile steht —, aber der Zustand gehoert nicht uns.
+            return $gesetzt > 0 ? $jetzt : null;
         });
 
-        if (! $gebucht) {
+        if ($gesetzt === false) {
             return false;
         }
 
@@ -104,16 +118,44 @@ class Chargebacks
             // an der Zwillingsstelle tut. Der Anbieter stellt erneut zu, die
             // Anspruchszeile bleibt und wird zum Wiedereinstieg, und
             // `finishUnclaimed()` feuert das Ereignis dann doch noch.
-            Payment::query()
-                ->whereKey($payment->getKey())
-                ->update(['charged_back_at' => null, 'updated_at' => Carbon::now()]);
+            //
+            // Nur den **eigenen** Zeitstempel: `$gesetzt` ist null, wenn ein
+            // frueherer Widerspruch den Zustand gesetzt hat. Ihn dann zu
+            // loeschen naehme dem ersten Widerspruch seinen Zustand, und die
+            // Wache in `Fulfilment` waere aus.
+            try {
+                if ($gesetzt instanceof Carbon) {
+                    Payment::query()
+                        ->whereKey($payment->getKey())
+                        ->where('charged_back_at', $gesetzt)
+                        ->update(['charged_back_at' => null, 'updated_at' => Carbon::now()]);
+                }
 
-            Log::error('statamic-payments: a chargeback was recorded but its event threw; the state was rolled back so a later delivery fires it again.', [
-                'payment_id' => $payment->getKey(),
-                'reference' => $reference,
-                'exception' => $e->getMessage(),
-            ]);
+                Log::error('statamic-payments: a chargeback was recorded but its event threw; the state was rolled back so a later delivery fires it again.', [
+                    'payment_id' => $payment->getKey(),
+                    'reference' => $reference,
+                    'rolled_back' => $gesetzt instanceof Carbon,
+                    'exception' => $e->getMessage(),
+                ]);
+            } catch (Throwable $rueckname) {
+                // Die Zuruecknahme selbst ist gescheitert — oft dieselbe
+                // verlorene Verbindung, an der eine Zeile vorher der Listener
+                // starb. Ohne diesen Fang ginge `$e` verloren, die Zeile mit
+                // Zahlung und Kennung liefe nie, und `charged_back_at` bliebe
+                // gesetzt: jede weitere Zustellung faende alles erledigt und
+                // das Ereignis feuerte nie wieder. Genau der Ausgang, den der
+                // Kommentar oben auszuschliessen behauptet.
+                Log::critical('statamic-payments: a chargeback event threw and rolling its state back failed too; the access may still be open. Check this payment by hand.', [
+                    'payment_id' => $payment->getKey(),
+                    'reference' => $reference,
+                    'original' => $e->getMessage(),
+                    'rollback' => $rueckname->getMessage(),
+                ]);
+            }
 
+            // Immer der urspruengliche Fehler, nie der Ersatz: der Anbieter
+            // soll erneut zustellen, und wer nachsieht, will wissen, was
+            // wirklich passiert ist.
             throw $e;
         }
 
@@ -134,13 +176,18 @@ class Chargebacks
      * UPDATE entscheidet: setzt es die Zeit, war dieser Aufruf derjenige, der
      * die Rueckbuchung wirksam gemacht hat, und das Ereignis gehoert gefeuert.
      * Findet es die Zeit gesetzt, war wirklich schon alles getan.
+     *
+     * Gibt den gesetzten Zeitstempel zurueck, nicht `true` — der Aufrufer darf
+     * spaeter nur zuruecknehmen, was er selbst geschrieben hat.
      */
-    protected function finishUnclaimed(Payment $payment): bool
+    protected function finishUnclaimed(Payment $payment): Carbon|false
     {
+        $jetzt = Carbon::now();
+
         $nachgeholt = Payment::query()
             ->whereKey($payment->getKey())
             ->whereNull('charged_back_at')
-            ->update(['charged_back_at' => Carbon::now(), 'updated_at' => Carbon::now()]);
+            ->update(['charged_back_at' => $jetzt, 'updated_at' => $jetzt]);
 
         if ($nachgeholt === 0) {
             return false;
@@ -150,7 +197,7 @@ class Chargebacks
             'payment_id' => $payment->getKey(),
         ]);
 
-        return true;
+        return $jetzt;
     }
 
     /**

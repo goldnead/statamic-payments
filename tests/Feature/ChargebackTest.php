@@ -421,4 +421,44 @@ class ChargebackTest extends TestCase
         // Und die Rueckbuchung steht genau einmal in der Tabelle.
         $this->assertSame(1, DB::table('payment_chargebacks')->where('reference', 'chb_wirft')->count());
     }
+
+    #[Test]
+    public function a_second_dispute_that_throws_does_not_erase_the_first_ones_state(): void
+    {
+        // Die Zuruecknahme darf nur den eigenen Zeitstempel loeschen. Auf
+        // Stripe ist ein zweiter Widerspruch auf derselben Zahlungszeile
+        // erreichbar, weil mehrere Charges einer Rechnung auf dieselbe Zeile
+        // zeigen und jeder seinen eigenen `dp_…` traegt. Nahm die Zuruecknahme
+        // unbedingt zurueck, war der Zustand des **ersten** Widerspruchs weg:
+        // kein Badge im CP, keine Widerspruchszeile in der Detailansicht — und
+        // die Wache, die eine zurueckgebuchte Zahlung von der Erfuellung
+        // abhaelt, war ausgeschaltet.
+        $payment = $this->paidPayment('stripe', 'in_zwei_widersprueche');
+
+        Event::fake([PaymentChargedBack::class]);
+        $this->assertTrue(app(Chargebacks::class)->record($payment, 'dp_1', 1900));
+
+        $erster = $payment->fresh()->charged_back_at;
+        $this->assertNotNull($erster);
+
+        // Der zweite Widerspruch, dessen Listener stirbt.
+        Event::listen(PaymentChargedBack::class, function () {
+            throw new \RuntimeException('der Nachbar ist weg');
+        });
+
+        try {
+            app(Chargebacks::class)->record($payment->fresh(), 'dp_2', 500);
+            $this->fail('the throw has to reach the caller');
+        } catch (\RuntimeException) {
+            // erwartet
+        }
+
+        // Der Zustand des ersten steht unveraendert.
+        $this->assertNotNull($payment->fresh()->charged_back_at);
+        $this->assertTrue($erster->equalTo($payment->fresh()->charged_back_at));
+        $this->assertTrue(app(Chargebacks::class)->chargedBack($payment->fresh()));
+
+        // Und beide Anspruchszeilen stehen.
+        $this->assertSame(2, DB::table('payment_chargebacks')->where('payment_id', $payment->getKey())->count());
+    }
 }

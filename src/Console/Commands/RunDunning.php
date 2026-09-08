@@ -50,6 +50,9 @@ class RunDunning extends Command
     /** Die Zeile hat geworfen. Der Lauf ging weiter. */
     protected int $broken = 0;
 
+    /** Die Vereinbarung war schon gekuendigt oder ausgelaufen; die Strecke wurde geschlossen. */
+    protected int $closed = 0;
+
     public function handle(Dunning $dunning, DunningNotice $notice): int
     {
         if (! $dunning->enabled()) {
@@ -88,6 +91,27 @@ class RunDunning extends Command
     /** One agreement: settle, end, or write the letter that is due. */
     protected function pass(Dunning $dunning, DunningNotice $notice, Subscription $subscription, bool $dry): void
     {
+        // Eine Vereinbarung, die es nicht mehr gibt, wird nicht gemahnt.
+        //
+        // `begin()` haelt gekuendigte Abos heraus, aber nur beim Oeffnen. Wer
+        // am Tag 4 im Portal kuendigt, statt die Karte zu reparieren, bekam
+        // danach Brief zwei und drei — mit „Ohne ein gueltiges Zahlungsmittel
+        // endet der Zugang" und einem Link zum Kartenwechsel an jemanden, der
+        // gerade gegangen ist — und am Tag 21 ein zweites `SubscriptionEnded`
+        // samt Kuendigungsversuch gegen einen Anbieter, der die Vereinbarung
+        // laengst beendet hat. `cancel()` raeumt die `dunning_*`-Spalten nicht
+        // ab, also blieb die Strecke stehen.
+        //
+        // `suspended` gehoert ausdruecklich dazu: genau das setzt Mollie, wenn
+        // eine Abbuchung scheitert. Ein blankes `isLive()` legte die Mollie-
+        // Strecke vollstaendig stumm.
+        if (in_array($subscription->status, [Subscription::STATUS_CANCELLED, Subscription::STATUS_COMPLETED], true)) {
+            $dry || $dunning->stop($subscription);
+            $this->closed++;
+
+            return;
+        }
+
         // The provider first, always. It retries on its own rhythm, and a card
         // that went through between two letters ends the sequence silently —
         // writing to somebody who has already paid is the one outcome worth
@@ -171,6 +195,10 @@ class RunDunning extends Command
                 ? "Dry run: {$this->seen} sequence(s) checked, {$this->sent} letter(s) due, {$this->ended} agreement(s) would end, {$this->stopped} settled meanwhile."
                 : "{$this->seen} sequence(s) checked, {$this->sent} letter(s) sent, {$this->ended} agreement(s) ended, {$this->stopped} closed because the money arrived.",
         ];
+
+        if ($this->closed > 0) {
+            $zeilen[] = "{$this->closed} sequence(s) closed because the agreement had already ended.";
+        }
 
         if ($this->skipped > 0) {
             $zeilen[] = "{$this->skipped} stage(s) counted without a letter (no address, or on the suppression list).";

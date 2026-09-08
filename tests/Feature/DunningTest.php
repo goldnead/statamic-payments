@@ -736,6 +736,50 @@ class DunningTest extends TestCase
     }
 
     #[Test]
+    public function cancelling_in_the_middle_of_a_sequence_closes_it(): void
+    {
+        // `begin()` haelt gekuendigte Abos heraus, aber nur beim Oeffnen. Wer
+        // am Tag 4 kuendigt, statt die Karte zu reparieren, bekam bisher Brief
+        // zwei und drei — beide mit einem Link zum Kartenwechsel — und am Tag
+        // 21 ein zweites `SubscriptionEnded` samt Kuendigungsversuch gegen
+        // einen Anbieter, der die Vereinbarung laengst beendet hat.
+        [$subscription] = $this->openSequence();
+        Mail::fake();
+
+        // Tag 3: der erste Brief geht raus.
+        Carbon::setTestNow(Carbon::parse('2026-09-04 10:00:00'));
+        $this->artisan('payments:dunning')->assertSuccessful();
+        Mail::assertSent(DunningMail::class, 1);
+        $this->assertSame(1, (int) $subscription->fresh()->dunning_stage);
+
+        // Tag 4: der Kunde kuendigt im Portal.
+        Carbon::setTestNow(Carbon::parse('2026-09-05 10:00:00'));
+        Subscription::query()->whereKey($subscription->getKey())->update([
+            'status' => Subscription::STATUS_CANCELLED,
+            'cancelled_at' => Carbon::now(),
+            'ended_at' => Carbon::now(),
+        ]);
+
+        Event::fake([SubscriptionEnded::class]);
+
+        // Der Rest der Strecke, Tag fuer Tag bis hinter das Ende.
+        foreach (range(5, 22) as $tag) {
+            Carbon::setTestNow(Carbon::parse('2026-09-01 09:00:00')->addDays($tag));
+            $this->artisan('payments:dunning')->assertSuccessful();
+        }
+
+        // Kein zweiter Brief, kein zweites Ende.
+        Mail::assertSent(DunningMail::class, 1);
+        Event::assertNotDispatched(SubscriptionEnded::class);
+
+        // Und die Strecke steht nicht als Leiche in der Tabelle: sonst haelt
+        // sie fuer immer `payments:prune-unpaid` von ihrer Zyklus-Zeile ab.
+        $frisch = $subscription->fresh();
+        $this->assertNull($frisch->dunning_started_at);
+        $this->assertNull($frisch->dunning_payment_id);
+    }
+
+    #[Test]
     public function one_broken_sequence_does_not_stop_the_run(): void
     {
         // `running()` sortiert nach dem Beginn der Strecke. Riss eine Zeile das

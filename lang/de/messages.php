@@ -12,6 +12,8 @@ return [
     // Neben dem Status auf dem Zahlungs-Bildschirm, nie an seiner Stelle: eine
     // zurueckgebuchte Bestellung ist weiter bezahlt.
     'charged_back' => 'Zurückgebucht',
+    'dunning_running' => 'Mahnstrecke :stage/:stages',
+    'subscription_field_dunning_since' => 'Mahnstrecke seit',
     'utility_title' => 'Zahlungen',
     'utility_nav' => 'Zahlungen',
     // Der Abschnitt der CP-Navigation, unter dem die Verkaufs-Bildschirme der

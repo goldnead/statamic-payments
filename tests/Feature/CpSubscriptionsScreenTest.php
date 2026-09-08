@@ -267,6 +267,33 @@ class CpSubscriptionsScreenTest extends TestCase
     }
 
     #[Test]
+    public function a_running_dunning_sequence_is_visible_on_the_row(): void
+    {
+        // Mollie setzt bei einer gescheiterten Abbuchung `suspended`, und das
+        // steht auch an einem Abo, dem gerade niemand hinterherschreibt. Wer
+        // wissen will, ob eine Mahnstrecke laeuft und wie weit sie ist, musste
+        // in die Datenbank sehen. Der Kreis steht auf der Liste selbst.
+        $ohne = $this->subscription(['provider_id' => 'sub_ruhig']);
+        $mit = $this->subscription(['provider_id' => 'sub_gemahnt']);
+
+        $mit->forceFill([
+            'dunning_started_at' => now()->subDays(4),
+            'dunning_stage' => 2,
+        ])->save();
+
+        $rows = collect($this->actingAs($this->user())->getJson('/cp/utilities/subscriptions')->json('data'))
+            ->keyBy('provider_id');
+
+        $this->assertNull($rows['sub_ruhig']['dunning'], 'a quiet agreement carries no badge');
+        $this->assertSame('Dunning 2/3', $rows['sub_gemahnt']['dunning']['label']);
+        $this->assertNotNull($rows['sub_gemahnt']['dunning']['started_at']);
+
+        // Die Kennung der gemahnten Zahlung faellt nicht mit heraus: die Liste
+        // ist ein Kreis, kein zweiter Beleg.
+        $this->assertSame(['label', 'started_at'], array_keys($rows['sub_gemahnt']['dunning']));
+    }
+
+    #[Test]
     public function it_filters_by_status(): void
     {
         $this->subscription(['provider_id' => 'sub_laeuft']);

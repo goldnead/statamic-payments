@@ -84,6 +84,7 @@ const detailFields = computed(() => {
         { label: t.field_rhythm, value: row.rhythm },
         { label: t.field_progress, value: row.progress },
         { label: t.field_total, value: row.total ? `${row.total} ${row.currency}` : null },
+        { label: t.field_dunning_since, value: row.dunning?.started_at ?? null, date: true },
         { label: t.field_starts_at, value: row.starts_at, date: true },
         { label: t.field_next_payment, value: row.next_payment_at, date: true },
         { label: t.field_cancelled_at, value: row.cancelled_at, date: true },
@@ -166,8 +167,14 @@ const detailFields = computed(() => {
                 <span v-else class="text-gray-500 dark:text-gray-400">{{ t.none }}</span>
             </template>
 
+            <!-- Zwei Kreise, nicht einer: `suspended` steht auch an einem Abo,
+                 dem gerade niemand hinterherschreibt. Der zweite sagt, dass eine
+                 Mahnstrecke laeuft und wie weit sie ist. -->
             <template #cell-status="{ row }">
-                <Badge :color="statusColor(row.status)" :text="row.status_label" />
+                <div class="flex items-center gap-1">
+                    <Badge :color="statusColor(row.status)" :text="row.status_label" />
+                    <Badge v-if="row.dunning" color="amber" :text="row.dunning.label" />
+                </div>
             </template>
 
             <template #cell-email="{ row }">
@@ -192,6 +199,7 @@ const detailFields = computed(() => {
             <div v-if="detail" class="space-y-6">
                 <div class="flex items-center gap-2">
                     <Badge :color="statusColor(detail.status)" :text="detail.status_label" />
+                    <Badge v-if="detail.dunning" color="amber" :text="detail.dunning.label" />
                     <span class="text-sm text-gray-600 dark:text-gray-400">{{ detail.kind }}</span>
                 </div>
 

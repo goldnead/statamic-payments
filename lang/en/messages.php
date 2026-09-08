@@ -12,6 +12,8 @@ return [
     // Beside the status on the payments screen, never instead of it: a
     // disputed order is still paid.
     'charged_back' => 'Charged back',
+    'dunning_running' => 'Dunning :stage/:stages',
+    'subscription_field_dunning_since' => 'Dunning since',
     'utility_title' => 'Payments',
     'utility_nav' => 'Payments',
     // The CP navigation section the suite's selling screens live under. Shared

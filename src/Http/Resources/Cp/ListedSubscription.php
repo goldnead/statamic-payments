@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Http\Resources\Cp;
 
 use Goldnead\StatamicPayments\Http\Resources\Cp\Concerns\DescribesProducts;
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\Dunning;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
@@ -61,6 +62,21 @@ class ListedSubscription extends JsonResource
             'progress' => $this->isPlan()
                 ? $this->times_charged.' / '.$this->times
                 : (string) $this->times_charged,
+
+            // Ob gerade gemahnt wird, und wie weit.
+            //
+            // Der Status allein sagt es nicht: Mollie setzt bei einer
+            // gescheiterten Abbuchung `suspended`, und das steht auch an einem
+            // Abo, dem niemand hinterherschreibt. Wer sehen will, ob eine
+            // Strecke laeuft und wie viele Briefe schon raus sind, musste bis
+            // hierher in die Datenbank sehen.
+            'dunning' => $this->dunning_started_at === null ? null : [
+                'label' => __('statamic-payments::messages.dunning_running', [
+                    'stage' => (int) $this->dunning_stage,
+                    'stages' => count(app(Dunning::class)->stages()),
+                ]),
+                'started_at' => $this->dunning_started_at->toIso8601String(),
+            ],
 
             'status' => $this->status,
             'status_label' => $this->translatedOrRaw(

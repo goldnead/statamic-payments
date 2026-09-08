@@ -193,6 +193,7 @@ class SubscriptionsController extends CpController
             'field_rhythm' => __('statamic-payments::messages.subscription_column_rhythm'),
             'field_progress' => __('statamic-payments::messages.subscription_column_progress'),
             'field_status' => __('statamic-payments::messages.subscription_column_status'),
+            'field_dunning_since' => __('statamic-payments::messages.subscription_field_dunning_since'),
             'field_starts_at' => __('statamic-payments::messages.subscription_field_starts_at'),
             'field_next_payment' => __('statamic-payments::messages.subscription_column_next_payment'),
             'field_cancelled_at' => __('statamic-payments::messages.subscription_field_cancelled_at'),

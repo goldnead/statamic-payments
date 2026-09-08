@@ -318,7 +318,13 @@ class Dunning
         $stages = $this->stages();
         $last = (int) (end($stages) ?: 0);
 
-        return $now->greaterThanOrEqualTo($started->copy()->addDays($last + $this->graceDays()));
+        // Mindestens ein Tag hinter der letzten Stufe, auch bei `grace_days`
+        // von null. Sonst fallen die Frist und der letzte Brief auf denselben
+        // Tag, und der Lauf fragt zuerst nach der Frist: der Kunde bekommt zwei
+        // von drei versprochenen Briefen und ist gekuendigt, bevor der dritte je
+        // geschrieben wurde. Karenz null heisst „am Tag nach dem letzten Brief",
+        // nicht „statt des letzten Briefs".
+        return $now->greaterThanOrEqualTo($started->copy()->addDays($last + max(1, $this->graceDays())));
     }
 
     /**
@@ -349,21 +355,47 @@ class Dunning
         // wieder ein Brief, nie ein Ende, kein Zugangsentzug, und keine Zeile
         // irgendwo. Rollt die Transaktion zurueck, steht die Strecke wieder da
         // und der naechste Lauf versucht es erneut.
-        $claimed = DB::transaction(function () use ($subscription): bool {
-            $genommen = Subscription::query()
-                ->whereKey($subscription->getKey())
-                ->whereNotNull('dunning_started_at')
-                ->update([
-                    'dunning_started_at' => null,
-                    'dunning_payment_id' => null,
-                    'status' => Subscription::STATUS_CANCELLED,
-                    'ended_at' => $subscription->ended_at ?? Carbon::now(),
-                    'next_payment_at' => null,
-                    'updated_at' => Carbon::now(),
-                ]);
+        //
+        // `SubscriptionEnded` gehoert **mit** in diese Transaktion, und das ist
+        // der Unterschied zwischen einem schlechten und einem unsichtbaren Tag.
+        // Das Ereignis ist, was den Zugang entzieht. Wurde die Strecke davor
+        // abgeraeumt und das Abo gekuendigt und warf dann ein Zuhoerer, war
+        // beides verloren: der Zugang stand weiter offen, und keine Zeile fand
+        // die Strecke je wieder — `running()` kennt sie nicht mehr, und der Lauf
+        // kommt nie wieder vorbei. So rollt der Wurf den Anspruch mit zurueck,
+        // die Strecke steht wieder da und der naechste Lauf versucht es erneut.
+        try {
+            $claimed = DB::transaction(function () use ($subscription): bool {
+                $genommen = Subscription::query()
+                    ->whereKey($subscription->getKey())
+                    ->whereNotNull('dunning_started_at')
+                    ->update([
+                        'dunning_started_at' => null,
+                        'dunning_payment_id' => null,
+                        'status' => Subscription::STATUS_CANCELLED,
+                        'ended_at' => $subscription->ended_at ?? Carbon::now(),
+                        'next_payment_at' => null,
+                        'updated_at' => Carbon::now(),
+                    ]);
 
-            return $genommen > 0;
-        });
+                if ($genommen === 0) {
+                    return false;
+                }
+
+                SubscriptionEnded::dispatch($subscription->fresh() ?? $subscription);
+
+                return true;
+            });
+        } catch (Throwable $e) {
+            // `critical`: der Zugangsentzug ist gescheitert, und das ist die
+            // eine Stoerung hier, die Geld kostet, solange sie steht.
+            Log::critical('statamic-payments: withdrawing the access at the end of a dunning sequence threw; nothing was ended and the sequence is still open for the next run.', [
+                'subscription_id' => $subscription->getKey(),
+                'exception' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
 
         if (! $claimed) {
             return false;
@@ -419,10 +451,6 @@ class Dunning
             ->whereKey($subscription->getKey())
             ->whereNull('cancelled_at')
             ->update(['cancelled_at' => Carbon::now(), 'updated_at' => Carbon::now()]);
-
-        // What takes the access away, through the listener that already exists
-        // for an agreement running out.
-        SubscriptionEnded::dispatch($subscription->fresh() ?? $subscription);
 
         return true;
     }

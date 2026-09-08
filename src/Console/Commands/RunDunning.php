@@ -55,13 +55,11 @@ class RunDunning extends Command
 
     public function handle(Dunning $dunning, DunningNotice $notice): int
     {
-        if (! $dunning->enabled()) {
-            $this->warn('statamic-payments.dunning.enabled is off; nothing was done.');
-
-            return self::SUCCESS;
-        }
-
         $dry = (bool) $this->option('dry-run');
+
+        if (! $dunning->enabled()) {
+            return $this->closeEverything($dunning, $dry);
+        }
 
         foreach ($dunning->running() as $subscription) {
             $this->seen++;
@@ -84,6 +82,43 @@ class RunDunning extends Command
         }
 
         $this->report($dry);
+
+        // Ein Lauf, in dem Zeilen geworfen haben, ist kein gelungener Lauf. Im
+        // Cron ist der Rueckgabewert das Einzige, was gelesen wird: mit `0`
+        // schwieg der Planer ueber eine Mahnstrecke, die niemanden mehr mahnt.
+        // Die Zahl steht im Bericht darueber.
+        return $this->broken > 0 ? self::FAILURE : self::SUCCESS;
+    }
+
+    /**
+     * Der Schalter steht auf aus — und die laufenden Strecken werden dabei
+     * geschlossen, nicht eingefroren.
+     *
+     * Eingefroren waere die stille Variante genau des Lochs, das die
+     * Mahnstrecke schliessen soll: `dunning_started_at` bleibt stehen, kein
+     * Brief geht mehr raus, kein Ende kommt, und `payments:prune-unpaid` fasst
+     * die Zyklus-Zeile nicht an, weil sie unter einer Mahnstrecke haengt. Kein
+     * Mensch sieht das je wieder.
+     *
+     * Geschlossen, nicht gekuendigt: ein Schalter ist keine Kuendigung, und ein
+     * Haus, das die Mahnstrecke abstellt, hat sich damit gegen den automatischen
+     * Zugangsentzug entschieden, nicht dafuer. Das Abo bleibt, wie der Anbieter
+     * es gesetzt hat, und die Zyklus-Zeile ist wieder aufraeumbar.
+     */
+    protected function closeEverything(Dunning $dunning, bool $dry): int
+    {
+        $offen = 0;
+
+        foreach ($dunning->running() as $subscription) {
+            $dry || $dunning->stop($subscription);
+            $offen++;
+        }
+
+        $this->warn(match (true) {
+            $offen === 0 => 'statamic-payments.dunning.enabled is off; nothing was done.',
+            $dry => "statamic-payments.dunning.enabled is off; {$offen} running sequence(s) would be closed.",
+            default => "statamic-payments.dunning.enabled is off; {$offen} running sequence(s) were closed rather than left frozen.",
+        });
 
         return self::SUCCESS;
     }

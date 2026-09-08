@@ -231,7 +231,18 @@ class DunningNotice
             try {
                 $mailer = app($class);
             } catch (Throwable $e) {
-                Log::debug('statamic-payments: no brand-aware mailer is configured; the dunning letter went out through the ordinary one.', [
+                // `warning`, nicht `debug`. Der markenbewusste Versand liegt auf
+                // der Platte und laesst sich nicht bauen: jeder Mahnbrief geht
+                // danach unter dem Absender der Grundeinstellung raus, auf einer
+                // Installation mit mehreren Marken also unter dem Namen der
+                // falschen — bei einem Brief ueber das Geld eines Kunden. In den
+                // ueblichen Kanaelen steht `debug` nicht, das sah niemand je.
+                // Und der Absender steht dabei, sonst weiss der Leser nicht,
+                // unter welchem Namen die Briefe tatsaechlich rausgingen.
+                Log::warning('statamic-payments: no brand-aware mailer could be built; the dunning letter went out through the ordinary one.', [
+                    'subscription_id' => $subscription->getKey(),
+                    'brand_id' => (int) $subscription->brand_id,
+                    'sender' => (string) config('mail.from.address'),
                     'exception' => $e->getMessage(),
                 ]);
             }

@@ -11,6 +11,7 @@ use Goldnead\StatamicPayments\Portal\LinkTokenizer;
 use Goldnead\StatamicPayments\Support\Dunning;
 use Goldnead\StatamicPayments\Support\DunningNotice;
 use Goldnead\StatamicPayments\Tests\TestCase;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
@@ -827,11 +828,187 @@ class DunningTest extends TestCase
         $this->app->instance(DunningNotice::class, $notice);
 
         Carbon::setTestNow(Carbon::parse('2026-09-04 10:00:00'));
-        $this->artisan('payments:dunning')->assertSuccessful();
+        // Weitergelaufen ist nicht gelungen: der Rueckgabewert meldet den Bruch,
+        // damit der Planer nicht darueber schweigt.
+        $this->artisan('payments:dunning')->assertFailed();
 
         // Die zweite Zeile wurde trotzdem bedient.
         $this->assertSame(1, (int) $zweite->fresh()->dunning_stage);
         Mail::assertSent(DunningMail::class, 1);
+    }
+
+    // ------------------------------------- the ending and the access it takes
+
+    #[Test]
+    public function a_listener_that_throws_never_costs_both_the_access_and_the_sequence(): void
+    {
+        // Der teuerste Ausgang, den es hier gibt: `SubscriptionEnded` ist das,
+        // was den Zugang entzieht. Wurde die Strecke abgeraeumt und das Abo
+        // gekuendigt, *bevor* das Ereignis ohne Wurf durch war, und warf dann
+        // ein Zuhoerer, so war beides weg — der Zugang blieb bestehen und keine
+        // Zeile fand die Strecke je wieder. Erlaubt sind genau zwei Ausgaenge:
+        // der Zugang ist entzogen, oder die Strecke steht noch da.
+        [$subscription] = $this->openSequence();
+        Mail::fake();
+
+        Event::listen(SubscriptionEnded::class, function (): void {
+            throw new \RuntimeException('der Zugangsentzug ist gescheitert');
+        });
+
+        Carbon::setTestNow(Carbon::parse('2026-09-22 10:00:00'));
+        $this->artisan('payments:dunning');
+
+        $frisch = $subscription->fresh();
+
+        $this->assertNotNull(
+            $frisch->dunning_started_at,
+            'the sequence stays findable when the access could not be withdrawn'
+        );
+        $this->assertSame(
+            Subscription::STATUS_ACTIVE,
+            $frisch->status,
+            'a subscription is not cancelled while its access is still standing'
+        );
+    }
+
+    #[Test]
+    public function the_next_run_ends_what_the_throwing_listener_left_open(): void
+    {
+        // Die andere Haelfte derselben Zusicherung: „auffindbar" ist nur dann
+        // etwas wert, wenn der naechste Lauf es auch wirklich zu Ende bringt.
+        [$subscription] = $this->openSequence();
+        Mail::fake();
+
+        $kaputt = true;
+
+        Event::listen(SubscriptionEnded::class, function () use (&$kaputt): void {
+            if ($kaputt) {
+                throw new \RuntimeException('der Zugangsentzug ist gescheitert');
+            }
+        });
+
+        Carbon::setTestNow(Carbon::parse('2026-09-22 10:00:00'));
+        $this->artisan('payments:dunning');
+
+        $kaputt = false;
+        $this->artisan('payments:dunning')->assertSuccessful();
+
+        $frisch = $subscription->fresh();
+        $this->assertSame(Subscription::STATUS_CANCELLED, $frisch->status);
+        $this->assertNull($frisch->dunning_started_at);
+    }
+
+    #[Test]
+    public function a_run_with_a_broken_sequence_ends_with_a_failing_exit_code(): void
+    {
+        // Im Cron ist der Rueckgabewert das Einzige, was gelesen wird. Ein Lauf,
+        // in dem jede einzelne Zeile geworfen hat, meldete `0` — und damit
+        // schwieg der Planer ueber eine Mahnstrecke, die niemanden mehr mahnt.
+        [$subscription] = $this->openSequence();
+        Mail::fake();
+
+        $notice = new class(app(LinkTokenizer::class)) extends DunningNotice
+        {
+            public function send(Subscription $subscription, int $stage): string
+            {
+                throw new \RuntimeException('diese Zeile ist kaputt');
+            }
+        };
+
+        $this->app->instance(DunningNotice::class, $notice);
+
+        Carbon::setTestNow(Carbon::parse('2026-09-04 10:00:00'));
+        $this->artisan('payments:dunning')
+            ->expectsOutputToContain('1 sequence(s) threw')
+            ->assertFailed();
+    }
+
+    // ------------------------------------------- the switch and the schedule
+
+    #[Test]
+    public function a_grace_period_of_zero_does_not_eat_the_last_letter(): void
+    {
+        // Mit `grace_days => 0` fallen die letzte Stufe und die Frist auf
+        // denselben Tag, und der Lauf fragte zuerst nach der Frist. Der Kunde
+        // bekam zwei von drei versprochenen Briefen und war gekuendigt, bevor
+        // der dritte je geschrieben wurde.
+        config(['statamic-payments.dunning.grace_days' => 0]);
+
+        [$subscription] = $this->openSequence();
+        Mail::fake();
+
+        foreach (range(1, 16) as $tag) {
+            Carbon::setTestNow(Carbon::parse('2026-09-01 09:00:00')->addDays($tag));
+            $this->artisan('payments:dunning')->assertSuccessful();
+        }
+
+        Mail::assertSent(DunningMail::class, 3);
+        $this->assertSame(Subscription::STATUS_CANCELLED, $subscription->fresh()->status);
+    }
+
+    #[Test]
+    public function switching_the_sequence_off_does_not_freeze_the_running_ones(): void
+    {
+        // Ein Schalter, der laufende Strecken einfriert, ist die stille
+        // Variante des Lochs, das diese Klasse schliessen soll: `running()`
+        // haelt sie fuer immer, kein Brief geht mehr raus, kein Ende kommt, und
+        // `prune-unpaid` raeumt die Zyklus-Zeile nicht weg, weil sie unter einer
+        // Mahnstrecke haengt. Aus heisst deshalb: die Strecken werden
+        // geschlossen, das Abo bleibt, wie der Anbieter es gesetzt hat.
+        [$subscription, $payment] = $this->openSequence();
+        Mail::fake();
+
+        config(['statamic-payments.dunning.enabled' => false]);
+
+        Carbon::setTestNow(Carbon::parse('2026-09-04 10:00:00'));
+        $this->artisan('payments:dunning')->assertSuccessful();
+
+        $frisch = $subscription->fresh();
+        $this->assertNull($frisch->dunning_started_at, 'the sequence was closed rather than frozen');
+        $this->assertNull($frisch->dunning_payment_id, 'and the cycle row is prunable again');
+        $this->assertSame(Subscription::STATUS_ACTIVE, $frisch->status, 'a switch is not a cancellation');
+        Mail::assertNothingSent();
+
+        $this->assertSame(0, Subscription::query()
+            ->whereNotNull('dunning_payment_id')
+            ->where('dunning_payment_id', $payment->getKey())
+            ->count());
+    }
+
+    #[Test]
+    public function a_brand_mailer_that_cannot_be_built_says_so_out_loud(): void
+    {
+        // `Log::debug` war die falsche Lautstaerke. Der markenbewusste Versand
+        // ist installiert, aber nicht gebunden: jeder Brief geht danach unter
+        // dem Absender der Grundeinstellung raus, also unter dem Namen der
+        // falschen Marke — bei einem Brief ueber das Geld eines Kunden. In den
+        // Standard-Kanaelen steht `debug` nicht, das sah niemand je.
+        [$subscription] = $this->openSequence();
+        Mail::fake();
+
+        if (! class_exists(DunningNotice::BRAND_MAILER)) {
+            $this->markTestSkipped('statamic-brand-context is not installed.');
+        }
+
+        $meldungen = [];
+
+        Event::listen(MessageLogged::class, function (MessageLogged $meldung) use (&$meldungen): void {
+            $meldungen[] = $meldung;
+        });
+
+        Carbon::setTestNow(Carbon::parse('2026-09-04 10:00:00'));
+        $this->artisan('payments:dunning')->assertSuccessful();
+
+        Mail::assertSent(DunningMail::class, 1);
+
+        $passende = array_values(array_filter(
+            $meldungen,
+            fn (MessageLogged $m) => str_contains($m->message, 'brand-aware mailer'),
+        ));
+
+        $this->assertNotEmpty($passende, 'the fallback to the ordinary mailer was logged');
+        $this->assertSame('warning', $passende[0]->level, 'and loud enough to appear in the ordinary channels');
+        $this->assertArrayHasKey('sender', $passende[0]->context, 'naming the sender the letter actually went out under');
     }
 
     #[Test]

@@ -90,6 +90,21 @@ class Fulfilment
     {
         try {
             return $this->gateway->fetch($providerId);
+        } catch (ProviderUnavailable $e) {
+            // Not swallowed, and this is the one exception to the rule below.
+            //
+            // "The provider would not answer" covers two very different things:
+            // an id this account never issued, and an outage. For Mollie the
+            // difference does not matter, because Mollie redelivers on its own
+            // schedule whatever this endpoint says. For Stripe it decides
+            // everything: the event id is claimed before this runs, so a
+            // delivery that returns quietly during an outage never comes back —
+            // not on a retry, not from the Resend button. A buyer paid, and the
+            // only trace is a warning nobody reads.
+            //
+            // So a gateway that says "ask again later" is allowed to say it,
+            // and the caller decides what to do about it.
+            throw $e;
         } catch (Throwable $e) {
             // Most often a 404 for an id this account never issued, which is
             // the ordinary shape of a stray or forged call. A real outage looks

@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.21.1 — 2026-09-08
+
+Two defects in 1.21.0's Stripe endpoint, both found by review rather than by anything failing.
+
+### Fixed: a delivery during a Stripe outage was never redelivered
+
+`Fulfilment::fetch()` catches everything a gateway throws, logs it and carries on with a null.
+That is right for Mollie — an id this account never issued is a stray call, and Mollie redelivers
+on its own schedule whatever the endpoint answers.
+
+On the Stripe path it was fatal. The event id is claimed **before** the work runs, so a timeout, a
+502 or a rate limit produced a quiet `200` with the claim still standing. Stripe then never came
+back — not on a retry, and not from the Resend button, which sends the same `evt_` id into the same
+claim. A buyer paid, one warning landed in the log, and the order was never fulfilled.
+
+A gateway now throws `Support\ProviderUnavailable` when the answer is "ask again later" — a 5xx, a
+429, a connection that never came up. `Fulfilment` lets that one through instead of swallowing it,
+the endpoint releases its claim and answers `503`, and Stripe redelivers. A 404 is still an answer
+and still a quiet `200`.
+
+### Fixed: the only alarm this package has fired on every single sale
+
+`payment_intent.succeeded` was in the README's recommended event list. Stripe sends it alongside
+`checkout.session.completed` for the same purchase — but the row is stamped with the session id, so
+the intent matched nothing and `Fulfilment` logged "webhook for an unknown payment id". That line
+exists for a buyer who paid into thin air. Firing it on every order made it worthless.
+
+A PaymentIntent event is now only acted on when a row actually carries that id, which is the
+follow-up-offer case and nothing else. The README lists the events properly, including the failure
+ones, and says which two are only for sites using follow-up offers.
+
+### Also
+
+- `Refunds::book()` lost the remainder when another refund booked between its read and its write:
+  the claim stood, so the money was never booked and no redelivery could fix it. It now books what
+  still fits.
+- The README's binding example casts the config value, so an unset `STRIPE_KEY` is a clear message
+  rather than a `TypeError`.
+
 ## 1.21.0 — 2026-09-08
 
 **A second payment provider, and the resolution that had to come first.** Stripe ships as an

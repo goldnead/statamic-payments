@@ -10,6 +10,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Testing\TestResponse;
 use PHPUnit\Framework\Attributes\Test;
 
@@ -265,6 +266,129 @@ class StripeWebhookTest extends TestCase
 
         $this->assertSame(0, DB::table('payment_webhook_events')
             ->where('event_id', 'evt_throws')->count(), 'the claim must be released for the retry');
+    }
+
+    // ------------------------------------------------- the provider is down
+
+    #[Test]
+    public function a_delivery_stripe_could_not_answer_is_given_back_and_not_swallowed(): void
+    {
+        // The failure mode this endpoint can have that Mollie's cannot: the
+        // event id is claimed before the work runs, so a delivery answered 200
+        // during an outage never comes back — not on a retry, not from the
+        // Resend button, which sends the same id into the same claim.
+        $payment = $this->stripePayment();
+
+        Http::fake(['api.stripe.com/*' => Http::response(['error' => ['message' => 'Bad gateway']], 502)]);
+
+        $body = $this->body('evt_outage', 'checkout.session.completed', ['id' => 'cs_test_a1b2c3']);
+
+        $this->deliver($body)->assertStatus(503);
+
+        $this->assertFalse($payment->fresh()->isPaid());
+        $this->assertSame(0, DB::table('payment_webhook_events')
+            ->where('event_id', 'evt_outage')->count(), 'the claim must be released for the redelivery');
+    }
+
+    #[Test]
+    public function the_redelivery_after_an_outage_fulfils(): void
+    {
+        $payment = $this->stripePayment();
+
+        Http::fake(['api.stripe.com/*' => Http::sequence()
+            ->push(['error' => ['message' => 'Service unavailable']], 503)
+            ->push([
+                'id' => 'cs_test_a1b2c3',
+                'object' => 'checkout.session',
+                'status' => 'complete',
+                'payment_status' => 'paid',
+                'customer_details' => ['email' => 'kaeufer@example.com'],
+            ]),
+        ]);
+
+        $body = $this->body('evt_retried', 'checkout.session.completed', ['id' => 'cs_test_a1b2c3']);
+        $header = $this->sign($body);
+
+        $this->deliver($body, $header)->assertStatus(503);
+        $this->assertFalse($payment->fresh()->isPaid());
+
+        // The same event id a second time. Without the release above this would
+        // be treated as a redelivery of something already done.
+        $this->deliver($body, $header)->assertOk();
+
+        $this->assertTrue($payment->fresh()->isPaid());
+        $this->assertNotNull($payment->fresh()->fulfilled_at);
+    }
+
+    #[Test]
+    public function a_payment_stripe_says_it_never_issued_is_still_a_quiet_two_hundred(): void
+    {
+        // A 404 is an answer, not an outage. Retrying it would have Stripe
+        // redeliver a stray or forged call for days.
+        $this->stripePayment();
+
+        Http::fake(['api.stripe.com/*' => Http::response(['error' => ['message' => 'No such session']], 404)]);
+
+        $this->deliver($this->body('evt_404', 'checkout.session.completed', ['id' => 'cs_test_unknown']))
+            ->assertOk();
+
+        $this->assertSame(1, DB::table('payment_webhook_events')
+            ->where('event_id', 'evt_404')->count(), 'an answered delivery keeps its claim');
+    }
+
+    // --------------------------------------------- the twin of a purchase
+
+    #[Test]
+    public function an_ordinary_purchase_raises_no_alarm_about_an_unknown_payment(): void
+    {
+        // Stripe fires `payment_intent.succeeded` alongside
+        // `checkout.session.completed` for the same purchase. The row carries
+        // the session id, so the intent matches nothing — and the package's
+        // only alarm for a buyer who paid into thin air used to fire on every
+        // single sale. An alarm that always rings is an alarm nobody reads.
+        $payment = $this->stripePayment();
+        $this->fakePaidSession();
+
+        Log::spy();
+
+        $this->deliver($this->body('evt_cs', 'checkout.session.completed', ['id' => 'cs_test_a1b2c3']))->assertOk();
+        $this->deliver($this->body('evt_pi', 'payment_intent.succeeded', ['id' => 'pi_test_1']))->assertOk();
+
+        $this->assertTrue($payment->fresh()->isPaid());
+
+        Log::shouldNotHaveReceived('warning', [
+            \Mockery::on(fn ($message) => is_string($message) && str_contains($message, 'unknown payment id')),
+            \Mockery::any(),
+        ]);
+    }
+
+    #[Test]
+    public function a_follow_up_charge_still_gets_its_payment_intent_event(): void
+    {
+        // The case where a `pi_` really is the row's own id: `FollowUp::accept()`
+        // stores what `chargeAgain()` returned. Ignoring every intent event
+        // would leave those orders unfulfilled.
+        $followUp = Payment::create([
+            'provider' => 'stripe',
+            'provider_id' => 'pi_test_followup',
+            'product' => 'noten-paket',
+            'amount_cent' => 900,
+            'currency' => 'EUR',
+            'status' => Payment::STATUS_OPEN,
+            'email' => 'kaeufer@example.com',
+        ]);
+
+        Http::fake(['api.stripe.com/*' => Http::response([
+            'id' => 'pi_test_followup',
+            'object' => 'payment_intent',
+            'status' => 'succeeded',
+            'receipt_email' => 'kaeufer@example.com',
+        ])]);
+
+        $this->deliver($this->body('evt_pi_followup', 'payment_intent.succeeded', ['id' => 'pi_test_followup']))
+            ->assertOk();
+
+        $this->assertTrue($followUp->fresh()->isPaid());
     }
 
     // ---------------------------------------------------------- a refund

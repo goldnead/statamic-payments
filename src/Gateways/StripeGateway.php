@@ -7,8 +7,10 @@ use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\CheckoutSession;
 use Goldnead\StatamicPayments\Support\Money;
+use Goldnead\StatamicPayments\Support\ProviderUnavailable;
 use Goldnead\StatamicPayments\Support\RemotePayment;
 use Goldnead\StatamicPayments\Support\RemoteSubscription;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Carbon;
@@ -809,7 +811,7 @@ class StripeGateway implements SubscriptionGateway
      */
     protected function get(string $path, array $query = []): array
     {
-        return $this->read($this->client()->get($path, $query), 'GET '.$path);
+        return $this->send(fn () => $this->client()->get($path, $query), 'GET '.$path);
     }
 
     /**
@@ -818,13 +820,35 @@ class StripeGateway implements SubscriptionGateway
      */
     protected function post(string $path, array $form): array
     {
-        return $this->read($this->client()->asForm()->post($path, $form), 'POST '.$path);
+        return $this->send(fn () => $this->client()->asForm()->post($path, $form), 'POST '.$path);
     }
 
     /** @return array<string, mixed> */
     protected function delete(string $path): array
     {
-        return $this->read($this->client()->delete($path), 'DELETE '.$path);
+        return $this->send(fn () => $this->client()->delete($path), 'DELETE '.$path);
+    }
+
+    /**
+     * The call, with a connection that never came up told apart from a refusal.
+     *
+     * A timeout or a refused connection throws before there is any response to
+     * read, so `read()` never sees it. Left as a plain exception it would be
+     * indistinguishable from "no such payment" one layer up — and that is the
+     * distinction the whole retry behaviour hangs on.
+     *
+     * @param  callable(): Response  $call
+     * @return array<string, mixed>
+     */
+    protected function send(callable $call, string $label): array
+    {
+        try {
+            $response = $call();
+        } catch (ConnectionException $e) {
+            throw new ProviderUnavailable("statamic-payments: Stripe could not be reached for [{$label}]: {$e->getMessage()}", 0, $e);
+        }
+
+        return $this->read($response, $label);
     }
 
     protected function client(): PendingRequest
@@ -857,8 +881,17 @@ class StripeGateway implements SubscriptionGateway
     {
         if ($response->failed()) {
             $message = (string) ($response->json('error.message') ?? $response->body());
+            $status = $response->status();
 
-            throw new RuntimeException("statamic-payments: Stripe refused [{$call}] with {$response->status()}: {$message}");
+            // Told apart on purpose. A 404 is an answer — this account does not
+            // know that id — and there is nothing to gain by asking again. A
+            // 5xx or a rate limit is not an answer at all, and a webhook that
+            // treated it as one would burn its only delivery during an outage.
+            if ($status >= 500 || $status === 429) {
+                throw new ProviderUnavailable("statamic-payments: Stripe could not answer [{$call}] ({$status}): {$message}");
+            }
+
+            throw new RuntimeException("statamic-payments: Stripe refused [{$call}] with {$status}: {$message}");
         }
 
         $body = $response->json();

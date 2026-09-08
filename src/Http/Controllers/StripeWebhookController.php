@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Gateways\StripeGateway;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Support\Fulfilment;
 use Goldnead\StatamicPayments\Support\Gateways;
+use Goldnead\StatamicPayments\Support\ProviderUnavailable;
 use Goldnead\StatamicPayments\Support\Refunds;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
@@ -77,6 +78,23 @@ class StripeWebhookController
 
         try {
             $this->act($gateways, $type, $event['data']['object'] ?? null);
+        } catch (ProviderUnavailable $e) {
+            // Stripe could not be asked. The claim goes back and the answer is
+            // 503, which is the one status that makes Stripe try again.
+            //
+            // A 200 here would be the most expensive bug this package could
+            // have: the event id stays claimed, so the delivery never returns —
+            // and neither does the Resend button, which sends the same id into
+            // the same claim. The buyer paid and the order sits there.
+            $this->release($id);
+
+            Log::warning('statamic-payments: Stripe could not be asked about this event; it was left for redelivery.', [
+                'event' => $id,
+                'type' => $type,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return response()->json(['received' => false], 503);
         } catch (Throwable $e) {
             // The claim is released, not held. Holding it would be "at most
             // once", whose failure mode is a buyer who paid and got nothing,
@@ -187,11 +205,38 @@ class StripeWebhookController
             return;
         }
 
+        // A PaymentIntent that belongs to no row of ours is the twin of a
+        // checkout this endpoint already handles.
+        //
+        // Stripe fires `payment_intent.succeeded` alongside
+        // `checkout.session.completed` for the very same purchase. The row was
+        // stamped with the session id (`cs_`), so the intent (`pi_`) matches
+        // nothing — and `Fulfilment` would then log "webhook for an unknown
+        // payment id", which is this package's only alarm for a buyer who paid
+        // into thin air. Firing it on every single sale is worse than not
+        // having it: an alarm that always rings is an alarm nobody reads.
+        //
+        // Follow-up charges are the case where a `pi_` really is the row's own
+        // id (`FollowUp::accept()` stores what `chargeAgain()` returned), and
+        // those still go through. The check is on the row, not on the event.
+        if (str_starts_with($id, 'pi_') && ! $this->hasRow($gateway, $id)) {
+            return;
+        }
+
         // Built with the Stripe adapter rather than the container's default.
         // This is what stops a Stripe delivery from being looked up among
         // Mollie's rows: `Fulfilment` scopes every query to the gateway's own
         // handle, and this one says `stripe`.
         app()->makeWith(Fulfilment::class, ['gateway' => $gateway])->handle($id);
+    }
+
+    /** Whether this provider id is one this site actually stamped on a row. */
+    protected function hasRow(StripeGateway $gateway, string $providerId): bool
+    {
+        return Payment::query()
+            ->where('provider', $gateway->provider())
+            ->where('provider_id', $providerId)
+            ->exists();
     }
 
     /**

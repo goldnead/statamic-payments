@@ -120,10 +120,7 @@ class Refunds
     protected function book(Payment $payment, int $amountCent): int
     {
         return (int) DB::transaction(function () use ($payment, $amountCent): int {
-            $offen = (int) (Payment::query()->whereKey($payment->getKey())->value('amount_cent') ?? 0)
-                - (int) (Payment::query()->whereKey($payment->getKey())->value('refunded_cent') ?? 0);
-
-            $betrag = min($amountCent, max(0, $offen));
+            $betrag = min($amountCent, max(0, $this->outstanding($payment)));
 
             if ($betrag <= 0) {
                 return 0;
@@ -139,10 +136,14 @@ class Refunds
                 ]);
 
             if ($gebucht === 0) {
-                // Zwischen Lesen und Schreiben hat jemand anders gebucht. Die
-                // Bedingung hat das abgefangen, statt die Bestellung mit einem
-                // negativen Erloes zurueckzulassen.
-                return 0;
+                // Zwischen Lesen und Schreiben hat jemand anders gebucht, und
+                // der volle Betrag passt nicht mehr. Die Bedingung hat das
+                // abgefangen, statt die Bestellung mit einem negativen Erloes
+                // zurueckzulassen — aber der Rest, der noch passt, gehoert
+                // gebucht. Ihn hier fallen zu lassen hiesse: der Anspruch steht
+                // in `payment_refunds`, verhindert damit jede erneute Meldung,
+                // und das Geld taucht nirgends auf.
+                return $this->bookRemainder($payment, $amountCent);
             }
 
             // Nur noch eine Anzeige: die Wahrheit ueber Doppelmeldungen steht
@@ -156,6 +157,44 @@ class Refunds
 
             return $betrag;
         });
+    }
+
+    /**
+     * Was noch hineinpasst, nachdem jemand anders dazwischenkam.
+     *
+     * Ein einziger zweiter Versuch, mit dem Rest, den die Zeile jetzt hergibt.
+     * Keine Schleife: wer hier ein drittes Mal verliert, verliert gegen einen
+     * Andrang, den ein Wiederholen nicht besser macht, und dann ist gar nichts
+     * zu buchen die richtige Antwort.
+     */
+    protected function bookRemainder(Payment $payment, int $amountCent): int
+    {
+        $rest = min($amountCent, max(0, $this->outstanding($payment)));
+
+        if ($rest <= 0) {
+            return 0;
+        }
+
+        $gebucht = Payment::query()
+            ->whereKey($payment->getKey())
+            ->whereRaw('refunded_cent + ? <= amount_cent', [$rest])
+            ->update([
+                'refunded_cent' => DB::raw('refunded_cent + '.$rest),
+                'refunded_at' => Carbon::now(),
+                'updated_at' => Carbon::now(),
+            ]);
+
+        return $gebucht === 0 ? 0 : $rest;
+    }
+
+    /** Wieviel von dieser Zahlung noch nicht zurueckgegeben ist. */
+    protected function outstanding(Payment $payment): int
+    {
+        $zeile = Payment::query()
+            ->whereKey($payment->getKey())
+            ->first(['amount_cent', 'refunded_cent']);
+
+        return $zeile === null ? 0 : (int) $zeile->amount_cent - (int) $zeile->refunded_cent;
     }
 
     /** Was this exact refund already noted, by an older version of this class? */

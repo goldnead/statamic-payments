@@ -50,11 +50,30 @@ in the Stripe dashboard first:
 https://your-site.example/!/statamic-payments/webhook/stripe
 ```
 
-and subscribe it to `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
-`checkout.session.expired`, `invoice.paid`, `payment_intent.succeeded` and `charge.refunded`.
+and subscribe it to:
+
+```
+checkout.session.completed
+checkout.session.async_payment_succeeded
+checkout.session.async_payment_failed
+checkout.session.expired
+invoice.paid
+invoice.payment_failed
+charge.refunded
+```
+
+Add `payment_intent.succeeded` and `payment_intent.payment_failed` **only if the site uses follow-up
+offers** — those charge off-session and their rows carry a PaymentIntent id. On an ordinary
+purchase Stripe sends the PaymentIntent event as a twin of the Checkout Session event, about a row
+that is stamped with the session id, and the endpoint ignores it.
+
 Stripe then shows you the `whsec_…` value. **Without it the endpoint refuses everything** — a
 webhook that cannot be verified must not be believed, and the other way round is an endpoint anybody
 on the internet can post to.
+
+**The endpoint answers `503` when Stripe itself cannot be reached** (a timeout, a 502, a rate
+limit), and gives the delivery back so Stripe redelivers it. Everything else it can act on gets a
+`200`, whatever the outcome.
 
 **The endpoint keeps a row per delivery** in `payment_webhook_events`, which is what makes the
 replay guard atomic — including for the many event types this package answers `200` and ignores.
@@ -72,7 +91,9 @@ To make Stripe the site's provider, bind it:
 $this->app->bind(
     \Goldnead\StatamicPayments\Contracts\PaymentGateway::class,
     fn () => new \Goldnead\StatamicPayments\Gateways\StripeGateway(
-        config('statamic-payments.stripe.key'),
+        // The cast matters: an unset `STRIPE_KEY` is null, and the constructor
+        // takes a string.
+        (string) config('statamic-payments.stripe.key'),
     ),
 );
 ```

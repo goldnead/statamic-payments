@@ -100,6 +100,37 @@ is seen as the same one. Stripe has a real per-dispute id and does not have this
   or the migration had never run. Sequences checked, letters sent, stages counted without a letter,
   providers that would not answer and letters withheld are now separate numbers.
 
+### What the acceptance round changed
+
+- **A listener that throws no longer costs both the access and the sequence.** `SubscriptionEnded`
+  is what withdraws the access, and it was dispatched *after* the sequence had been cleared and the
+  agreement cancelled. A listener that threw left the access standing and no row anywhere to find
+  it by — `running()` never saw that agreement again. The event now fires inside the same
+  transaction as the claim: either the access goes, or the sequence is still there for the next
+  run. The failure is logged as `critical`.
+- **A failed cycle is no longer swept up as an abandoned checkout.** A failed Stripe cycle is
+  written as `open` and stays `open`, which is exactly the shape `payments:sweep-abandoned` looks
+  for. It is not a cart somebody forgot, it is a card that stopped working — and a "you left
+  something behind" alongside the dunning letters burns the channel at the worst possible moment.
+  `Abandonment` now carries the same guard `payments:prune-unpaid` has, on both the sweep and
+  `announce()`.
+- **`payments:dunning` exits non-zero when a sequence threw**, and the report names how many. In
+  cron the exit code is the only thing that gets read, so a run in which every single row threw was
+  reported as a success.
+- **`grace_days => 0` no longer eats the last letter.** With no grace period the deadline and the
+  last stage fell on the same day, and the run asks about the deadline first: the customer was
+  cancelled having received two of the three letters they were promised. Zero now means "the day
+  after the last letter", not "instead of the last letter".
+- **`dunning.enabled` switched off no longer freezes the running sequences.** They used to stand
+  for ever: no letter, no ending, and `payments:prune-unpaid` would not touch the cycle rows
+  underneath them either. `payments:dunning` now **closes** the running sequences when the switch
+  is off and says how many — the agreements themselves are left exactly as the provider set them,
+  because a switch is not a cancellation, and the cycle rows become prunable again.
+- **A brand-aware mailer that cannot be built is a `warning`, not a `debug` line**, and it names the
+  sender the letters actually went out under. Every letter falls back to the default sender, which
+  on a multi-brand install is the wrong brand's name on a letter about somebody's money — and
+  `debug` is in nobody's channels.
+
 ## 1.22.0 — 2026-09-08
 
 The two things 1.21.1 knowingly left open.

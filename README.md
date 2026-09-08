@@ -656,7 +656,17 @@ provider that will not answer sends nothing that run rather than writing on a gu
 
 **It ends.** After the last stage plus `grace_days` the agreement is ended and the access goes with
 it, through the `SubscriptionEnded` listener that already exists. A sequence that only ever sends
-leaves a free customer behind for ever.
+leaves a free customer behind for ever. `grace_days => 0` means *the day after the last letter*,
+not *instead of it* — the last letter is always written before the deadline is acted on.
+
+**Switching it back off closes the running sequences, it does not freeze them.** The next
+`payments:dunning` clears every open sequence and says how many. The agreements themselves stay
+exactly as the provider set them, because a switch is not a cancellation — and the failed cycle
+rows underneath become prunable again. Left standing, they would have received no further letter,
+reached no ending, and been skipped by `payments:prune-unpaid` for ever.
+
+**The run exits non-zero if any sequence threw**, naming the number, so a scheduler does not report
+a silent success for a pass in which nothing worked.
 
 ### The gates
 

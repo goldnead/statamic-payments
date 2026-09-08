@@ -9,6 +9,9 @@ return [
     // The line a provider prints on its own dashboard when a checkout carries
     // no description of its own.
     'order' => 'Order',
+    // Beside the status on the payments screen, never instead of it: a
+    // disputed order is still paid.
+    'charged_back' => 'Charged back',
     'utility_title' => 'Payments',
     'utility_nav' => 'Payments',
     // The CP navigation section the suite's selling screens live under. Shared

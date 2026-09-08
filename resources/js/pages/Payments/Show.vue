@@ -125,6 +125,12 @@ const hasLinks = computed(() => {
                     <div class="flex items-center gap-3">
                         <span class="text-2xl font-semibold tabular-nums">{{ p.amount }} {{ p.currency }}</span>
                         <Badge :color="statusColor(p.status)" :text="p.status_label" size="lg" />
+                        <!--
+                            A dispute is its own fact beside the status: the
+                            order stays `paid`, and this says the money was
+                            taken back afterwards.
+                        -->
+                        <Badge v-if="p.chargeback?.at" color="red" :text="p.chargeback.label" size="lg" />
                     </div>
                     <div class="text-sm text-gray-900 dark:text-gray-300">
                         <span class="font-medium">{{ p.product_name || p.product }}</span>

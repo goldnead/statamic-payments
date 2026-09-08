@@ -51,17 +51,24 @@ class RunDunning extends Command
                 continue;
             }
 
-            if ($settled === null) {
-                // The provider would not answer. Logged there; here it simply
-                // means no letter goes out on a guess this run.
-                continue;
-            }
-
+            // The end does not wait for the provider, and that order matters.
+            // `dueToEnd()` is a question about dates alone; hanging it behind a
+            // successful provider call means a multi-day outage freezes every
+            // running sequence — no further letters, but no ending either, long
+            // after the grace period is up. The money has not arrived either
+            // way, and an agreement nobody can reach is not a reason to keep
+            // giving the access away.
             if ($dunning->dueToEnd($subscription)) {
                 if ($dry || $dunning->end($subscription)) {
                     $ended++;
                 }
 
+                continue;
+            }
+
+            if ($settled === null) {
+                // The provider would not answer. Logged there; here it simply
+                // means no letter goes out on a guess this run.
                 continue;
             }
 

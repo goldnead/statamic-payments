@@ -314,7 +314,7 @@ class EntitlementsBridge
      * The reason is mandatory in the sibling, on purpose: a revocation nobody
      * can explain later is a revocation somebody undoes.
      */
-    public function revokeFor(Payment $payment, bool $isFull): void
+    public function revokeFor(Payment $payment, bool $isFull, string $reason = 'Zahlung erstattet'): void
     {
         if (! $isFull || ! $this->available()) {
             return;
@@ -343,13 +343,14 @@ class EntitlementsBridge
                         ->get();
 
                     foreach ($grants as $grant) {
-                        $facade::revoke($grant, 'Zahlung erstattet');
+                        $facade::revoke($grant, $reason);
                     }
                 } catch (Throwable $e) {
                     // Laut, nicht still: hier bleibt jemand mit Zugang zurueck, den
                     // er zurueckgezahlt bekommen hat. Das ist der Fall, in dem ein
                     // Mensch nachsehen muss.
-                    Log::error('statamic-payments: a refund was recorded but the access could not be withdrawn.', [
+                    Log::error('statamic-payments: money went back but the access could not be withdrawn.', [
+                        'reason' => $reason,
                         'payment_id' => $payment->getKey(),
                         'product' => $handle,
                         'grants' => $slug,

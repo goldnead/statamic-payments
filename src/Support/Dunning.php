@@ -124,6 +124,22 @@ class Dunning
             ]);
     }
 
+    /**
+     * Whether a cycle of this agreement has been paid since the sequence opened.
+     *
+     * The failed payment is excluded by the date, not by its id: any cycle
+     * fulfilled after the sequence began is money that arrived, whichever row
+     * it landed on.
+     */
+    protected function paidSince(Subscription $subscription): bool
+    {
+        return Payment::query()
+            ->where('subscription_id', $subscription->getKey())
+            ->whereNotNull('fulfilled_at')
+            ->where('fulfilled_at', '>=', $subscription->dunning_started_at)
+            ->exists();
+    }
+
     /** Every agreement with a sequence running. */
     public function running(): Collection
     {
@@ -196,7 +212,13 @@ class Dunning
         Subscription::query()
             ->whereKey($subscription->getKey())
             ->where('dunning_stage', $stage)
-            ->update(['dunning_stage' => $stage - 1, 'updated_at' => Carbon::now()]);
+            // `dunning_last_at` goes back with it. Left standing it would say
+            // "last written on" about a letter that never left.
+            ->update([
+                'dunning_stage' => $stage - 1,
+                'dunning_last_at' => null,
+                'updated_at' => Carbon::now(),
+            ]);
     }
 
     /** Whether the last letter plus the grace period is behind us. */
@@ -299,11 +321,37 @@ class Dunning
      */
     public function settledMeanwhile(Subscription $subscription): ?bool
     {
+        // A newer paid cycle settles it, whatever the failed one still says.
+        //
+        // This is not a shortcut past the provider question, it is the other
+        // half of it — and on Mollie it is the half that matters. A Mollie
+        // payment that failed is failed for ever: the retry, and a card the
+        // buyer replaces in the portal, produce a **new** payment. Asking only
+        // about the old one would answer "still not paid" until the end of
+        // time, and the sequence would run its full course against somebody who
+        // has been paying all along. Stripe hides this because its row is an
+        // invoice, and an invoice turns `paid` in place.
+        //
+        // Read locally on purpose: a cycle only becomes paid here after
+        // `Fulfilment` has already asked the provider and been told so. This is
+        // that answer, written down.
+        if ($subscription->dunning_started_at && $this->paidSince($subscription)) {
+            return true;
+        }
+
         $payment = $subscription->dunning_payment_id
             ? Payment::find($subscription->dunning_payment_id)
             : null;
 
         if (! $payment || ! $payment->hasProviderId()) {
+            // Nothing to ask about. Said out loud, because the caller then
+            // sends nothing for ever and a sequence stuck like this is
+            // otherwise invisible.
+            Log::warning('statamic-payments: a dunning sequence has no payment to ask the provider about; it is sending nothing.', [
+                'subscription_id' => $subscription->getKey(),
+                'dunning_payment_id' => $subscription->dunning_payment_id,
+            ]);
+
             return null;
         }
 

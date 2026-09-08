@@ -58,6 +58,16 @@ class DunningNotice
             // Nothing to do and nothing to retry. An agreement without an
             // address cannot be dunned, and the sequence still has to reach its
             // end — so this counts as sent.
+            //
+            // Said out loud, though: the stage counter moves on as if a letter
+            // had gone out, and without this line somebody asking later why a
+            // customer was never written to finds an advanced counter and no
+            // explanation anywhere.
+            Log::warning('statamic-payments: a dunning stage was skipped because the agreement carries no email address.', [
+                'subscription_id' => $subscription->getKey(),
+                'stage' => $stage,
+            ]);
+
             return true;
         }
 

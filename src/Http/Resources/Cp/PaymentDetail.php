@@ -121,6 +121,7 @@ class PaymentDetail extends JsonResource
             // may still be won. Counting the two together would make every
             // revenue figure wrong about both.
             'chargeback' => [
+                'label' => __('statamic-payments::messages.charged_back'),
                 'at' => $payment->charged_back_at?->toIso8601String(),
                 'amount' => $chargeback && (int) $chargeback->amount_cent > 0
                     ? Money::format((int) $chargeback->amount_cent, $payment->currency)

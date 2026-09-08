@@ -19,6 +19,10 @@ class WithdrawOnChargeback
 
     public function handle(PaymentChargedBack $event): void
     {
-        $this->bridge->revokeFor($event->payment->loadMissing('items'), true);
+        // The reason is written into the entitlement's own history, and it has
+        // to be the true one. Sharing the refund wording would tell a support
+        // reader the opposite story: that somebody here decided to give the
+        // money back, when in fact it was taken.
+        $this->bridge->revokeFor($event->payment->loadMissing('items'), true, 'Rückbuchung');
     }
 }

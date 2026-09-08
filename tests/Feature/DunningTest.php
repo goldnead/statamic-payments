@@ -11,6 +11,7 @@ use Goldnead\StatamicPayments\Support\Dunning;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use PHPUnit\Framework\Attributes\Test;
 
@@ -157,6 +158,75 @@ class DunningTest extends TestCase
         Carbon::setTestNow();
     }
 
+    #[Test]
+    public function a_failed_stripe_invoice_announces_itself_over_the_signed_webhook(): void
+    {
+        // The other provider, over its own signed endpoint. Without this the
+        // sequence is only ever proved on one path, and "provider-neutral"
+        // rests on reading the code rather than on running it.
+        config([
+            'statamic-payments.stripe.key' => 'sk_test_notARealKey',
+            'statamic-payments.stripe.webhook_secret' => 'whsec_kJ8vN2mQ4pR7sT1uV3wX5yZ6aB8cD0eF',
+        ]);
+
+        $subscription = Subscription::create([
+            'provider' => 'stripe',
+            'provider_id' => 'sub_stripe_1',
+            'customer_reference' => 'cus_1',
+            'product' => 'noten-paket',
+            'amount_cent' => 1900,
+            'currency' => 'EUR',
+            'interval' => '1 month',
+            'times_charged' => 3,
+            'status' => Subscription::STATUS_ACTIVE,
+            'starts_at' => now()->subMonths(3),
+            'email' => 'kaeufer@example.com',
+        ]);
+
+        $payment = Payment::create([
+            'provider' => 'stripe',
+            'provider_id' => 'in_stripe_failed',
+            'product' => 'noten-paket',
+            'amount_cent' => 1900,
+            'currency' => 'EUR',
+            'status' => Payment::STATUS_OPEN,
+            'email' => 'kaeufer@example.com',
+        ]);
+
+        // Deliberately not faking the event here. Faking it would stop the
+        // listener, and then the assertion below — that the sequence actually
+        // opened — could never pass. The whole chain is what this test is for:
+        // signed delivery, invoice fetched back, event, listener, `begin()`.
+        Http::fake(['api.stripe.com/v1/invoices/in_stripe_failed*' => Http::response([
+            'id' => 'in_stripe_failed',
+            'object' => 'invoice',
+            'status' => 'uncollectible',
+            'subscription' => 'sub_stripe_1',
+            'customer_email' => 'kaeufer@example.com',
+        ])]);
+
+        $body = json_encode([
+            'id' => 'evt_invoice_failed',
+            'object' => 'event',
+            'type' => 'invoice.payment_failed',
+            'data' => ['object' => ['id' => 'in_stripe_failed', 'object' => 'invoice']],
+        ], JSON_UNESCAPED_SLASHES);
+
+        $timestamp = Carbon::now()->getTimestamp();
+        $signature = hash_hmac('sha256', $timestamp.'.'.$body, 'whsec_kJ8vN2mQ4pR7sT1uV3wX5yZ6aB8cD0eF');
+
+        $this->call('POST', '/!/statamic-payments/webhook/stripe', [], [], [], [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_STRIPE_SIGNATURE' => "t={$timestamp},v1={$signature}",
+        ], $body)->assertOk();
+
+        $this->assertNotNull(
+            $subscription->fresh()->dunning_started_at,
+            'a failed Stripe invoice must open the sequence, exactly as a failed Mollie cycle does',
+        );
+        $this->assertSame($payment->getKey(), (int) $subscription->fresh()->dunning_payment_id);
+    }
+
     // ------------------------------------------------------------- the stages
 
     /** Opens a sequence at a fixed moment, without going through the webhook. */
@@ -209,7 +279,7 @@ class DunningTest extends TestCase
     }
 
     #[Test]
-    public function two_workers_never_send_the_same_letter(): void
+    public function a_second_run_of_the_same_schedule_sends_nothing_more(): void
     {
         [$subscription] = $this->openSequence();
         Mail::fake();
@@ -273,6 +343,73 @@ class DunningTest extends TestCase
         // And the agreement is untouched — this is the case where nothing
         // should have happened at all.
         $this->assertTrue($subscription->fresh()->isLive());
+
+        Carbon::setTestNow();
+    }
+
+    #[Test]
+    public function a_new_paid_cycle_stops_the_sequence_even_though_the_old_payment_stays_failed(): void
+    {
+        // The Mollie shape, and the one that would have cancelled a paying
+        // customer. A Mollie payment that failed is failed for ever: the retry,
+        // and a card the buyer replaces in the portal, produce a **new**
+        // payment. Asking only about the old one answers "still not paid" until
+        // the end of time.
+        [$subscription] = $this->openSequence();
+        Mail::fake();
+
+        Carbon::setTestNow(Carbon::parse('2026-09-04 10:00:00'));
+        $this->artisan('payments:dunning')->assertSuccessful();
+        Mail::assertSent(DunningMail::class, 1);
+
+        // A different row, fulfilled after the sequence opened. The old one
+        // still says failed, and the provider still says so too.
+        Payment::create([
+            'provider' => 'fake',
+            'provider_id' => 'tr_retry',
+            'subscription_id' => $subscription->getKey(),
+            'product' => 'noten-paket',
+            'amount_cent' => 1900,
+            'currency' => 'EUR',
+            'status' => Payment::STATUS_PAID,
+            'paid_at' => now(),
+            'fulfilled_at' => now(),
+            'email' => 'kaeufer@example.com',
+        ]);
+
+        Carbon::setTestNow(Carbon::parse('2026-09-08 10:00:00'));
+        $this->artisan('payments:dunning')->assertSuccessful();
+
+        Mail::assertSent(DunningMail::class, 1);
+        $this->assertNull($subscription->fresh()->dunning_started_at);
+        $this->assertTrue($subscription->fresh()->isLive());
+
+        Carbon::setTestNow();
+    }
+
+    #[Test]
+    public function a_provider_outage_does_not_freeze_a_sequence_past_its_end(): void
+    {
+        // `dueToEnd()` is a question about dates and needs no provider. Behind
+        // a successful provider call, a multi-day outage would freeze every
+        // running sequence: no further letters, but no ending either, long
+        // after the grace period is up.
+        [$subscription] = $this->openSequence();
+        Mail::fake();
+
+        foreach (['2026-09-04', '2026-09-08', '2026-09-15'] as $day) {
+            Carbon::setTestNow(Carbon::parse($day.' 10:00:00'));
+            $this->artisan('payments:dunning')->assertSuccessful();
+        }
+
+        // The provider goes dark right before the end is due.
+        $this->gateway->throwOnFetch = true;
+
+        Carbon::setTestNow(Carbon::parse('2026-09-22 10:00:00'));
+        $this->artisan('payments:dunning')->assertSuccessful();
+
+        $this->assertSame(Subscription::STATUS_CANCELLED, $subscription->fresh()->status);
+        $this->assertNotNull($subscription->fresh()->ended_at);
 
         Carbon::setTestNow();
     }

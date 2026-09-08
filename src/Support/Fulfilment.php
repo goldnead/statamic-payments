@@ -80,6 +80,25 @@ class Fulfilment
         // erfuellt sie noch einmal und merkt von der Rueckbuchung nichts.
         $this->noteChargeback($payment, $remote);
 
+        // Und danach nicht mehr erfuellen.
+        //
+        // `isPaid()` kennt nur den Status, und eine zurueckgebuchte
+        // Mollie-Zahlung steht weiter auf `paid`. Ohne diese Zeile buchte
+        // derselbe Aufruf erst die Rueckbuchung und erfuellte die Bestellung
+        // danach trotzdem: Zugang zu einem Produkt, dessen Geld laut eigenem
+        // Protokoll schon weg ist. Der Fall tritt ein, wenn die erste
+        // erfolgreiche Zustellung fuer diese Kennung erst **nach** der
+        // Rueckbuchung ankommt — ein verlorener erster Webhook reicht.
+        if (($payment->fresh() ?? $payment)->charged_back_at !== null) {
+            Log::warning('statamic-payments: a payment that has been charged back was not fulfilled.', [
+                'payment_id' => $payment->getKey(),
+                'provider' => $payment->provider,
+                'provider_id' => $payment->provider_id,
+            ]);
+
+            return $payment->fresh() ?? $payment;
+        }
+
         if (! $remote || ! $remote->isPaid()) {
             if ($remote) {
                 $this->recordUnpaid($payment, $remote);

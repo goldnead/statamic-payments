@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Tests\Feature;
 
 use Goldnead\StatamicPayments\Events\PaymentChargedBack;
+use Goldnead\StatamicPayments\Events\PaymentPaid;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Support\Chargebacks;
 use Goldnead\StatamicPayments\Tests\TestCase;
@@ -237,6 +238,40 @@ class ChargebackTest extends TestCase
 
         Event::assertDispatchedTimes(PaymentChargedBack::class, 1);
         $this->assertSame(1, DB::table('payment_chargebacks')->where('payment_id', $payment->getKey())->count());
+    }
+
+    #[Test]
+    public function a_charged_back_payment_is_never_fulfilled_afterwards(): void
+    {
+        // The trap: a charged-back Mollie payment still reads `paid`, and
+        // `isPaid()` knows only the status. Without a guard the same delivery
+        // recorded the dispute and then fulfilled the order — access to a
+        // product whose money is gone by the package's own log. It happens when
+        // the first successful delivery for an id arrives *after* the
+        // chargeback, which one lost webhook is enough to cause.
+        $payment = Payment::create([
+            'provider' => 'fake',
+            'provider_id' => 'tr_late',
+            'product' => 'noten-paket',
+            'amount_cent' => 1900,
+            'currency' => 'EUR',
+            'status' => Payment::STATUS_OPEN,
+            'email' => 'kaeufer@example.com',
+        ]);
+
+        Event::fake([PaymentChargedBack::class, PaymentPaid::class]);
+
+        $this->gateway->markPaid('tr_late');
+        $this->gateway->markChargedBack('tr_late', 1900, 'chb_late');
+
+        $this->postJson('/!/statamic-payments/webhook', ['id' => 'tr_late'])->assertOk();
+
+        $payment->refresh();
+
+        $this->assertNotNull($payment->charged_back_at);
+        $this->assertNull($payment->fulfilled_at, 'a charged-back payment must not be fulfilled');
+        Event::assertNotDispatched(PaymentPaid::class);
+        Event::assertDispatched(PaymentChargedBack::class);
     }
 
     #[Test]

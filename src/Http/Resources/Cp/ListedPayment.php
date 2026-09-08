@@ -36,6 +36,7 @@ class ListedPayment extends JsonResource
             // shows it as a second badge so a disputed order is visible without
             // opening it.
             'charged_back_at' => $this->charged_back_at?->toIso8601String(),
+            'charged_back_label' => __('statamic-payments::messages.charged_back'),
             'email' => $this->email,
             'name' => $this->name,
             'provider_id' => $this->provider_id,

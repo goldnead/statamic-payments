@@ -78,7 +78,16 @@ const statusColor = (status) => ({
             </template>
 
             <template #cell-status="{ row }">
-                <Badge :color="statusColor(row.status)" :text="row.status_label" />
+                <!--
+                    Next to the status, not instead of it. A disputed order is
+                    still `paid` — the money did move and the thing was
+                    delivered — so this is a second fact, the same way a refund
+                    is an amount and a time rather than a status.
+                -->
+                <span class="flex flex-wrap items-center gap-1">
+                    <Badge :color="statusColor(row.status)" :text="row.status_label" />
+                    <Badge v-if="row.charged_back_at" color="red" :text="row.charged_back_label" />
+                </span>
             </template>
 
             <template #cell-fulfilled_at="{ row }">

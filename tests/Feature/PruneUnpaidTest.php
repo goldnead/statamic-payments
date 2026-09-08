@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Tests\Feature;
 
 use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use Illuminate\Support\Carbon;
 use PHPUnit\Framework\Attributes\Test;
@@ -142,5 +143,38 @@ class PruneUnpaidTest extends TestCase
             ->assertSuccessful();
 
         $this->assertNotNull(Payment::find($zahlung->id));
+    }
+
+    #[Test]
+    public function a_cycle_a_dunning_sequence_hangs_on_is_not_pruned(): void
+    {
+        // Dieselbe Wache, die es fuer die Abbruch-Strecke schon gab. Ein
+        // fehlgeschlagener Stripe-Zyklus wird als `open` angelegt und bleibt
+        // `open`, passt also exakt in diese Abfrage. Verschwindet er, kann
+        // `Dunning` den Anbieter nicht mehr fragen, ob inzwischen bezahlt
+        // wurde, und die schon verschickten Briefe verlieren ihre Zeilen im
+        // Kommunikationsprotokoll: die Strecke laeuft blind bis zur Kuendigung.
+        $zyklus = $this->zahlung(['status' => Payment::STATUS_OPEN]);
+        $frei = $this->zahlung();
+
+        Subscription::create([
+            'provider' => 'fake',
+            'provider_id' => 'sub_prune',
+            'customer_reference' => 'cus_prune',
+            'product' => 'kurs',
+            'amount_cent' => 10000,
+            'currency' => 'EUR',
+            'interval' => '1 month',
+            'status' => Subscription::STATUS_ACTIVE,
+            'starts_at' => Carbon::now()->subMonths(3),
+            'email' => 'wer@example.com',
+            'dunning_started_at' => Carbon::now()->subDays(5),
+            'dunning_payment_id' => $zyklus->id,
+        ]);
+
+        $this->artisan('payments:prune-unpaid')->assertSuccessful();
+
+        $this->assertNotNull(Payment::find($zyklus->id), 'the cycle the sequence hangs on survived');
+        $this->assertNull(Payment::find($frei->id), 'an ordinary abandoned checkout still goes');
     }
 }

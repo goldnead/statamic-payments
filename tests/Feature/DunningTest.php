@@ -238,7 +238,7 @@ class DunningTest extends TestCase
 
         $notice = new class(app(LinkTokenizer::class)) extends DunningNotice
         {
-            public function suppressed(string $email, int $brandId): bool
+            public function suppressed(string $email, int $brandId): ?bool
             {
                 return true;
             }
@@ -640,6 +640,154 @@ class DunningTest extends TestCase
 
         $this->assertFalse(app(Dunning::class)->begin($subscription, $payment));
         $this->assertNull($subscription->fresh()->dunning_started_at);
+    }
+
+    // --------------------------------------- a sequence whose letters stall
+
+    #[Test]
+    public function a_sequence_whose_letters_never_leave_still_ends_on_time(): void
+    {
+        // Der teuerste der Funde, und er kam aus der eigenen Mechanik. `send()`
+        // gibt bei einer Marke ohne verifizierten Absender `FAILED` zurueck,
+        // der Anspruch geht zurueck, `dunning_stage` bleibt auf 0 stehen — und
+        // solange `dueToEnd()` „alle Stufen raus" verlangte, wurde es damit nie
+        // wahr. Kein Brief, kein Ende, kein Zugangsentzug: ein Kunde, dessen
+        // Geld nie ankam, behielt den bezahlten Zugang unbegrenzt.
+        [$subscription] = $this->openSequence();
+        Mail::fake();
+        Event::fake([SubscriptionEnded::class]);
+
+        $notice = new class(app(LinkTokenizer::class)) extends DunningNotice
+        {
+            public function send(Subscription $subscription, int $stage): string
+            {
+                return self::FAILED;
+            }
+        };
+
+        $this->app->instance(DunningNotice::class, $notice);
+
+        // Jeden Tag laufen lassen, vom Beginn bis eine Woche nach der letzten
+        // Stufe. Kein einziger Brief geht raus.
+        foreach (range(1, 22) as $tag) {
+            Carbon::setTestNow(Carbon::parse('2026-09-01 09:00:00')->addDays($tag));
+            $this->artisan('payments:dunning')->assertSuccessful();
+        }
+
+        Mail::assertNothingSent();
+
+        $frisch = $subscription->fresh();
+        $this->assertSame(0, (int) $frisch->dunning_stage, 'no stage was ever claimed');
+        $this->assertSame(Subscription::STATUS_CANCELLED, $frisch->status);
+        $this->assertNull($frisch->dunning_started_at, 'the sequence was closed out');
+        Event::assertDispatched(SubscriptionEnded::class);
+    }
+
+    #[Test]
+    public function a_provider_that_never_answers_does_not_hold_the_sequence_open_for_ever(): void
+    {
+        // Dieselbe Form, anderer Ausloeser: rotierter Schluessel, 401 auf jedem
+        // `fetch`. `settledMeanwhile()` gibt fuer immer `null`, also geht nie
+        // ein Brief raus, also stieg der Zaehler nie, also endete die Strecke
+        // nie. Der bestehende Ausfall-Test setzte den Ausfall erst ein, als
+        // alle Stufen schon draussen waren — genau daran ging der Fund vorbei.
+        [$subscription] = $this->openSequence();
+        Mail::fake();
+
+        $this->gateway->throwOnFetch = true;
+
+        foreach (range(1, 22) as $tag) {
+            Carbon::setTestNow(Carbon::parse('2026-09-01 09:00:00')->addDays($tag));
+            $this->artisan('payments:dunning')->assertSuccessful();
+        }
+
+        Mail::assertNothingSent();
+        $this->assertSame(Subscription::STATUS_CANCELLED, $subscription->fresh()->status);
+    }
+
+    #[Test]
+    public function an_unreadable_suppression_list_does_not_cost_the_customer_a_stage(): void
+    {
+        // „Sperrliste nicht lesbar" ist nicht „steht auf der Sperrliste". Als
+        // die Stoerung noch `true` hiess, lief die ganze Strecke ohne einen
+        // Brief durch, das Abo endete am Tag 21, und im Protokoll stand die
+        // Behauptung, die Adresse habe auf der Sperrliste gestanden.
+        [$subscription] = $this->openSequence();
+        Mail::fake();
+
+        $notice = new class(app(LinkTokenizer::class)) extends DunningNotice
+        {
+            public function suppressed(string $email, int $brandId): ?bool
+            {
+                return null;
+            }
+        };
+
+        $this->app->instance(DunningNotice::class, $notice);
+
+        Carbon::setTestNow(Carbon::parse('2026-09-04 10:00:00'));
+        $this->artisan('payments:dunning')->assertSuccessful();
+
+        Mail::assertNothingSent();
+        // Der Anspruch ging zurueck: die Stufe steht wieder offen und der
+        // naechste Lauf versucht sie erneut, sobald die Liste antwortet.
+        $this->assertSame(0, (int) $subscription->fresh()->dunning_stage);
+        $this->assertDatabaseMissing('payment_communications', ['kind' => 'dunning_suppressed']);
+    }
+
+    #[Test]
+    public function one_broken_sequence_does_not_stop_the_run(): void
+    {
+        // `running()` sortiert nach dem Beginn der Strecke. Riss eine Zeile das
+        // Kommando ab, stand dasselbe kaputte Abo am naechsten Tag wieder vorn
+        // und alles dahinter bekam nie wieder einen Brief.
+        [$kaputt] = $this->openSequence();
+
+        Carbon::setTestNow(Carbon::parse('2026-09-01 09:30:00'));
+        $zweite = Subscription::create([
+            'provider' => 'fake',
+            'provider_id' => 'sub_2',
+            'customer_reference' => 'cus_2',
+            'product' => 'noten-paket',
+            'amount_cent' => 1900,
+            'currency' => 'EUR',
+            'interval' => '1 month',
+            'times_charged' => 3,
+            'status' => Subscription::STATUS_ACTIVE,
+            'starts_at' => now()->subMonths(3),
+            'email' => 'zweiter@example.com',
+            'name' => 'Zweite',
+        ]);
+        $zyklus = $this->failedCycle('tr_cycle_2');
+        $this->gateway->markFailedCycle('tr_cycle_2', 'sub_2');
+        app(Dunning::class)->begin($zweite, $zyklus);
+
+        Mail::fake();
+
+        $kaputteId = $kaputt->getKey();
+        $notice = new class(app(LinkTokenizer::class)) extends DunningNotice
+        {
+            public int $kaputteId = 0;
+
+            public function send(Subscription $subscription, int $stage): string
+            {
+                if ((int) $subscription->getKey() === $this->kaputteId) {
+                    throw new \RuntimeException('diese Zeile ist kaputt');
+                }
+
+                return parent::send($subscription, $stage);
+            }
+        };
+        $notice->kaputteId = (int) $kaputteId;
+
+        $this->app->instance(DunningNotice::class, $notice);
+
+        Carbon::setTestNow(Carbon::parse('2026-09-04 10:00:00'));
+        $this->artisan('payments:dunning')->assertSuccessful();
+
+        // Die zweite Zeile wurde trotzdem bedient.
+        $this->assertSame(1, (int) $zweite->fresh()->dunning_stage);
+        Mail::assertSent(DunningMail::class, 1);
     }
 
     #[Test]

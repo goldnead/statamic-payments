@@ -289,17 +289,33 @@ class Dunning
             ]);
     }
 
-    /** Whether the last letter plus the grace period is behind us. */
+    /**
+     * Whether the last letter plus the grace period is behind us.
+     *
+     * A question to the calendar and to nothing else. It used to also demand
+     * that every stage had actually gone out, and that turned each of the
+     * ordinary reasons a letter does not leave into a sequence that never ends
+     * at all: a brand without a verified sender, a provider that will not
+     * answer, a cycle row pruned from under the sequence. The counter then
+     * stands still for ever, `dueToEnd()` stays false for ever, and the
+     * customer whose money never arrived keeps the paid access — the very
+     * outcome this class exists to prevent, reached through its own machinery.
+     *
+     * The letters are the courtesy. The deadline is the deadline, and it runs
+     * whether or not the courtesy could be delivered. Someone who paid is taken
+     * out of the sequence long before this, by {@see settledMeanwhile()} and by
+     * {@see StopDunningOnRenewal} — so what is left here has not paid.
+     */
     public function dueToEnd(Subscription $subscription, ?Carbon $now = null): bool
     {
         $now ??= Carbon::now();
         $started = $subscription->dunning_started_at;
-        $stages = $this->stages();
 
-        if (! $started || (int) $subscription->dunning_stage < count($stages)) {
+        if (! $started) {
             return false;
         }
 
+        $stages = $this->stages();
         $last = (int) (end($stages) ?: 0);
 
         return $now->greaterThanOrEqualTo($started->copy()->addDays($last + $this->graceDays()));
@@ -351,6 +367,23 @@ class Dunning
 
         if (! $claimed) {
             return false;
+        }
+
+        // Ended without having said everything the sequence meant to say.
+        // The deadline is not negotiable, but this is the one outcome an
+        // operator has to see: the customer was cancelled having received
+        // fewer letters than the plan promises, so the reason the letters
+        // stopped — a sender the brand refuses, a provider that never
+        // answered, a pruned cycle row — is the thing to go and fix.
+        $geschickt = (int) $subscription->dunning_stage;
+        $geplant = count($this->stages());
+
+        if ($geschickt < $geplant) {
+            Log::error('statamic-payments: a dunning sequence ended without sending every letter; find out why the letters stopped.', [
+                'subscription_id' => $subscription->getKey(),
+                'stages_sent' => $geschickt,
+                'stages_planned' => $geplant,
+            ]);
         }
 
         try {

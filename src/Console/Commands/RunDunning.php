@@ -2,9 +2,12 @@
 
 namespace Goldnead\StatamicPayments\Console\Commands;
 
+use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\Dunning;
 use Goldnead\StatamicPayments\Support\DunningNotice;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * One pass over every agreement whose payment failed.
@@ -26,6 +29,27 @@ class RunDunning extends Command
 
     protected $description = 'Send the due dunning letters and end the agreements that ran out of them.';
 
+    /** Was dieser Lauf angefasst hat. Der Bericht am Ende liest sie. */
+    protected int $seen = 0;
+
+    protected int $sent = 0;
+
+    protected int $ended = 0;
+
+    protected int $stopped = 0;
+
+    /** Der Anbieter hat nicht geantwortet, also ging kein Brief auf Verdacht raus. */
+    protected int $unreachable = 0;
+
+    /** Nichts zu verschicken, aber die Stufe zaehlt: keine Adresse, oder gesperrt. */
+    protected int $skipped = 0;
+
+    /** Der Brief wollte raus und konnte nicht. Der Anspruch ging zurueck. */
+    protected int $withheld = 0;
+
+    /** Die Zeile hat geworfen. Der Lauf ging weiter. */
+    protected int $broken = 0;
+
     public function handle(Dunning $dunning, DunningNotice $notice): int
     {
         if (! $dunning->enabled()) {
@@ -35,73 +59,135 @@ class RunDunning extends Command
         }
 
         $dry = (bool) $this->option('dry-run');
-        $sent = $ended = $stopped = 0;
 
         foreach ($dunning->running() as $subscription) {
-            // The provider first, always. It retries on its own rhythm, and a
-            // card that went through between two letters ends the sequence
-            // silently — writing to somebody who has already paid is the one
-            // outcome worth more than the letter.
-            $settled = $dunning->settledMeanwhile($subscription);
+            $this->seen++;
 
-            if ($settled === true) {
-                $dry || $dunning->stop($subscription);
-                $stopped++;
+            try {
+                $this->pass($dunning, $notice, $subscription, $dry);
+            } catch (Throwable $e) {
+                // Eine Zeile darf den Lauf nicht anhalten. `running()` sortiert
+                // nach dem Beginn der Strecke, also stuende dasselbe kaputte Abo
+                // morgen wieder vorn: jedes dahinter bekaeme nie wieder einen
+                // Brief und wuerde nie beendet, und im Cron laege ein einzelner
+                // Stacktrace als ganze Erklaerung.
+                $this->broken++;
 
-                continue;
-            }
-
-            // The end does not wait for the provider, and that order matters.
-            // `dueToEnd()` is a question about dates alone; hanging it behind a
-            // successful provider call means a multi-day outage freezes every
-            // running sequence — no further letters, but no ending either, long
-            // after the grace period is up. The money has not arrived either
-            // way, and an agreement nobody can reach is not a reason to keep
-            // giving the access away.
-            if ($dunning->dueToEnd($subscription)) {
-                if ($dry || $dunning->end($subscription)) {
-                    $ended++;
-                }
-
-                continue;
-            }
-
-            if ($settled === null) {
-                // The provider would not answer. Logged there; here it simply
-                // means no letter goes out on a guess this run.
-                continue;
-            }
-
-            $stage = $dunning->stageDue($subscription);
-
-            if ($stage === null) {
-                continue;
-            }
-
-            if ($dry) {
-                $sent++;
-
-                continue;
-            }
-
-            // The claim comes before the mail, so two workers cannot both write
-            // this letter. If the send then fails, the claim goes back and the
-            // next run tries the same stage again.
-            if (! $dunning->claimStage($subscription, $stage)) {
-                continue;
-            }
-
-            if ($notice->send($subscription, $stage)) {
-                $sent++;
-            } else {
-                $dunning->releaseStage($subscription, $stage);
+                Log::error('statamic-payments: a dunning sequence threw; the run continued with the next one.', [
+                    'subscription_id' => $subscription->getKey(),
+                    'exception' => $e->getMessage(),
+                ]);
             }
         }
 
-        $this->info($dry
-            ? "Dry run: {$sent} letter(s) due, {$ended} agreement(s) would end, {$stopped} settled meanwhile."
-            : "{$sent} letter(s) sent, {$ended} agreement(s) ended, {$stopped} sequence(s) closed because the money arrived.");
+        $this->report($dry);
 
         return self::SUCCESS;
+    }
+
+    /** One agreement: settle, end, or write the letter that is due. */
+    protected function pass(Dunning $dunning, DunningNotice $notice, Subscription $subscription, bool $dry): void
+    {
+        // The provider first, always. It retries on its own rhythm, and a card
+        // that went through between two letters ends the sequence silently —
+        // writing to somebody who has already paid is the one outcome worth
+        // more than the letter.
+        $settled = $dunning->settledMeanwhile($subscription);
+
+        if ($settled === true) {
+            $dry || $dunning->stop($subscription);
+            $this->stopped++;
+
+            return;
+        }
+
+        // The end does not wait for the provider, and that order matters.
+        // `dueToEnd()` is a question about dates alone; hanging it behind a
+        // successful provider call means a multi-day outage freezes every
+        // running sequence — no further letters, but no ending either, long
+        // after the grace period is up. The money has not arrived either way,
+        // and an agreement nobody can reach is not a reason to keep giving the
+        // access away.
+        if ($dunning->dueToEnd($subscription)) {
+            if ($dry || $dunning->end($subscription)) {
+                $this->ended++;
+            }
+
+            return;
+        }
+
+        if ($settled === null) {
+            // The provider would not answer. Logged there; here it simply means
+            // no letter goes out on a guess this run.
+            $this->unreachable++;
+
+            return;
+        }
+
+        $stage = $dunning->stageDue($subscription);
+
+        if ($stage === null) {
+            return;
+        }
+
+        if ($dry) {
+            $this->sent++;
+
+            return;
+        }
+
+        // The claim comes before the mail, so two workers cannot both write
+        // this letter. If the send then fails, the claim goes back and the
+        // next run tries the same stage again.
+        if (! $dunning->claimStage($subscription, $stage)) {
+            return;
+        }
+
+        match ($notice->send($subscription, $stage)) {
+            DunningNotice::SENT => $this->sent++,
+            DunningNotice::SKIPPED => $this->skipped++,
+            default => $this->giveBack($dunning, $subscription, $stage),
+        };
+    }
+
+    protected function giveBack(Dunning $dunning, Subscription $subscription, int $stage): void
+    {
+        $dunning->releaseStage($subscription, $stage);
+        $this->withheld++;
+    }
+
+    /**
+     * What the run did, in numbers that can be told apart.
+     *
+     * „0 letter(s) sent" allein sah identisch aus fuer „nichts faellig",
+     * „Migration nicht gelaufen, `running()` ist leer" und „jeder
+     * Anbieteraufruf gescheitert". Deshalb steht die Gegenzahl davor: null von
+     * null ist ein ruhiger Tag, null von 312 ist ein Defekt.
+     */
+    protected function report(bool $dry): void
+    {
+        $zeilen = [
+            $dry
+                ? "Dry run: {$this->seen} sequence(s) checked, {$this->sent} letter(s) due, {$this->ended} agreement(s) would end, {$this->stopped} settled meanwhile."
+                : "{$this->seen} sequence(s) checked, {$this->sent} letter(s) sent, {$this->ended} agreement(s) ended, {$this->stopped} closed because the money arrived.",
+        ];
+
+        if ($this->skipped > 0) {
+            $zeilen[] = "{$this->skipped} stage(s) counted without a letter (no address, or on the suppression list).";
+        }
+
+        if ($this->unreachable > 0) {
+            $zeilen[] = "{$this->unreachable} sequence(s) skipped because the provider would not say whether they had been paid.";
+        }
+
+        if ($this->withheld > 0) {
+            $zeilen[] = "{$this->withheld} letter(s) could not be sent; the stage was given back and the next run tries again.";
+        }
+
+        $this->info(implode(' ', $zeilen));
+
+        if ($this->broken > 0) {
+            $this->error("{$this->broken} sequence(s) threw and were skipped; see the log.");
+        }
     }
 }

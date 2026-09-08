@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Console\Commands;
 
 use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Models\Subscription;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 
@@ -46,6 +47,16 @@ class PruneUnpaidCheckouts extends Command
             // Nicht unter einer laufenden Abbruch-Strecke wegräumen: eine
             // Automation, deren Auslöser verschwindet, scheitert mitten drin.
             ->whereNull('abandoned_notified_at')
+            // Und ebenso wenig unter einer laufenden Mahnstrecke. Ein
+            // fehlgeschlagener Stripe-Zyklus wird als `open` angelegt und
+            // bleibt `open`, passt also genau in diese Abfrage. Verschwindet
+            // er, kann `Dunning` den Anbieter nicht mehr fragen, ob inzwischen
+            // bezahlt wurde, und die bereits verschickten Briefe verlieren ihre
+            // Zeilen im Kommunikationsprotokoll — die Strecke laeuft blind
+            // weiter bis zur Kuendigung.
+            ->whereNotIn('id', Subscription::query()
+                ->whereNotNull('dunning_payment_id')
+                ->select('dunning_payment_id'))
             ->where('created_at', '<=', Carbon::now()->subDays($tage));
 
         $anzahl = (clone $abfrage)->count();

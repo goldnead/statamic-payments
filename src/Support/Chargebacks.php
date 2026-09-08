@@ -8,6 +8,7 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Recording that the bank took the money back.
@@ -88,7 +89,33 @@ class Chargebacks
         // Nach dem Commit, nie darin. Ein Listener, der den Zugang entzieht,
         // darf nicht in einer Transaktion laufen, die noch zurueckgerollt
         // werden koennte.
-        PaymentChargedBack::dispatch($payment->fresh() ?? $payment, $reference, $amountCent, $reason);
+        try {
+            PaymentChargedBack::dispatch($payment->fresh() ?? $payment, $reference, $amountCent, $reason);
+        } catch (Throwable $e) {
+            // Der Zustand steht, das Ereignis ist gestorben — und ohne das
+            // Folgende waere das endgueltig. Die Anspruchszeile steht ja, und
+            // `charged_back_at` auch: die naechste Zustellung faende beides
+            // erledigt, `finishUnclaimed()` gaebe `false`, und das Ereignis
+            // wuerde nie wieder gefeuert. Zurueck bliebe ein Kaeufer mit
+            // zurueckgeholtem Geld und offenem Zugang, ab der zweiten
+            // Zustellung ohne eine einzige Zeile irgendwo.
+            //
+            // Also den Zustand zuruecknehmen und werfen, wie es `Fulfilment`
+            // an der Zwillingsstelle tut. Der Anbieter stellt erneut zu, die
+            // Anspruchszeile bleibt und wird zum Wiedereinstieg, und
+            // `finishUnclaimed()` feuert das Ereignis dann doch noch.
+            Payment::query()
+                ->whereKey($payment->getKey())
+                ->update(['charged_back_at' => null, 'updated_at' => Carbon::now()]);
+
+            Log::error('statamic-payments: a chargeback was recorded but its event threw; the state was rolled back so a later delivery fires it again.', [
+                'payment_id' => $payment->getKey(),
+                'reference' => $reference,
+                'exception' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
 
         return true;
     }

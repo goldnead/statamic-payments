@@ -72,6 +72,33 @@ is seen as the same one. Stripe has a real per-dispute id and does not have this
   rather than a session or an intent — and renewals are the population this release is about.
 - Voiding a Stripe invoice no longer starts a dunning sequence: that is a hand in the dashboard, not
   a failed collection.
+- **A sequence whose letters could not leave never ended at all** — and that was the machinery
+  eating its own purpose. `dueToEnd()` demanded that every stage had actually gone out, so each of
+  the ordinary reasons a letter does not leave (a brand with no verified sender, a provider that
+  will not answer, a pruned cycle row) froze the counter for ever: no letter, no ending, no
+  withdrawal, and a customer whose money never arrived keeping the paid access indefinitely. The
+  deadline is now a question to the calendar alone, and ending without having sent every letter is
+  an `error` in the log naming how many went out.
+- **"The suppression list could not be read" no longer means "is suppressed."** For the abandoned
+  reminder that reading is right — one marketing mail is skipped. Here a cancellation hangs on it: a
+  brief outage ran all three stages without a single letter, ended the agreement, and left a line in
+  the communication log claiming the address had been on the suppression list. Now the letter is
+  withheld, the stage is given back, and the next run tries again.
+- **A chargeback whose event threw lost the withdrawal for ever.** The state is committed before the
+  event so no listener runs inside a transaction — but a listener that threw left `charged_back_at`
+  set, so every redelivery found the work done and never fired again: money back, access open, and
+  after the first delivery not a line anywhere. The state is now rolled back and the throw reaches
+  the caller, so the provider's next delivery completes it.
+- **`payments:prune-unpaid` deleted the cycle a dunning sequence hangs on.** A failed Stripe cycle is
+  written `open` and stays `open`, matching the prune query exactly. It now carries the same guard
+  the abandoned sequence already had.
+- **One broken agreement no longer stops the whole run.** `running()` is ordered by when the sequence
+  opened, so a row that threw stood first again the next day and everything behind it was never
+  written to again. Each agreement is now handled on its own, and the failures are counted.
+- **The run's own report stopped lying.** "1 letter(s) sent" was printed for an agreement with no
+  address and for a suppressed one, and "0 letter(s) sent" looked identical whether nothing was due
+  or the migration had never run. Sequences checked, letters sent, stages counted without a letter,
+  providers that would not answer and letters withheld are now separate numbers.
 
 ## 1.22.0 — 2026-09-08
 

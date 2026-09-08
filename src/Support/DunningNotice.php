@@ -42,15 +42,37 @@ class DunningNotice
 
     public const MAIL_CLASS = '\Goldnead\Marketing\Contracts\MailClass';
 
+    /** Ein Brief ist wirklich rausgegangen. */
+    public const SENT = 'sent';
+
+    /**
+     * Nichts zu verschicken, aber die Stufe zaehlt trotzdem.
+     *
+     * Keine Adresse, oder die Sperrliste sagt nein. Beides ist endgueltig, kein
+     * naechster Lauf macht es besser, und die Strecke muss ihr Ende erreichen.
+     */
+    public const SKIPPED = 'skipped';
+
+    /** Nicht rausgegangen, aber es lohnt der naechste Versuch: Anspruch zurueck. */
+    public const FAILED = 'failed';
+
     public function __construct(protected LinkTokenizer $tokenizer) {}
 
     /**
-     * Send one stage. Returns whether it actually went out.
+     * Send one stage. Says which of the three things happened.
      *
      * A refusal is a return value, not an exception: the caller has already
      * claimed the stage and needs to know whether to give the claim back.
+     *
+     * Drei Werte, nicht zwei, weil zwei an dieser Stelle gelogen haben. „Keine
+     * Adresse" und „gesperrt" gaben `true` zurueck, damit die Strecke ihr Ende
+     * erreicht — und der Lauf meldete daraufhin „1 letter(s) sent", obwohl
+     * nichts verschickt wurde. Wer nachsieht, ob die Mahnungen ankommen, las
+     * eine Zahl, die es nicht gab.
+     *
+     * @return self::SENT|self::SKIPPED|self::FAILED
      */
-    public function send(Subscription $subscription, int $stage): bool
+    public function send(Subscription $subscription, int $stage): string
     {
         $email = is_string($subscription->email) ? trim($subscription->email) : '';
 
@@ -68,7 +90,7 @@ class DunningNotice
                 'stage' => $stage,
             ]);
 
-            return true;
+            return self::SKIPPED;
         }
 
         // The communication log hangs off a payment, not an agreement, so the
@@ -80,7 +102,16 @@ class DunningNotice
 
         $brand = (int) $subscription->brand_id;
 
-        if ($this->suppressed($email, $brand)) {
+        $gesperrt = $this->suppressed($email, $brand);
+
+        if ($gesperrt === null) {
+            // Die Sperrliste war nicht lesbar. Kein Brief, aber auch keine
+            // verbrauchte Stufe und keine Behauptung im Protokoll, die Adresse
+            // sei gesperrt gewesen. Geloggt wird in `suppressed()`.
+            return self::FAILED;
+        }
+
+        if ($gesperrt) {
             // The gatekeeper stays the gatekeeper. A dunning letter is
             // transactional, and the frequency cap therefore lets it through —
             // but somebody who asked never to be written to meant it, and the
@@ -90,7 +121,7 @@ class DunningNotice
                 PaymentLog::note($payment, 'dunning_suppressed', __('statamic-payments::dunning.log_suppressed', ['email' => $email]));
             }
 
-            return true;
+            return self::SKIPPED;
         }
 
         try {
@@ -118,7 +149,7 @@ class DunningNotice
                     PaymentLog::mail($payment, 'dunning_'.$stage, $email, null, PaymentCommunication::STATUS_FAILED, ['error' => 'brand refused to send']);
                 }
 
-                return false;
+                return self::FAILED;
             }
 
             if ($payment) {
@@ -130,7 +161,7 @@ class DunningNotice
             // marketing mails and one payment notice" rather than three.
             $this->countAgainstCap($email, $brand);
 
-            return true;
+            return self::SENT;
         } catch (Throwable $e) {
             Log::error('statamic-payments: a dunning letter could not be sent.', [
                 'subscription_id' => $subscription->getKey(),
@@ -145,7 +176,7 @@ class DunningNotice
             // Not sent. The caller gives the stage back, and the next run tries
             // again — a letter lost to a broken relay must not cost the
             // customer a stage of their own sequence.
-            return false;
+            return self::FAILED;
         }
     }
 
@@ -226,10 +257,18 @@ class DunningNotice
      * Ob diese Adresse ueberhaupt angeschrieben werden darf.
      *
      * Kein Nachbar, keine Sperrliste — dann gilt „nicht gesperrt". Wo einer da
-     * ist, gilt seine Antwort, und im Zweifel gilt „gesperrt": eine Mail zu
-     * viel an jemanden, der nicht will, ist der teurere Fehler.
+     * ist, gilt seine Antwort.
+     *
+     * `null` heisst „nicht lesbar", und das ist bewusst kein `true`. Beim
+     * Abbruch-Nachbarn darf eine unlesbare Sperrliste als „gesperrt" gelten:
+     * dort faellt eine Werbemail aus, mehr nicht. Hier haengt die Kuendigung
+     * daran. Waere eine kurze Stoerung „gesperrt", liefen alle Stufen ohne
+     * einen einzigen Brief durch, das Abo endete, der Zugang ginge — und im
+     * Kommunikationsprotokoll staende die Behauptung, die Adresse habe auf der
+     * Sperrliste gestanden. Genau die Zeile, die den Menschen in die Irre
+     * fuehrt, der spaeter nachsieht, warum gekuendigt wurde.
      */
-    public function suppressed(string $email, int $brandId): bool
+    public function suppressed(string $email, int $brandId): ?bool
     {
         $facade = self::SUPPRESSION_FACADE;
 
@@ -240,11 +279,11 @@ class DunningNotice
         try {
             return (bool) $facade::isSuppressed($email, $brandId === 0 ? null : $brandId);
         } catch (Throwable $e) {
-            Log::warning('statamic-payments: the suppression list could not be read; the dunning letter was withheld.', [
+            Log::error('statamic-payments: the suppression list could not be read; the dunning letter was withheld and the stage was not counted.', [
                 'exception' => $e->getMessage(),
             ]);
 
-            return true;
+            return null;
         }
     }
 

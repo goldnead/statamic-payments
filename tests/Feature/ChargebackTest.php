@@ -379,4 +379,46 @@ class ChargebackTest extends TestCase
         $this->assertNotNull($payment->fulfilled_at);
         $this->assertNotNull($payment->paid_at);
     }
+
+    #[Test]
+    public function a_listener_that_throws_does_not_swallow_the_withdrawal_for_ever(): void
+    {
+        // Der Zustand wird vor dem Ereignis committet, damit der Listener nicht
+        // in einer Transaktion laeuft. Der Preis dafuer war still: wirft der
+        // Listener, antwortet der Webhook 500, der Anbieter stellt erneut zu —
+        // und die Wiederzustellung fand den Anspruch belegt **und**
+        // `charged_back_at` gesetzt, gab `false` zurueck und feuerte das
+        // Ereignis nie wieder. Geld zurueck, Zugang offen, ab der zweiten
+        // Zustellung ohne eine einzige Zeile irgendwo.
+        $payment = $this->paidPayment('mollie', 'tr_listener_wirft');
+
+        $platzt = true;
+        Event::listen(PaymentChargedBack::class, function () use (&$platzt) {
+            if ($platzt) {
+                throw new \RuntimeException('der Entitlements-Nachbar ist weg');
+            }
+        });
+
+        try {
+            app(Chargebacks::class)->record($payment, 'chb_wirft', 1900);
+            $this->fail('the throw has to reach the caller, or the webhook answers 200 and nobody redelivers');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('der Entitlements-Nachbar ist weg', $e->getMessage());
+        }
+
+        // Der Zustand wurde zurueckgenommen, die Anspruchszeile steht.
+        $this->assertNull($payment->fresh()->charged_back_at);
+        $this->assertDatabaseHas('payment_chargebacks', ['reference' => 'chb_wirft']);
+
+        // Die Wiederzustellung holt es nach, sobald der Nachbar wieder da ist.
+        $platzt = false;
+        Event::fake([PaymentChargedBack::class]);
+
+        $this->assertTrue(app(Chargebacks::class)->record($payment->fresh(), 'chb_wirft', 1900));
+        $this->assertNotNull($payment->fresh()->charged_back_at);
+        Event::assertDispatched(PaymentChargedBack::class);
+
+        // Und die Rueckbuchung steht genau einmal in der Tabelle.
+        $this->assertSame(1, DB::table('payment_chargebacks')->where('reference', 'chb_wirft')->count());
+    }
 }

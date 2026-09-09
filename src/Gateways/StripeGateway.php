@@ -204,12 +204,27 @@ class StripeGateway implements SubscriptionGateway
     {
         $invoice = $this->get("/v1/invoices/{$id}");
 
+        // `total` und nicht `amount_paid`.
+        //
+        // `total` ist, was die Rechnung wert ist: Positionen minus Rabatte plus
+        // Steuer. `amount_paid` ist, was davon per Karte kam — eine Rechnung,
+        // die aus dem Guthaben des Kunden beglichen wurde, steht dort auf null
+        // und ist trotzdem ein voller Zyklus. Ueber den Betrag entscheidet die
+        // Rechnung, nicht der Weg des Geldes.
+        //
+        // Fehlt das Feld, bleibt es `null`: das heisst „Stripe hat nichts
+        // gesagt", und geerbt wird dann weiter wie bisher. Nur eine Zahl, die
+        // wirklich dasteht, zaehlt — sonst waere jede unvollstaendige Antwort
+        // eine Rechnung ueber null Euro.
+        $total = $invoice['total'] ?? null;
+
         return new RemotePayment(
             providerId: $id,
             status: $this->normaliseInvoice((string) ($invoice['status'] ?? '')),
             metadata: $this->readMetadata($invoice),
             email: $this->firstString([$invoice['customer_email'] ?? null]),
             subscriptionId: $this->firstString([$invoice['subscription'] ?? null]),
+            amountCent: is_int($total) ? $total : null,
         );
     }
 

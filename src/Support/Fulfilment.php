@@ -53,6 +53,24 @@ class Fulfilment
 
         $payment ??= $this->recover($providerId, $remote);
 
+        // Eine Abrechnung über null Euro ist kein bezahlter Zyklus.
+        //
+        // Sie kommt bei jedem Abo mit Probezeit: Stripe legt zum neuen Abo
+        // sofort eine Rechnung an (`billing_reason: subscription_create`,
+        // `total: 0`), markiert sie als `paid`, weil an null Euro nichts offen
+        // bleibt, und meldet `invoice.paid` — im selben Augenblick, in dem die
+        // Kasse das Geld genommen hat. Ohne diese Zeile entstand daraus unten
+        // eine zweite bezahlte Zahlung über den Betrag des Abos, ein zweiter
+        // Zugang und ein Zyklus-Zähler, der der Abbuchung vorauslief. Am
+        // 09.09.2026 gegen ein echtes Stripe-Testkonto beobachtet.
+        //
+        // Geprüft wird es hier und nicht in `openCycle()`, weil der Zyklus-Pfad
+        // die einzige Stelle ist, die einen Betrag **erbt** statt ihn zu
+        // erfragen: eine Zeile, die es schon gibt, trägt ihren eigenen.
+        if (! $payment && $this->nothingToCharge($remote)) {
+            return null;
+        }
+
         // The one payment a site legitimately never created: a cycle the
         // provider charged on its own, on an agreement this site *did* create.
         // The row is written here rather than refused, because the alternative
@@ -311,6 +329,38 @@ class Fulfilment
      * `PaymentPaid`, und was der Kartenherausgeber sagt, ist der bessere
      * Nachweis. Ein geerbtes Land stünde ihm im Weg.
      */
+    /**
+     * Ein Zyklus, für den der Anbieter ausdrücklich null Cent nennt.
+     *
+     * `null` ist nicht `0`. Sagt der Anbieter über den Betrag nichts — ein Feld,
+     * das seine API-Fassung nicht führt, eine gekürzte Antwort, Mollie, das
+     * dieses Feld gar nicht setzt —, bleibt es beim geerbten Betrag und damit
+     * beim bisherigen Verhalten. Nur eine Zahl, die wirklich dasteht, entscheidet.
+     *
+     * Der Grund der Rechnung wird bewusst **nicht** gelesen. Auch ein
+     * `subscription_cycle` über null Euro geht denselben Weg — ein Gutschein
+     * über 100 %, ein ausgesetzter Monat —, und das ist gewollt: eine Zeile
+     * über den vollen Abo-Betrag für einen Zeitraum, in dem kein Geld floss,
+     * wäre in jeder Auswertung eine Erfindung, und der Betrag ist hier geerbt,
+     * nicht belegt. Der Preis dafür: ein solcher Zeitraum verlängert keinen
+     * Zugang, denn verlängert wird nur gegen eine bezahlte Zahlung. Genau
+     * deshalb steht die Zeile im Protokoll und der Abbruch ist nicht still.
+     */
+    protected function nothingToCharge(?RemotePayment $remote): bool
+    {
+        if (! $remote?->subscriptionId || $remote->amountCent !== 0) {
+            return false;
+        }
+
+        Log::info('statamic-payments: the provider says this cycle is worth nothing; no payment was booked for it.', [
+            'provider' => $this->gateway->provider(),
+            'provider_id' => $remote->providerId,
+            'provider_subscription_id' => $remote->subscriptionId,
+        ]);
+
+        return true;
+    }
+
     protected function openCycle(string $providerId, ?RemotePayment $remote): ?Payment
     {
         if (! $remote?->subscriptionId) {

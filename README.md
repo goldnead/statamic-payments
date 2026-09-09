@@ -812,6 +812,15 @@ is written in the webhook. They inherit instead, taking the first payment's `met
 package runs itself, plus a `meta['cycle_of']` pointer, because the `subscription_id` column is still
 empty when `PaymentPaid` fires. See `docs/follow-up-offers.md`.
 
+The amount is inherited too — and only as long as the provider says nothing about it. **A cycle the
+provider prices at zero is not booked at all**, with a line in the log. Stripe writes an invoice
+worth nothing whenever a subscription with a trial period starts, and marks it `paid`; booking it
+would give the buyer a second order and a second entitlement for a charge that happened once. The
+same holds for a cycle waived by a 100% coupon: it books nothing, and it extends no access either,
+because access is extended against a payment that was actually paid. An answer that simply does not
+carry an amount is not the same as one that says zero — then the agreement's amount stands, exactly
+as before.
+
 ## A subscription and the access it pays for
 
 With `statamic-entitlements` installed and `entitlements.enabled` on, a subscription keeps its grant

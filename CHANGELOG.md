@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.23.1 — 2026-09-09
+
+### A trial no longer books a second payment nobody made
+
+Buying a subscription with a trial period produced **two** paid orders and two entitlements for one
+charge. Found on a real Stripe test account, not in a fixture.
+
+Stripe writes an invoice the moment a subscription starts — `billing_reason: subscription_create`,
+`total: 0`, `charge: null` — and marks it `paid`, because nothing stays open on an invoice worth
+nothing. `invoice.paid` therefore arrives in the same second as the checkout that took the money.
+The cycle path then wrote a second payment over the **agreement's** amount, granted the entitlement
+a second time, and moved `times_charged` on. Revenue reports counted money that never came, the
+buyer saw two orders, and the instalment counter ran ahead of the instalments.
+
+The amount was inherited from the agreement and never asked for, because a provider-driven cycle
+has no calling side to carry one. It is asked for now: `RemotePayment` has an `amountCent`, the
+Stripe adapter fills it from the invoice's `total`, and a cycle the provider prices at zero is not
+booked — with a line in the log, not silently.
+
+Two boundaries this was built against, both with tests:
+
+- **Nothing said is not zero.** A response without `total` — an older API version, a trimmed answer,
+  Mollie, which does not set the field at all — leaves `amountCent` at `null` and the amount is
+  inherited exactly as before. Only a number that is really there decides.
+- **`total`, not `amount_paid`.** An invoice settled from a customer's credit balance has
+  `amount_paid: 0` and is a full cycle. What the invoice is worth decides, not the route the money
+  took.
+
+The billing reason is deliberately **not** read: a `subscription_cycle` worth zero — a 100% coupon,
+a month waived — takes the same path. A line over the full amount for a period in which no money
+moved would be wrong in every report, and the amount there is inherited rather than evidenced. The
+price of that: such a period extends no access either, because access is extended against a paid
+payment. That is why the log line exists.
+
 ## 1.23.0 — 2026-09-08
 
 Two silent holes closed, both provider-neutral.

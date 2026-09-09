@@ -95,6 +95,24 @@ final readonly class RemotePayment
          * faellt daran ab, statt den Zugang ein zweites Mal zu entziehen.
          */
         public ?string $chargebackReference = null,
+        /**
+         * Was diese Zahlung beim Anbieter wert ist, in kleinsten Einheiten.
+         *
+         * Wie bei `chargedBackCent` heisst `null` „der Anbieter sagt dazu
+         * nichts" und nicht „null Euro". Der Unterschied ist hier die ganze
+         * Auskunft: eine Rechnung ueber null Euro ist kein bezahlter Zyklus,
+         * eine Rechnung ohne Betragsangabe dagegen ein ganz gewoehnlicher.
+         *
+         * Gebraucht wird das Feld von der einzigen Stelle, die einen Betrag
+         * bisher erfinden musste: {@see Fulfilment::openCycle()} erbt ihn vom
+         * Abo, weil ein vom Anbieter getriebener Zyklus keine aufrufende
+         * Strecke hat, die ihn mitgeben koennte. Geerbt heisst geraten, und
+         * geraten wird nur, solange der Anbieter selbst nichts sagt.
+         *
+         * Nicht dazu da, den Betrag einer bestehenden Zeile nachtraeglich zu
+         * korrigieren: was an der Kasse feststand, steht fest.
+         */
+        public ?int $amountCent = null,
     ) {}
 
     public function isPaid(): bool

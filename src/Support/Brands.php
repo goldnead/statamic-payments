@@ -51,6 +51,24 @@ final class Brands
     /** {@see self::forCatalogueEntry()}: eine Vereinbarung entsteht. */
     public const FOR_SUBSCRIPTION = 'subscription';
 
+    /** {@see self::forCatalogueEntry()}: eine bestehende Vereinbarung wird umgetragen. */
+    public const FOR_SUBSCRIPTION_BACKFILL = 'subscription-backfill';
+
+    /** {@see self::decideForCatalogueEntry()}: ein Betrieb ohne Mandanten. Keine Frage. */
+    public const REASON_SINGLE = 'einzelmarke';
+
+    /** Der Katalog kennt das Verkaufte nicht mehr. Nichts ist ableitbar, auch Betrag und Waehrung nicht. */
+    public const REASON_NO_ENTRY = 'kein-katalogeintrag';
+
+    /** Der Eintrag nennt keine Marke. Es bleibt beim Erbe, und das ist richtig. */
+    public const REASON_NO_BRAND = 'nennt-keine-marke';
+
+    /** Der Eintrag nennt etwas, das keine Marke ist. Es bleibt beim Erbe, aber laut. */
+    public const REASON_UNUSABLE = 'keine-brauchbare-marke';
+
+    /** Der Eintrag nennt eine Marke, und die gewinnt. */
+    public const REASON_OFFER = 'marke-des-angebots';
+
     /**
      * Whether the sibling is installed and usable at all.
      *
@@ -201,9 +219,135 @@ final class Brands
     public static function forCatalogueEntry(array $eintrag, Payment $geerbtVon, string $anlass): int
     {
         $geerbt = (int) $geerbtVon->brand_id;
+        $entscheidung = self::decideForCatalogueEntry($eintrag, $geerbt);
+        $handle = $entscheidung['handle'];
+        $roh = $entscheidung['raw'];
+
+        // Entschieden wird eine Zeile hoeher, hier wird nur erzaehlt. Getrennt
+        // ist beides, seit `payments:subscription-brand-backfill` dieselbe
+        // Regel braucht: die Meldungen unten sagen „the new row", und ein Lauf,
+        // der nichts schreibt, darf das nicht ins Log schreiben. Die Regel
+        // bleibt trotzdem eine einzige — der Backfill erzaehlt seine eigene
+        // Fassung aus demselben `reason`.
+        switch ($entscheidung['reason']) {
+            case self::REASON_SINGLE:
+                // Ein Hinweis je Bestellung waere auf einem Betrieb ohne
+                // Mandanten reiner Laerm.
+                break;
+
+            case self::REASON_NO_ENTRY:
+                Log::warning('statamic-payments: the catalogue no longer knows the thing being sold here, so the new row inherits everything from the payment it grew out of, brand included.', [
+                    'original_brand' => $geerbt,
+                    'original_payment' => $geerbtVon->getKey(),
+                    'for' => $anlass,
+                ]);
+                break;
+
+            case self::REASON_NO_BRAND:
+                Log::info('statamic-payments: this catalogue entry names no brand, so the new row inherits the brand of the payment it grew out of.', [
+                    'product' => $handle,
+                    'original_brand' => $geerbt,
+                    'original_payment' => $geerbtVon->getKey(),
+                    'for' => $anlass,
+                ]);
+                break;
+
+            case self::REASON_UNUSABLE:
+                Log::warning('statamic-payments: this catalogue entry names something that is not a usable brand id, so the new row inherits the brand of the payment it grew out of.', [
+                    'product' => $handle,
+                    // Der Typ und nur bei einem Skalar der Wert: was hier steht,
+                    // kommt aus fremdem Code und gehoert nicht ungeprueft in
+                    // eine Logzeile.
+                    'brand_id_type' => get_debug_type($roh),
+                    'brand_id' => is_scalar($roh) ? $roh : null,
+                    'original_brand' => $geerbt,
+                    'original_payment' => $geerbtVon->getKey(),
+                    'for' => $anlass,
+                ]);
+                break;
+
+            case self::REASON_OFFER:
+                if ($entscheidung['brand'] === $geerbt) {
+                    // Das Angebot nennt genau die geerbte Marke. Nichts
+                    // passiert, nichts zu melden.
+                    break;
+                }
+
+                // Zwei sehr verschiedene Lagen, und die Beschriftung entscheidet,
+                // ob jemand etwas tut. Eine Zahlung auf 0 gehoerte nie einer Marke:
+                // entstanden, wo keine galt — Webhook, Kommando, Warteschlange —,
+                // also stempelte {@see self::stampId()} null. Dass die neue Zeile
+                // jetzt eine Marke bekommt, ist die Reparatur und nicht der Fehler.
+                //
+                // **Der Altbestand von vor `statamic-funnels` 1.15.2 steht
+                // ausdruecklich nicht hier.** Der trug die *Standardmarke*, und die
+                // ist groesser als null. Er landet also in der zweiten Meldung, und
+                // das ist richtig: von aussen ist eine falsch gestempelte alte
+                // Zahlung von einem Funnel mit fremdem Angebot nicht zu
+                // unterscheiden, und beide will der Betreiber sehen.
+                Log::warning($geerbt < 1
+                    ? 'statamic-payments: the payment this grew out of carries no brand, so the new row takes the brand of the offer instead of inheriting none.'
+                    : 'statamic-payments: this offer belongs to a different brand than the payment it grew out of; the new row is made under the brand of the offer.', [
+                        'product' => $handle,
+                        'offer' => $entscheidung['offer'],
+                        'offer_brand' => $entscheidung['brand'],
+                        'original_brand' => $geerbt,
+                        'original_payment' => $geerbtVon->getKey(),
+                        'for' => $anlass,
+                    ]);
+                break;
+
+            default:
+                // Ein siebter Grund, der spaeter dazukommt, bekaeme sonst
+                // stillschweigend den Satz ueber das fremde Angebot — eine
+                // Meldung, die dann etwas anderes behauptet, als geschehen ist.
+                Log::error('statamic-payments: the brand rule returned a reason this caller does not know; the row still takes the brand it decided on.', [
+                    'reason' => $entscheidung['reason'],
+                    'brand' => $entscheidung['brand'],
+                    'product' => $handle,
+                    'for' => $anlass,
+                ]);
+        }
+
+        return $entscheidung['brand'];
+    }
+
+    /**
+     * Dieselbe Entscheidung, ohne eine Zeile ins Log und ohne eine Zahlung.
+     *
+     * Der Rumpf von {@see self::forCatalogueEntry()}, herausgeloest, damit ein
+     * zweiter Aufrufer ihn buchstaeblich benutzen kann statt ihn abzuschreiben:
+     * `payments:subscription-brand-backfill` traegt bestehende Vereinbarungen
+     * nach derselben Regel um. Der Backfill hat keine Zahlung — sein Erbe ist,
+     * was in der Zeile heute steht — und sein Trockenlauf darf nichts
+     * behaupten, was er nicht tut. Beides schliesst die alte Signatur aus, und
+     * eine zweite Kopie der Regel schliesst dieses Paket selbst aus: zwei
+     * Kopien einer Entscheidung ueber Geld sind die eine, die spaeter etwas
+     * dazulernt, und die andere.
+     *
+     * `reason` ist die Lage, nicht die Meldung. Wer erzaehlt, waehlt seine
+     * eigenen Worte; entschieden wird hier.
+     *
+     * @param  array<string, mixed>  $eintrag
+     * @param  int  $geerbt  Die Marke, die ohne diese Frage gelten wuerde.
+     * @return array{brand: int, reason: string, handle: string, offer: string|null, raw: mixed}
+     */
+    public static function decideForCatalogueEntry(array $eintrag, int $geerbt): array
+    {
+        $handle = (string) ($eintrag['handle'] ?? '');
+        $offer = is_string($eintrag['offer'] ?? null) ? $eintrag['offer'] : null;
+        $roh = $eintrag['brand_id'] ?? null;
+
+        $antwort = fn (int $brand, string $reason): array => [
+            'brand' => $brand,
+            'reason' => $reason,
+            'handle' => $handle,
+            'offer' => $offer,
+            'raw' => $roh,
+        ];
 
         if (self::mode() === self::SINGLE) {
-            return $geerbt;
+            return $antwort($geerbt, self::REASON_SINGLE);
         }
 
         // **Gar kein Eintrag ist etwas anderes als ein Eintrag ohne Marke**,
@@ -217,13 +361,7 @@ final class Brands
         // und wer nach so etwas sucht, filtert nach `warning`, nicht nach einer
         // `info`-Zeile mit leerem `product`.
         if ($eintrag === []) {
-            Log::warning('statamic-payments: the catalogue no longer knows the thing being sold here, so the new row inherits everything from the payment it grew out of, brand included.', [
-                'original_brand' => $geerbt,
-                'original_payment' => $geerbtVon->getKey(),
-                'for' => $anlass,
-            ]);
-
-            return $geerbt;
+            return $antwort($geerbt, self::REASON_NO_ENTRY);
         }
 
         // Nicht der blosse Cast: der Katalog ist offen, und der Eintrag kommt
@@ -231,69 +369,24 @@ final class Brands
         // einem versehentlichen Array eine `1` — also eine echte Marke, die es
         // hier zufaellig gibt. Eine Ziffernfolge im Text zaehlt dagegen: eine
         // Eloquent-Spalte ohne Cast liefert genau die.
-        $roh = $eintrag['brand_id'] ?? null;
         $desAngebots = match (true) {
             is_int($roh) => $roh,
             is_string($roh) && ctype_digit($roh) => (int) $roh,
             default => 0,
         };
-        $handle = (string) ($eintrag['handle'] ?? '');
 
         if ($desAngebots < 1) {
             // „Nichts gesagt" und „etwas gesagt, das keine Marke ist" sind
             // nicht dasselbe, und nur das erste ist harmlos. Beim zweiten wird
             // ebenfalls geerbt — raten waere schlimmer —, aber der Grund steht
             // dann laut da, statt als „nennt keine Marke" verkleidet zu werden.
-            if ($roh === null || $roh === 0 || $roh === '0') {
-                Log::info('statamic-payments: this catalogue entry names no brand, so the new row inherits the brand of the payment it grew out of.', [
-                    'product' => $handle,
-                    'original_brand' => $geerbt,
-                    'original_payment' => $geerbtVon->getKey(),
-                    'for' => $anlass,
-                ]);
-            } else {
-                Log::warning('statamic-payments: this catalogue entry names something that is not a usable brand id, so the new row inherits the brand of the payment it grew out of.', [
-                    'product' => $handle,
-                    // Der Typ und nur bei einem Skalar der Wert: was hier steht,
-                    // kommt aus fremdem Code und gehoert nicht ungeprueft in
-                    // eine Logzeile.
-                    'brand_id_type' => get_debug_type($roh),
-                    'brand_id' => is_scalar($roh) ? $roh : null,
-                    'original_brand' => $geerbt,
-                    'original_payment' => $geerbtVon->getKey(),
-                    'for' => $anlass,
-                ]);
-            }
-
-            return $geerbt;
+            return $antwort(
+                $geerbt,
+                $roh === null || $roh === 0 || $roh === '0' ? self::REASON_NO_BRAND : self::REASON_UNUSABLE,
+            );
         }
 
-        if ($desAngebots !== $geerbt) {
-            // Zwei sehr verschiedene Lagen, und die Beschriftung entscheidet,
-            // ob jemand etwas tut. Eine Zahlung auf 0 gehoerte nie einer Marke:
-            // entstanden, wo keine galt — Webhook, Kommando, Warteschlange —,
-            // also stempelte {@see self::stampId()} null. Dass die neue Zeile
-            // jetzt eine Marke bekommt, ist die Reparatur und nicht der Fehler.
-            //
-            // **Der Altbestand von vor `statamic-funnels` 1.15.2 steht
-            // ausdruecklich nicht hier.** Der trug die *Standardmarke*, und die
-            // ist groesser als null. Er landet also in der zweiten Meldung, und
-            // das ist richtig: von aussen ist eine falsch gestempelte alte
-            // Zahlung von einem Funnel mit fremdem Angebot nicht zu
-            // unterscheiden, und beide will der Betreiber sehen.
-            Log::warning($geerbt < 1
-                ? 'statamic-payments: the payment this grew out of carries no brand, so the new row takes the brand of the offer instead of inheriting none.'
-                : 'statamic-payments: this offer belongs to a different brand than the payment it grew out of; the new row is made under the brand of the offer.', [
-                    'product' => $handle,
-                    'offer' => is_string($eintrag['offer'] ?? null) ? $eintrag['offer'] : null,
-                    'offer_brand' => $desAngebots,
-                    'original_brand' => $geerbt,
-                    'original_payment' => $geerbtVon->getKey(),
-                    'for' => $anlass,
-                ]);
-        }
-
-        return $desAngebots;
+        return $antwort($desAngebots, self::REASON_OFFER);
     }
 
     /**

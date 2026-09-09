@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.24.3 — 2026-09-09
+
+### Added: `payments:subscription-brand-backfill`
+
+1.24.2 gave a *new* agreement the brand of its catalogue entry. Agreements that already existed kept
+the brand of their first payment — the very answer that fix overruled. A fix that only applies going
+forward leaves the stock wrong, and for an agreement wrong is expensive: the brand hangs on every
+cycle, every invoice and its visibility in the portal, for as long as it runs.
+
+```
+php artisan payments:subscription-brand-backfill          # zeigt nur
+php artisan payments:subscription-brand-backfill --apply  # schreibt
+```
+
+The dry run is the default and prints one row per deviation (agreement, product, brand today, brand
+derived, reason). `--apply` writes each row under its own condition — the brand it was read at — and
+logs one line per change. Agreements whose catalogue entry cannot be resolved, or whose entry names
+something that is not a usable brand id, are **reported and left alone**, and the command then exits
+non-zero: "I have no evidence" is not evidence, and a run that leaves such rows behind must not pass
+for done inside a script.
+
+**A sibling of `payments:brand-backfill`, not an option on it.** That one derives an agreement's
+brand from its *first payment*, which is the rule being overruled here. Two contradicting rules
+inside one fixed point would resolve by pass order.
+
+`Brands::forCatalogueEntry()` keeps its behaviour and its log messages to the word; the decision it
+makes is now `Brands::decideForCatalogueEntry()`, which decides and says nothing. The backfill uses
+that same body rather than a copy — and its dry run therefore cannot log "the new row is made under
+the brand of the offer" about a row it does not touch.
+
 ## 1.24.2 — 2026-09-09
 
 ### Fixed: an agreement belongs to the brand that sold it, not to its first payment

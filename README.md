@@ -1087,6 +1087,27 @@ measurement afterwards: it compares every invoice against the brand of its payme
 Nothing happens at all without `goldnead/statamic-brand-context`, or with multi-brand off. Then
 every row is `0`, and `0` is right.
 
+#### Agreements that predate the rule
+
+From 1.24.2 a new agreement takes the brand of its catalogue entry. Ones that already existed kept
+the brand of their first payment — the answer that fix overruled. This moves them:
+
+```
+php artisan payments:subscription-brand-backfill          # zeigt nur
+php artisan payments:subscription-brand-backfill --apply  # schreibt
+```
+
+The dry run is the default and prints one row per deviation: agreement, product, brand today, brand
+derived, reason. `--apply` writes each row under the brand it was read at, so a hand correction made
+in the meantime wins and is reported rather than overwritten, and it logs one line per change.
+
+An agreement whose catalogue entry cannot be resolved — the product is gone, a contributed resolver
+failed, or the entry names something that is not a usable brand id — is **reported and left exactly
+as it is**, and the command exits non-zero. It derives, it never guesses.
+
+This is a sibling of `payments:brand-backfill` and not an option on it: that one derives an
+agreement's brand from its first payment, which is the rule this one overrules.
+
 ## Configuration
 
 | Key | Default | What happens when it is wrong |

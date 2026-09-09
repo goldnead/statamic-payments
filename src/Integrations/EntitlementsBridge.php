@@ -371,14 +371,34 @@ class EntitlementsBridge
      * documented and never once working, because the tests mocked the facade
      * and a mock accepts anything.
      *
-     * `email` as the type is the honest answer here. A payment knows an address
-     * and nothing else: there may be no user account and no contact, and
-     * inventing one to hang a grant on would be worse than saying what we have.
-     * A host that wants grants against its own users binds its own
-     * `SubjectResolver`, which is what that seam is for.
+     * `email` as the type is the honest answer **when nobody knows better**. A
+     * payment knows an address and nothing else: there may be no user account
+     * and no contact, and inventing one to hang a grant on would be worse than
+     * saying what we have.
+     *
+     * **Aber gefragt wird zuerst der Host.** Der Satz „a host that wants grants
+     * against its own users binds its own `SubjectResolver`" stand hier schon,
+     * und die Naht gibt es auch — nur ging diese Methode daran vorbei. Sie baute
+     * das Paar selbst, und `EntitlementManager::reference()` reichte ein
+     * fertiges Paar unverändert durch: der Resolver des Hosts wurde nie
+     * gefragt.
+     *
+     * Am 09.09.2026 auf adriangoldner.com gemessen, mit dem Zugang eines echten
+     * Testkaufs: über die E-Mail gefunden 0, über den Nutzer 1. Dort hängen
+     * Zugänge am eigenen `User`, und damit waren `renewFor()` und `closeFor()`
+     * **stille Nichtstuer** — die Mahnstrecke lief bis zum Ende durch, meldete
+     * den Entzug und entzog nichts. Wer aufhörte zu zahlen, behielt den Zugang.
+     *
+     * Also: erst den Resolver mit dem rohen Wert fragen. Wirft er (die
+     * Vorgabe `MorphSubjectResolver` kann mit einer Zeichenkette nichts
+     * anfangen), bleibt es beim `email`-Paar wie bisher. Ein Host, der seine
+     * Nutzer erreichen will, bindet dafür einen Resolver — genau wofür die Naht
+     * da ist.
      */
     protected function subjectFor(string $email): mixed
     {
+        $email = mb_strtolower(trim($email));
+
         $klasse = '\\Goldnead\\Entitlements\\Support\\SubjectReference';
 
         if (! class_exists($klasse)) {
@@ -387,7 +407,32 @@ class EntitlementsBridge
             return $email;
         }
 
-        return new $klasse('email', mb_strtolower(trim($email)));
+        // **Ohne führenden Backslash.** `interface_exists()` und `new` verzeihen
+        // ihn, der Dienstbehälter nicht: gebunden ist der Name ohne, und
+        // `app('\Goldnead\…')` sucht die Zeichenkette wörtlich, findet nichts
+        // und baut sich stattdessen eine neue Vorgabe — die mit einer Adresse
+        // nichts anfangen kann. Der Rückfall unten griff dann immer, und die
+        // Naht sah aus, als gäbe es sie nicht.
+        $vertrag = 'Goldnead\\Entitlements\\Contracts\\SubjectResolver';
+
+        if (interface_exists($vertrag)) {
+            try {
+                // Nicht das Ergebnis zurückgeben, sondern den Rohwert: gibt der
+                // Resolver eine Antwort, ist er zuständig, und `forSubject()`
+                // fragt ihn gleich noch einmal mit demselben Wert. Zweimal
+                // dieselbe Antwort ist billiger als zwei Wege, auf denen sie
+                // auseinanderlaufen können.
+                app($vertrag)->reference($email);
+
+                return $email;
+            } catch (Throwable) {
+                // Der Host kennt diese Adresse nicht oder hat gar keinen
+                // eigenen Resolver. Kein Fehler: dann gilt die Adresse selbst
+                // als Subjekt, wie bisher.
+            }
+        }
+
+        return new $klasse('email', $email);
     }
 
     /**

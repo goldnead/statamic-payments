@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.24.0 — 2026-09-09
+
+### Fixed: the entitlements bridge never asked the host who the buyer is
+
+`EntitlementsBridge` built the subject itself — `SubjectReference('email', …)` — and
+`EntitlementManager::reference()` passes a finished pair straight through. So the host's
+`SubjectResolver` was never asked, on any installation, ever. The docblock in this very method
+already said "a host that wants grants against its own users binds its own `SubjectResolver`,
+which is what that seam is for". The seam existed; nothing reached it.
+
+Measured on adriangoldner.com on 09.09.2026, against the grant of a real test purchase:
+
+```
+found by email: 0
+found by user:  1
+```
+
+Grants there hang off the site's own `User`. `renewFor()` and `closeFor()` were therefore
+**silent no-ops**: the dunning run went through to the end, reported the withdrawal and withdrew
+nothing. **Whoever stopped paying kept their access** — and a subscription's cycle extended
+nothing, so a second grant would pile up instead of the first one moving.
+
+The bridge now hands the resolver the raw address and lets it decide. Answers it, the address
+itself is the subject and `forSubject()` asks the same resolver again with the same value —
+twice the same answer is cheaper than two paths that can drift apart. Throws it (the default
+`MorphSubjectResolver` can do nothing with a string), it stays the `email` pair, exactly as
+before. Hosts without their own resolver see no change at all.
+
+**The reason it looked like the seam did not exist:** the container lookup used a leading
+backslash. `interface_exists()` and `new` forgive that, the service container does not — it
+looks the string up verbatim, finds no binding, and builds a fresh default that cannot handle
+an address. The fallback then always won.
+
+**A note for hosts binding one:** `EntitlementManager` is a singleton with the resolver in its
+constructor. Bind in `register()`, not in `boot()` — a binding set after the manager stands
+changes nothing, and nothing fails; it just keeps finding nothing.
+
 ## 1.23.3 — 2026-09-09
 
 ### Fixed: a credit note walked straight through the guard from 1.23.1

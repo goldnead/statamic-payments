@@ -2,8 +2,11 @@
 
 namespace Goldnead\StatamicPayments\Tests\Feature;
 
+use Goldnead\Entitlements\Contracts\SubjectResolver;
+use Goldnead\Entitlements\EntitlementManager;
 use Goldnead\Entitlements\Facades\Entitlements;
 use Goldnead\Entitlements\Models\Entitlement;
+use Goldnead\Entitlements\Support\MorphSubjectResolver;
 use Goldnead\Entitlements\Support\SubjectReference;
 use Goldnead\IdentityContracts\ServiceProvider;
 use Goldnead\StatamicPayments\Events\SubscriptionEnded;
@@ -160,6 +163,86 @@ class SubscriptionRenewsRealEntitlementTest extends TestCase
             'der Zugang wurde geschlossen, obwohl alle Raten bezahlt sind',
         );
         $this->assertNull(Entitlement::first()->revoked_at);
+    }
+
+    /**
+     * Bindet der Host einen eigenen Resolver, erreicht die Brücke seine Zugänge.
+     *
+     * **Am 09.09.2026 auf adriangoldner.com gemessen.** Dort hängen Zugänge am
+     * eigenen `User`, nicht an einer E-Mail. Die Brücke baute das Paar
+     * `('email', …)` selbst, `EntitlementManager::reference()` reichte ein
+     * fertiges Paar unverändert durch — und der Resolver des Hosts wurde nie
+     * gefragt. Ergebnis am System: über die E-Mail gefunden 0, über den Nutzer
+     * 1. `renewFor()` und `closeFor()` waren damit stille Nichtstuer, und wer
+     * aufhörte zu zahlen, behielt seinen Zugang.
+     *
+     * Der Test bindet einen Resolver, wie ein Host es täte: eine Adresse wird
+     * zu einem ganz anderen Subjekt. Greift die Naht nicht, findet die Brücke
+     * den Zugang nicht und schließt nichts — genau der stille Fehlschlag.
+     */
+    #[Test]
+    public function the_bridge_asks_the_host_who_the_buyer_is(): void
+    {
+        $this->app->bind(SubjectResolver::class, fn () => new class implements SubjectResolver
+        {
+            public function reference(mixed $subject): SubjectReference
+            {
+                // Wie ein Host, der seine Nutzer kennt: aus der Adresse wird
+                // sein eigenes Subjekt. Alles andere geht an die Vorgabe.
+                if (is_string($subject) && $subject === 'wer@example.com') {
+                    return new SubjectReference('kunde', '42');
+                }
+
+                return (new MorphSubjectResolver)->reference($subject);
+            }
+
+            public function label(SubjectReference $reference): ?string
+            {
+                return null;
+            }
+        });
+
+        // **Der `EntitlementManager` ist ein Singleton mit dem Resolver im
+        // Konstruktor.** Wer ihn schon einmal aufgelöst hat, hält die Vorgabe
+        // fest, egal was danach gebunden wird. Hier vergessen wir ihn, damit er
+        // den Resolver von oben bekommt.
+        //
+        // Auf einem echten Host ist das keine Kunst, sondern eine Regel: die
+        // Bindung gehört in `register()`, nicht in `boot()`. Wer sie später
+        // setzt, bindet gegen einen Manager, der längst steht — und merkt es
+        // nicht, weil nichts fehlschlägt, sondern nur nichts gefunden wird.
+        $this->app->forgetInstance(EntitlementManager::class);
+        Entitlements::clearResolvedInstances();
+
+        // Der Zugang liegt am Subjekt des Hosts, nicht an der Adresse.
+        Entitlements::grant(new SubjectReference('kunde', '42'), 'mitgliedschaft', 'statamic-payments', 'sub_1');
+
+        $this->assertNull(Entitlement::first()->expires_at);
+
+        app(FollowSubscriptionWithEntitlement::class)->handleEnded(
+            new SubscriptionEnded($this->abo(['status' => Subscription::STATUS_CANCELLED])),
+        );
+
+        $this->assertSame(
+            '2026-10-01',
+            Entitlement::first()->expires_at?->format('Y-m-d'),
+            'die Bruecke hat den Zugang des Hosts nicht gefunden',
+        );
+    }
+
+    #[Test]
+    public function without_a_host_resolver_the_email_stays_the_subject(): void
+    {
+        // Die Gegenprobe. Die Vorgabe `MorphSubjectResolver` kann mit einer
+        // Zeichenkette nichts anfangen und wirft — dann muss es beim
+        // `email`-Paar bleiben und nicht der ganze Kauf scheitern.
+        Entitlements::grant(new SubjectReference('email', 'wer@example.com'), 'mitgliedschaft', 'statamic-payments', 'sub_1');
+
+        app(FollowSubscriptionWithEntitlement::class)->handleEnded(
+            new SubscriptionEnded($this->abo(['status' => Subscription::STATUS_CANCELLED])),
+        );
+
+        $this->assertSame('2026-10-01', Entitlement::first()->expires_at?->format('Y-m-d'));
     }
 
     #[Test]

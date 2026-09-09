@@ -105,7 +105,7 @@ class AboMarkeBackfillTest extends TestCase
         $abo = $this->abo('mitgliedschaft', $this->shopA);
         $ruhig = $this->abo('schweigsam', $this->shopA);
 
-        Log::spy();
+        $geloggt = $this->mitschnitt();
 
         $ausgabe = $this->lauf();
 
@@ -115,7 +115,9 @@ class AboMarkeBackfillTest extends TestCase
         // Ein Trockenlauf, der eine Tat ins Log schreibt, ist schlimmer als
         // einer, der schweigt: das Log ist der Ort, an dem hinterher
         // nachgelesen wird, was geschehen ist.
-        Log::shouldNotHaveReceived('info', [\Mockery::pattern('/moved to the brand/'), \Mockery::any()]);
+        foreach ($geloggt as $zeile) {
+            $this->assertStringNotContainsString('moved to the brand', $zeile['message'], 'der Trockenlauf hat eine Tat ins Log geschrieben');
+        }
 
         $this->assertOutputSays('mitgliedschaft', $ausgabe);
         $this->assertOutputSays('Marke abgeleitet', $ausgabe);
@@ -162,19 +164,21 @@ class AboMarkeBackfillTest extends TestCase
     #[Test]
     public function apply_schreibt_je_aenderung_eine_zeile_ins_log(): void
     {
-        Log::spy();
-
         $abo = $this->abo('mitgliedschaft', $this->shopA);
+        $geloggt = $this->mitschnitt();
 
         $this->lauf(apply: true);
 
-        Log::shouldHaveReceived('info')
-            ->withArgs(fn (string $message, array $context = []) => str_contains($message, 'moved to the brand of its catalogue entry')
-                && $context['subscription'] === (int) $abo->getKey()
-                && $context['brand_before'] === (int) $this->shopA->getKey()
-                && $context['brand_after'] === (int) $this->shopB->getKey()
-                && $context['for'] === Brands::FOR_SUBSCRIPTION_BACKFILL)
-            ->once();
+        $treffer = array_values(array_filter(
+            $geloggt->getArrayCopy(),
+            fn (array $z) => str_contains($z['message'], 'moved to the brand of its catalogue entry'),
+        ));
+
+        $this->assertCount(1, $treffer, 'nicht genau eine Log-Zeile je Änderung');
+        $this->assertSame((int) $abo->getKey(), $treffer[0]['context']['subscription']);
+        $this->assertSame((int) $this->shopA->getKey(), $treffer[0]['context']['brand_before']);
+        $this->assertSame((int) $this->shopB->getKey(), $treffer[0]['context']['brand_after']);
+        $this->assertSame(Brands::FOR_SUBSCRIPTION_BACKFILL, $treffer[0]['context']['for']);
     }
 
     #[Test]
@@ -336,6 +340,31 @@ class AboMarkeBackfillTest extends TestCase
             'status' => Subscription::STATUS_ACTIVE,
             'starts_at' => now(),
         ]);
+    }
+
+    /**
+     * Echtes Log, nur mitgehoert.
+     *
+     * Nicht `Log::spy()`: der tauscht den ganzen LogManager aus, und auf der
+     * prefer-lowest-Zelle der CI laeuft danach ein Aufruf gegen einen Kanal,
+     * den es nicht mehr gibt („Call to a member function warning() on null").
+     * Lokal war davon nichts zu sehen. Der Zuhoerer laesst das Log stehen.
+     *
+     * @return \ArrayObject<int, array{message: string, context: array<string, mixed>, level: string}>
+     */
+    protected function mitschnitt(): \ArrayObject
+    {
+        $zeilen = new \ArrayObject;
+
+        Log::listen(function ($ereignis) use ($zeilen) {
+            $zeilen[] = [
+                'message' => (string) $ereignis->message,
+                'context' => (array) $ereignis->context,
+                'level' => (string) $ereignis->level,
+            ];
+        });
+
+        return $zeilen;
     }
 
     protected function markeVon(Subscription $abo): int

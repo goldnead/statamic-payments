@@ -309,6 +309,87 @@ class Fulfilment
     }
 
     /**
+     * Ein Zyklus, für den der Anbieter ausdrücklich null Cent oder weniger nennt.
+     *
+     * `null` ist nicht `0`. Sagt der Anbieter über den Betrag nichts — ein Feld,
+     * das seine API-Fassung nicht führt, eine gekürzte Antwort, Mollie, das
+     * dieses Feld gar nicht setzt —, bleibt es beim geerbten Betrag und damit
+     * beim bisherigen Verhalten. Nur eine Zahl, die wirklich dasteht, entscheidet.
+     *
+     * **Und weniger als null ist erst recht nichts.** Eine Rechnung über einen
+     * negativen `total` ist die anteilige Gutschrift, die Stripe bei einem
+     * Downgrade mitten im Zeitraum schreibt. Sie steht auf `paid` — an einer
+     * Rechnung, die Geld zurückgibt, bleibt nichts offen —, sie nennt das Abo,
+     * und `!== 0` ließ sie bis v1.23.1 durch. Dahinter entstand genau der
+     * Schaden, gegen den diese Prüfung überhaupt existiert, nur mit umgekehrtem
+     * Vorzeichen: eine bezahlte Zeile über den vollen Abo-Betrag für einen
+     * Zeitraum, in dem Geld **heraus**ging.
+     *
+     * Der Grund der Rechnung wird bewusst **nicht** gelesen. Auch ein
+     * `subscription_cycle` über null Euro geht denselben Weg — ein Gutschein
+     * über 100 %, ein ausgesetzter Monat —, und das ist gewollt: eine Zeile
+     * über den vollen Abo-Betrag für einen Zeitraum, in dem kein Geld floss,
+     * wäre in jeder Auswertung eine Erfindung, und der Betrag ist hier geerbt,
+     * nicht belegt.
+     *
+     * Der Preis dafür, vollständig: ohne Zahlung verlängert dieser Zeitraum
+     * keinen Zugang, denn verlängert wird nur gegen eine bezahlte Zahlung. Und
+     * es läuft auch `Subscriptions::recordCycle()` nicht, damit kein
+     * `refresh()`, damit bleibt `next_payment_at` auf dem alten Datum stehen —
+     * der Kunde **verliert Zugang**, und die Vereinbarung sieht auf dem Schirm
+     * überfällig aus, obwohl der Anbieter zufrieden ist. Deshalb ist der
+     * Abbruch nicht still.
+     *
+     * **Nur der Erstzyklus ist leise.** Er ist der Probezeitfall, er kommt bei
+     * jeder Anmeldung, und eine Warnung, die immer klingelt, wird nicht
+     * gelesen. Unterschieden wird an `times_charged`: die Spalte startet auf 0
+     * ({@see Subscriptions::startFromPayment()}) und wird ausschließlich von
+     * `recordCycle()` hochgezählt, ist an dieser Stelle also genau dann 0, wenn
+     * noch kein Zyklus gezählt wurde. `next_payment_at` taugt dafür nicht: es
+     * wird bei der Anlage auf `nextPaymentAt ?? startsAt` gesetzt und liegt
+     * damit schon beim allerersten Webhook in der Vergangenheit, wenn der
+     * Anbieter kein Datum mitgeschickt hat.
+     *
+     * Die Abfrage kostet nichts auf dem heißen Pfad: sie steht **hinter** dem
+     * Veto, und ein gewöhnlicher Zyklus mit Betrag — oder einer ohne
+     * Betragsangabe — kommt hier nie an. Ein Abo, das diese Zeile nicht kennt,
+     * gilt als kein Erstzyklus und warnt: ein bezahlter Zyklus für eine
+     * Vereinbarung ohne Zeile ist nie der harmlose Fall.
+     */
+    protected function nothingToCharge(?RemotePayment $remote): bool
+    {
+        if (! $remote?->subscriptionId || $remote->amountCent === null || $remote->amountCent > 0) {
+            return false;
+        }
+
+        $timesCharged = Subscription::query()
+            ->where('provider', $this->gateway->provider())
+            ->where('provider_id', $remote->subscriptionId)
+            ->value('times_charged');
+
+        $erstzyklus = $timesCharged !== null && (int) $timesCharged === 0;
+
+        $message = 'statamic-payments: the provider says this cycle is worth nothing; no payment was booked, no access was extended and the next payment date was not moved.';
+
+        $context = [
+            'provider' => $this->gateway->provider(),
+            'provider_id' => $remote->providerId,
+            'provider_subscription_id' => $remote->subscriptionId,
+            'amount_cent' => $remote->amountCent,
+            'times_charged' => $timesCharged === null ? null : (int) $timesCharged,
+            'first_cycle' => $erstzyklus,
+        ];
+
+        if ($erstzyklus) {
+            Log::info($message, $context);
+        } else {
+            Log::warning($message, $context);
+        }
+
+        return true;
+    }
+
+    /**
      * A row for a cycle the provider charged without being asked.
      *
      * Everything about it is taken from the agreement, never from the webhook:
@@ -329,38 +410,6 @@ class Fulfilment
      * `PaymentPaid`, und was der Kartenherausgeber sagt, ist der bessere
      * Nachweis. Ein geerbtes Land stünde ihm im Weg.
      */
-    /**
-     * Ein Zyklus, für den der Anbieter ausdrücklich null Cent nennt.
-     *
-     * `null` ist nicht `0`. Sagt der Anbieter über den Betrag nichts — ein Feld,
-     * das seine API-Fassung nicht führt, eine gekürzte Antwort, Mollie, das
-     * dieses Feld gar nicht setzt —, bleibt es beim geerbten Betrag und damit
-     * beim bisherigen Verhalten. Nur eine Zahl, die wirklich dasteht, entscheidet.
-     *
-     * Der Grund der Rechnung wird bewusst **nicht** gelesen. Auch ein
-     * `subscription_cycle` über null Euro geht denselben Weg — ein Gutschein
-     * über 100 %, ein ausgesetzter Monat —, und das ist gewollt: eine Zeile
-     * über den vollen Abo-Betrag für einen Zeitraum, in dem kein Geld floss,
-     * wäre in jeder Auswertung eine Erfindung, und der Betrag ist hier geerbt,
-     * nicht belegt. Der Preis dafür: ein solcher Zeitraum verlängert keinen
-     * Zugang, denn verlängert wird nur gegen eine bezahlte Zahlung. Genau
-     * deshalb steht die Zeile im Protokoll und der Abbruch ist nicht still.
-     */
-    protected function nothingToCharge(?RemotePayment $remote): bool
-    {
-        if (! $remote?->subscriptionId || $remote->amountCent !== 0) {
-            return false;
-        }
-
-        Log::info('statamic-payments: the provider says this cycle is worth nothing; no payment was booked for it.', [
-            'provider' => $this->gateway->provider(),
-            'provider_id' => $remote->providerId,
-            'provider_subscription_id' => $remote->subscriptionId,
-        ]);
-
-        return true;
-    }
-
     protected function openCycle(string $providerId, ?RemotePayment $remote): ?Payment
     {
         if (! $remote?->subscriptionId) {

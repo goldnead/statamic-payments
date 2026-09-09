@@ -813,13 +813,22 @@ package runs itself, plus a `meta['cycle_of']` pointer, because the `subscriptio
 empty when `PaymentPaid` fires. See `docs/follow-up-offers.md`.
 
 The amount is inherited too — and only as long as the provider says nothing about it. **A cycle the
-provider prices at zero is not booked at all**, with a line in the log. Stripe writes an invoice
-worth nothing whenever a subscription with a trial period starts, and marks it `paid`; booking it
-would give the buyer a second order and a second entitlement for a charge that happened once. The
-same holds for a cycle waived by a 100% coupon: it books nothing, and it extends no access either,
-because access is extended against a payment that was actually paid. An answer that simply does not
-carry an amount is not the same as one that says zero — then the agreement's amount stands, exactly
-as before.
+provider prices at zero or less is not booked at all**, with a line in the log. Stripe writes an
+invoice worth nothing whenever a subscription with a trial period starts, and marks it `paid`;
+booking it would give the buyer a second order and a second entitlement for a charge that happened
+once. A **negative** total is the same refusal seen from the other side: the pro-rated credit note
+Stripe writes on a mid-period downgrade also stands `paid` and also names the agreement, and booking
+it would create a paid order over the full amount for a period in which money went *out*. An answer
+that simply does not carry an amount is not the same as one that says zero — then the agreement's
+amount stands, exactly as before.
+
+The same refusal catches a cycle waived by a 100% coupon, and there the cost has to be said plainly:
+it books nothing, so it extends no access — access is extended against a payment that was actually
+paid — and `recordCycle()` does not run either, so `next_payment_at` is not moved on. The buyer
+loses access and the agreement looks overdue on screen while the provider is perfectly happy. That
+is why only the **first** cycle logs at `info`: it is the trial invoice, it arrives on every single
+signup, and an alarm that always rings gets ignored. Every later zero-or-less cycle logs at
+`warning` and says outright that no access was extended.
 
 ## A subscription and the access it pays for
 

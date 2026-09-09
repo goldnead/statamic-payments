@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.23.3 — 2026-09-09
+
+### Fixed: a credit note walked straight through the guard from 1.23.1
+
+The check that stops a worthless cycle from being booked asked `amountCent !== 0`. A Stripe invoice
+with a **negative** total — the pro-rated credit note written on a mid-period downgrade — is not
+zero, so it passed. It stands `paid`, because nothing stays open on an invoice that gives money
+back, and it names the agreement. Behind the guard it did exactly the damage 1.23.1 had just
+removed, with the sign reversed: a paid order over the full subscription amount for a period in
+which money went **out**, a second entitlement, and `times_charged` moved on.
+
+The guard now passes only two things: an amount the provider did not state (`null`, inherited as
+before, unchanged for Mollie) and an amount above zero. Zero or less aborts.
+
+`amountCent` remains a veto and is still **not** read as a price. An invoice for a partial period
+continues to book the inherited amount; that is a named follow-up, not part of this release.
+
+### Changed: a zero cycle after the first one is a warning, not a note
+
+The abort is logged, and until now always at `info`. That is right for the trial invoice — it
+arrives on every single signup, and an alarm that always rings gets ignored — but far too quiet for
+the other case the guard deliberately covers: a cycle waived by a 100% coupon or a month suspended.
+
+The consequence there is larger than the comment admitted. Without a payment `recordCycle()` does
+not run, so `refresh()` does not run, so `next_payment_at` stays on the old date. The buyer **loses
+access** and the agreement reads overdue on screen while the provider is perfectly happy.
+
+Anything that is not the first cycle now logs at `warning`, and the message says outright that no
+payment was booked, no access was extended and the payment date was not moved. First cycle is told
+apart by `times_charged`: the column starts at `0` and is only ever incremented by `recordCycle()`.
+`next_payment_at` was rejected for the job — it is set to `nextPaymentAt ?? startsAt` at creation
+and is therefore already in the past on the very first webhook when the provider sent no date. The
+lookup costs nothing on the hot path: it sits behind the veto, so an ordinary cycle never reaches
+it. An agreement this site has no row for counts as not-the-first-cycle and warns.
+
+### Fixed: the docblock over `openCycle()` had drifted off it
+
+1.23.1 inserted `nothingToCharge()` between the old comment block and the function it describes,
+leaving the block orphaned and `openCycle()` undocumented. Moved back, word for word.
+
 ## 1.23.2 — 2026-09-09
 
 ### Fixed: paying the last instalment took the access away

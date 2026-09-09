@@ -11,6 +11,7 @@ use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Testing\TestResponse;
 use PHPUnit\Framework\Attributes\Test;
 
@@ -97,8 +98,13 @@ class ProbezeitrechnungTest extends TestCase
         );
     }
 
-    /** Das Abo und die eine Zahlung, die es an der Kasse gab. */
-    protected function abgeschlossenesAbo(): Subscription
+    /**
+     * Das Abo und die eine Zahlung, die es an der Kasse gab.
+     *
+     * @param  int  $bereitsAbgebucht  wie viele Zyklen schon gezaehlt sind; 0 ist der Zustand
+     *                                 direkt nach der Kasse und damit der Probezeitfall
+     */
+    protected function abgeschlossenesAbo(int $bereitsAbgebucht = 0): Subscription
     {
         $abo = Subscription::create([
             'provider' => 'stripe',
@@ -109,7 +115,7 @@ class ProbezeitrechnungTest extends TestCase
             'currency' => 'EUR',
             'interval' => '1 month',
             'times' => null,
-            'times_charged' => 0,
+            'times_charged' => $bereitsAbgebucht,
             'status' => Subscription::STATUS_ACTIVE,
             'starts_at' => Carbon::now()->addDays(14),
             'next_payment_at' => Carbon::now()->addDays(14),
@@ -227,5 +233,102 @@ class ProbezeitrechnungTest extends TestCase
         $this->assertTrue($zyklus->isPaid());
         $this->assertSame(1900, $zyklus->amount_cent);
         $this->assertSame(1, $abo->fresh()->times_charged);
+    }
+
+    /**
+     * Die Gutschrift, die durch den Waechter von v1.23.1 hindurchging.
+     *
+     * Ein Downgrade mitten im Monat laesst Stripe eine Rechnung ueber einen
+     * **negativen** `total` schreiben: die anteilige Gutschrift fuer den
+     * Zeitraum, den der Kaeufer zum alten Preis schon bezahlt hat. Sie steht
+     * auf `paid` — an einer Rechnung, die Geld zurueckgibt, bleibt nichts
+     * offen — und sie nennt das Abo.
+     *
+     * `amountCent !== 0` liess sie durch, und dahinter entstand exakt der
+     * Schaden, den v1.23.1 behoben hat: eine bezahlte Zeile ueber den vollen
+     * Abo-Betrag fuer einen Zeitraum, in dem kein Geld **hereinkam**, ein
+     * zweiter Zugang und ein hochgezaehlter Zyklus-Zaehler. Schlimmer als der
+     * Nullfall sogar, denn hier ist das Vorzeichen des echten Betrags dem
+     * gebuchten entgegengesetzt.
+     */
+    #[Test]
+    public function eine_gutschrift_ist_kein_bezahlter_zyklus(): void
+    {
+        $abo = $this->abgeschlossenesAbo();
+        $this->stripeAntwortet([
+            'total' => -840,
+            'amount_due' => -840,
+            'amount_paid' => 0,
+            'billing_reason' => 'subscription_update',
+        ]);
+
+        $this->assertSame(1, Payment::count());
+        $this->assertSame(1, Entitlement::count());
+
+        $this->deliver('evt_gutschrift', 'invoice.paid', ['id' => 'in_probe', 'object' => 'invoice'])->assertOk();
+
+        $this->assertFalse(
+            Payment::query()->where('provider_id', 'in_probe')->exists(),
+            'eine Gutschrift hat einen bezahlten Auftrag ueber den vollen Abo-Betrag angelegt',
+        );
+        $this->assertSame(1, Payment::count(), 'der Kaeufer sieht eine Bestellung fuer eine Rueckerstattung');
+        $this->assertSame(1, Entitlement::count(), 'eine Gutschrift hat einen zweiten Zugang vergeben');
+        $this->assertSame(0, $abo->fresh()->times_charged, 'eine Gutschrift hat den Zyklus-Zaehler hochgezaehlt');
+    }
+
+    /**
+     * Der Erstzyklus bleibt leise.
+     *
+     * Die Probezeitrechnung kommt bei **jeder** Anmeldung. Eine Warnung, die
+     * bei jeder Anmeldung klingelt, wird nach der dritten nicht mehr gelesen —
+     * und dann faellt der Fall darunter, um den es wirklich geht, nicht mehr auf.
+     */
+    #[Test]
+    public function die_probezeitrechnung_bleibt_leise(): void
+    {
+        $this->abgeschlossenesAbo();
+        $this->stripeAntwortet();
+
+        Log::spy();
+
+        $this->deliver('evt_probe_leise', 'invoice.paid', ['id' => 'in_probe', 'object' => 'invoice'])->assertOk();
+
+        Log::shouldHaveReceived('info')->withArgs(
+            fn (string $message) => str_contains($message, 'worth nothing'),
+        )->once();
+
+        Log::shouldNotHaveReceived('warning', [
+            \Mockery::on(fn (string $message) => str_contains($message, 'worth nothing')),
+            \Mockery::any(),
+        ]);
+    }
+
+    /**
+     * Ein Zyklus ueber null Euro mitten im Lauf ist keine Kleinigkeit.
+     *
+     * Ein Gutschein ueber 100 % oder ein ausgesetzter Monat geht denselben Weg
+     * wie die Probezeitrechnung, und das ist gewollt — der Betrag ist hier
+     * geerbt, nicht belegt. Die Folge ist aber groesser, als der Kommentar bis
+     * v1.23.1 zugab: ohne Zahlung laeuft auch `Subscriptions::recordCycle()`
+     * nicht, damit kein `refresh()`, damit bleibt `next_payment_at` stehen und
+     * der Kaeufer **verliert Zugang**. Das gehoert auf `warning` und der Satz
+     * muss es aussprechen.
+     */
+    #[Test]
+    public function ein_zyklus_ueber_null_euro_nach_dem_ersten_warnt_laut(): void
+    {
+        $this->abgeschlossenesAbo(bereitsAbgebucht: 3);
+        $this->stripeAntwortet(['total' => 0, 'amount_due' => 0, 'amount_paid' => 0, 'billing_reason' => 'subscription_cycle']);
+
+        Log::spy();
+
+        $this->deliver('evt_null_im_lauf', 'invoice.paid', ['id' => 'in_probe', 'object' => 'invoice'])->assertOk();
+
+        Log::shouldHaveReceived('warning')->withArgs(
+            fn (string $message) => str_contains($message, 'worth nothing')
+                && str_contains($message, 'no access was extended'),
+        )->once();
+
+        $this->assertFalse(Payment::query()->where('provider_id', 'in_probe')->exists());
     }
 }

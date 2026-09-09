@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.24.1 — 2026-09-09
+
+### Fixed: a one-click upsell carried the brand of the payment before it
+
+`FollowUp::accept()` stamped `brand_id` from `$original->brand_id`. As inheritance that is well
+meant — no request runs here, a follow-up is accepted from a background run too, and
+`Brands::stampId()` would answer zero — but it answers the wrong question. Asked is not "whose
+payment was the previous one" but "whose offer is being sold here".
+
+The two answers come apart in two real cases. A payment from before `statamic-funnels` 1.15.2 was
+stamped with the default brand, because a funnel runs under `/f/<handle>` where `SetBrandForSite`
+finds neither host nor path segment — and the visit cookie lasts a month, so every upsell on such a
+payment inherited the wrong brand onward, with invoice series, sender and withdrawal text attached.
+And any funnel whose upsell belongs to a different offer, and therefore a different brand, than its
+first offer.
+
+The charge now takes the brand of the catalogue entry being sold. Where that differs from the
+inherited one, the sale still happens — the buyer pressed the order button, and an operator's
+configuration mistake is not something a buyer should pay for — but it is a `warning` naming both
+brands and the handle. Where the catalogue entry names no brand (a configured product, a seeder, an
+import), the inheritance stands and says so at `info`. Both are skipped on a single-brand install,
+where every brand is zero and a line per order would be noise — asked as `Brands::mode()`, not as
+`multiBrand()`, because the latter also answers false when the sibling refused to say. That refusal
+is the moment a wrong brand is most likely and least reconstructible, so the check runs there too.
+
+`brand_id` reaches this code the same way `interval` and `times` reach the subscription code:
+`Catalogue::find()` keeps whatever else the catalogue declared. An `int` or a string of digits — an
+Eloquent column without a cast hands over the latter — counts; anything else is not a brand id, and
+is inherited past with a warning of its own rather than dressed up as "names no brand". A `(int)`
+cast would have turned a stray array into brand `1`, which on some install is a real tenant.
+
+**This half alone does not fix a live site.** No shipped resolver returns `brand_id` yet, so on
+today's installs every follow-up takes the `info` branch and behaves exactly as before.
+`statamic-offers` and `statamic-products` have to hand the key over before the charge can land on
+the selling brand; that is filed separately. What ships here is the payments side and its proof.
+
 ## 1.24.0 — 2026-09-09
 
 ### Fixed: the entitlements bridge never asked the host who the buyer is

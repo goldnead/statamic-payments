@@ -1043,20 +1043,24 @@ the brand a row was created in, inherited from the parent row where a webhook cr
 on the single-brand installs that are the great majority. In multi-brand mode a row on `0` belongs
 to nobody and is shown to nobody. Fail-closed, on purpose.
 
-A one-click follow-up charge is the exception to the inheritance, and the reason is that a
-follow-up is a **sale**: it belongs to whoever sells it, not to whoever sold the order before it. So
-it takes the `brand_id` of the catalogue entry being charged, and falls back on the parent row's
-brand only where the catalogue names none. A mismatch between the two is logged as a warning with
-both brands and the handle, and the charge goes through anyway — the buyer pressed the order button,
-and a funnel that offers another brand's upsell is the operator's mistake to see, not the buyer's to
-pay for. An `int` or a string of digits counts as a brand id; anything else is inherited past with a
-warning of its own, rather than cast into whatever number PHP would make of it.
+A one-click follow-up charge and a new agreement are the exceptions to the inheritance, and the
+reason is that both are a **sale**: they belong to whoever sells them, not to whoever sold the order
+before. So each takes the `brand_id` of the catalogue entry being charged, and falls back on the
+parent row's brand only where the catalogue names none. A mismatch between the two is logged as a
+warning with both brands and the handle, and the charge goes through anyway — the buyer pressed the
+order button, and a funnel that offers another brand's upsell is the operator's mistake to see, not
+the buyer's to pay for. An `int` or a string of digits counts as a brand id; anything else is
+inherited past with a warning of its own, rather than cast into whatever number PHP would make of
+it. One rule, one implementation: `Brands::forCatalogueEntry()`.
+
+For an agreement it matters more than for a charge. A follow-up stamped wrong is one line; an
+agreement stamped wrong is every cycle, every invoice and its visibility in the portal, for as long
+as it runs.
 
 **A contributed catalogue entry only reaches this by returning `brand_id` from its resolver** — the
-same passthrough that carries `interval` and `times` — and none of the addons that contribute
-entries does so yet. Until one does, a follow-up on such an entry inherits exactly as before and
-says so at `info`. The rule is in place; what a given install gets out of it depends on what its
-catalogue declares.
+same passthrough that carries `interval` and `times`. `statamic-offers` does so from 1.11.2 (the
+offer's own brand, not the product's underneath) and `statamic-products` from 1.6.1. On an older
+version of either, a sale on such an entry inherits exactly as before and says so at `info`.
 
 #### Rows that predate the column
 

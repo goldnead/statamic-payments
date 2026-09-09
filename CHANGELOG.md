@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.24.2 — 2026-09-09
+
+### Fixed: an agreement belongs to the brand that sold it, not to its first payment
+
+`Subscriptions::startFromPayment()` wrote `'brand_id' => $payment->brand_id` while the catalogue
+entry sat loaded two lines above it. Same shape as the follow-up charge 1.24.1 fixed, with a much
+longer reach: an upsell stamped wrong is one line, an agreement stamped wrong is every cycle, every
+invoice and its visibility in the portal, for as long as it runs.
+
+The rule is the one 1.24.1 settled and it is now literally the same code, moved to
+`Brands::forCatalogueEntry()` and called from both places. The offer wins; a catalogue entry that
+names no brand keeps the inheritance and says so with `info`; one that names something that is not a
+brand id keeps it too and says so with `warning`; a mismatch is sold under the offer's brand with a
+`warning` naming both. On a single-brand install none of it runs and nothing is logged.
+
+Two copies of a decision about money are the one that later learns something and the one that does
+not, so `FollowUp::brandFor()` is gone rather than duplicated. It was `protected`, so no caller
+outside the package could reach it — a subclass could have overridden it, and such an override is no
+longer followed.
+
+Every one of those log lines now carries `for`, either `follow-up` or `subscription`. The sentence
+is the same for both; the work behind it is not. On a follow-up an operator straightens out a
+funnel, on an agreement they also have to move a running row that every cycle and every invoice
+hangs off.
+
+And a catalogue that no longer knows the thing being sold is its own case, at `warning`, rather than
+passing for "names no brand" at `info`. The callers ask the catalogue a second time (`find(…) ?? []`)
+and an offer can be deleted, deactivated or run out of its window while the webhook is working —
+brand, amount and currency then all fall back to the payment at once, and that is not the everyday
+event the `info` line describes.
+
+No backfill run for existing rows. `payments:brand-backfill` derives a brand rather than choosing
+one, and for an agreement whose first payment was itself stamped wrong there is nothing to derive
+from. Measured on 2026-09-09: in the addon playground 4 of 10 agreements would land on a different
+brand, on `adg-staging` none of 1, because that install has a single brand. Whether those rows get
+moved is a decision, not a migration.
+
+**This needs `statamic-offers` 1.11.2 or `statamic-products` 1.6.1 to change anything.** Older
+versions of both leave `brand_id` out of the catalogue entry, so every sale lands in the inheritance
+branch and behaves exactly as before, plus one `info` line. No constraint was added for it: the
+dependency runs the other way — those packages require this one — and this package must keep working
+on its own.
+
 ## 1.24.1 — 2026-09-09
 
 ### Fixed: a one-click upsell carried the brand of the payment before it

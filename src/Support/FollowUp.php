@@ -129,123 +129,6 @@ class FollowUp
     }
 
     /**
-     * Wessen Marke auf der Folgezahlung steht.
-     *
-     * Geerbt wurde sie bisher von der Vorgaengerzahlung, und als Erbe ist das
-     * richtig gedacht: hier laeuft keine Anfrage mit einer Marke — ein
-     * Nachfassangebot wird auch aus einem Hintergrundlauf angenommen, und
-     * {@see Brands::stampId()} gaebe dort null. Nur beantwortet das Erbe die
-     * falsche Frage. Gefragt ist nicht „wessen Zahlung war die vorige", sondern
-     * „wessen Angebot wird hier verkauft".
-     *
-     * Die beiden Antworten gehen auseinander, sobald die Vorgaengerzahlung
-     * falsch gestempelt war — jede Funnel-Zahlung von vor `statamic-funnels`
-     * 1.15.2 trug die Standardmarke, und der Besuchs-Cookie haelt einen Monat —
-     * oder sobald ein Funnel ein Upsell fuehrt, das einer anderen Marke gehoert
-     * als sein Erstangebot.
-     *
-     * **Das Angebot gewinnt, und der Verkauf findet trotzdem statt.** Der
-     * Kaeufer hat auf den Bestellknopf geklickt; ein Konfigurationsfehler des
-     * Betreibers ist nichts, wofuer eine Bestellung abgelehnt werden darf. Er
-     * gehoert aber ins Log, mit beiden Marken und dem Handle, denn ein fremdes
-     * Upsell ist entweder Absicht oder ein Fehler, und keins von beidem darf
-     * man raten.
-     *
-     * Nennt der Katalogeintrag keine Marke — Altbestand, ein Produkt aus der
-     * Config, ein Seeder —, bleibt es beim Erbe. Das ist die einzige Antwort,
-     * die keine Erfindung ist, und `info` statt `warning`, weil sie richtig
-     * ist und nur festhaelt, dass am Angebot etwas fehlt.
-     *
-     * Auf einem Einzelmarken-System ueberhaupt keine Frage: dort ist jede Marke
-     * null, und ein Hinweis je Bestellung waere reiner Laerm. Gefragt wird nach
-     * {@see Brands::mode()} und nicht nach `multiBrand()`, weil der Unterschied
-     * genau hier haengt — `multiBrand()` sagt auch dann `false`, wenn das
-     * Geschwister nicht antworten wollte ({@see Brands::UNKNOWN}), und das ist
-     * der Augenblick, in dem am ehesten etwas schiefgeht. Ein stiller Verkauf
-     * unter der geerbten Marke waere dann nicht mehr zu rekonstruieren, also
-     * laeuft die Pruefung auch da.
-     *
-     * @param  array<string, mixed>  $product  Der Katalogeintrag. `brand_id`
-     *                                         reicht dieselbe Durchreiche her wie `interval` und `times`:
-     *                                         {@see Catalogue::find()} behaelt, was der Katalog sonst noch deklariert.
-     */
-    protected function brandFor(array $product, Payment $original): int
-    {
-        $geerbt = (int) $original->brand_id;
-
-        if (Brands::mode() === Brands::SINGLE) {
-            return $geerbt;
-        }
-
-        // Nicht der blosse Cast: der Katalog ist offen, und der Eintrag kommt
-        // womoeglich aus dem Resolver eines fremden Pakets. `(int)` machte aus
-        // einem versehentlichen Array eine `1` — also eine echte Marke, die es
-        // hier zufaellig gibt. Eine Ziffernfolge im Text zaehlt dagegen: eine
-        // Eloquent-Spalte ohne Cast liefert genau die.
-        $roh = $product['brand_id'] ?? null;
-        $desAngebots = match (true) {
-            is_int($roh) => $roh,
-            is_string($roh) && ctype_digit($roh) => (int) $roh,
-            default => 0,
-        };
-        $handle = (string) ($product['handle'] ?? '');
-
-        if ($desAngebots < 1) {
-            // „Nichts gesagt" und „etwas gesagt, das keine Marke ist" sind
-            // nicht dasselbe, und nur das erste ist harmlos. Beim zweiten wird
-            // ebenfalls geerbt — raten waere schlimmer —, aber der Grund steht
-            // dann laut da, statt als „nennt keine Marke" verkleidet zu werden.
-            if ($roh === null || $roh === 0 || $roh === '0') {
-                Log::info('statamic-payments: this follow-up offer names no brand, so the charge inherits the brand of the payment it follows.', [
-                    'product' => $handle,
-                    'original_brand' => $geerbt,
-                    'original_payment' => $original->getKey(),
-                ]);
-            } else {
-                Log::warning('statamic-payments: this follow-up offer names something that is not a usable brand id, so the charge inherits the brand of the payment it follows.', [
-                    'product' => $handle,
-                    // Der Typ und nur bei einem Skalar der Wert: was hier steht,
-                    // kommt aus fremdem Code und gehoert nicht ungeprueft in
-                    // eine Logzeile.
-                    'brand_id_type' => get_debug_type($roh),
-                    'brand_id' => is_scalar($roh) ? $roh : null,
-                    'original_brand' => $geerbt,
-                    'original_payment' => $original->getKey(),
-                ]);
-            }
-
-            return $geerbt;
-        }
-
-        if ($desAngebots !== $geerbt) {
-            // Zwei sehr verschiedene Lagen, und die Beschriftung entscheidet,
-            // ob jemand etwas tut. Eine Vorgaengerzahlung auf 0 gehoerte nie
-            // einer Marke: entstanden, wo keine galt — Webhook, Kommando,
-            // Warteschlange —, also stempelte {@see Brands::stampId()} null.
-            // Dass das Upsell jetzt eine Marke bekommt, ist die Reparatur und
-            // nicht der Fehler.
-            //
-            // **Der Altbestand von vor `statamic-funnels` 1.15.2 steht
-            // ausdruecklich nicht hier.** Der trug die *Standardmarke*, und die
-            // ist groesser als null. Er landet also in der zweiten Meldung, und
-            // das ist richtig: von aussen ist eine falsch gestempelte alte
-            // Zahlung von einem Funnel mit fremdem Upsell nicht zu
-            // unterscheiden, und beide will der Betreiber sehen.
-            Log::warning($geerbt < 1
-                ? 'statamic-payments: the payment this follow-up follows carries no brand, so the charge takes the brand of the offer instead of inheriting none.'
-                : 'statamic-payments: this follow-up offer belongs to a different brand than the payment it follows; the charge is made under the brand of the offer.', [
-                    'product' => $handle,
-                    'offer' => is_string($product['offer'] ?? null) ? $product['offer'] : null,
-                    'offer_brand' => $desAngebots,
-                    'original_brand' => $geerbt,
-                    'original_payment' => $original->getKey(),
-                ]);
-        }
-
-        return $desAngebots;
-    }
-
-    /**
      * Charge the accepted offer.
      *
      * Returns the new payment, or null if it was refused — and a refusal is the
@@ -302,9 +185,9 @@ class FollowUp
                 'provider' => $original->provider,
                 'provider_id' => Payment::PLACEHOLDER_PROVIDER_PREFIX.Str::uuid(),
                 // Die Marke des verkauften Angebots, sonst das Erbe. Siehe
-                // {@see self::brandFor()} — dort steht, warum das Erbe allein
-                // die falsche Frage beantwortet.
-                'brand_id' => $this->brandFor($product, $original),
+                // {@see Brands::forCatalogueEntry()} — dort steht, warum das
+                // Erbe allein die falsche Frage beantwortet.
+                'brand_id' => Brands::forCatalogueEntry($product, $original, Brands::FOR_FOLLOW_UP),
                 'product' => $product['handle'],
                 'amount_cent' => $product['amount_cent'],
                 'currency' => $product['currency'],

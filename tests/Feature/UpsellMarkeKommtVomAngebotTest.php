@@ -213,10 +213,18 @@ class UpsellMarkeKommtVomAngebotTest extends TestCase
         // Konfigurationsfehler, und keins von beidem darf man raten.
         Log::shouldHaveReceived('warning')->withArgs(
             function (string $message, array $context = []) {
-                return str_contains($message, 'brand')
+                // Auf das **unterscheidende** Stueck geprueft, nicht auf
+                // „brand": alle vier Meldungen dieser Regel enthalten das Wort,
+                // und eine Fassung, die die Bedeutung umdreht, kaeme damit
+                // durch.
+                return str_contains($message, 'different brand')
                     && ($context['product'] ?? null) === 'begleit-cd'
                     && (int) ($context['offer_brand'] ?? 0) === self::MARKE_B
-                    && (int) ($context['original_brand'] ?? 0) === self::MARKE_A;
+                    && (int) ($context['original_brand'] ?? 0) === self::MARKE_A
+                    // Wobei der Betreiber gerade steht: hier zieht er einen
+                    // Funnel gerade, bei einer Vereinbarung muesste er
+                    // zusaetzlich eine laufende Zeile umtragen.
+                    && ($context['for'] ?? null) === Brands::FOR_FOLLOW_UP;
             }
         )->once();
     }
@@ -248,9 +256,10 @@ class UpsellMarkeKommtVomAngebotTest extends TestCase
         // Leise, aber nicht stumm: das Erbe ist hier richtig und trotzdem eine
         // Aussage darueber, dass am Angebot etwas fehlt.
         Log::shouldHaveReceived('info')->withArgs(
-            fn (string $message, array $context = []) => str_contains($message, 'brand')
+            fn (string $message, array $context = []) => str_contains($message, 'names no brand')
                 && ($context['product'] ?? null) === 'zugabe'
                 && (int) ($context['original_brand'] ?? 0) === self::MARKE_A
+                && ($context['for'] ?? null) === Brands::FOR_FOLLOW_UP
         )->once();
 
         // Pauschal, und das ist hier die schaerfere Fassung.

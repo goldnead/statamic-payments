@@ -428,10 +428,17 @@ class Subscriptions
         // no provider id is a thing to notice and repair. A subscription at the
         // provider with no row is not.
         $subscription = Subscription::create([
-            // Von der ersten Zahlung geerbt. Sie entstand im Browser des
-            // Käufers, wo die Marke gesetzt war; dieses Abo entsteht im
-            // Webhook, wo sie es nicht ist.
-            'brand_id' => $payment->brand_id,
+            // Die Marke des verkauften Angebots, sonst das Erbe der ersten
+            // Zahlung. Siehe {@see Brands::forCatalogueEntry()} — dieselbe
+            // Regel wie bei einer Folgezahlung, und derselbe Code.
+            //
+            // **Hier wiegt sie schwerer als dort.** Ein falsch gestempeltes
+            // Upsell ist eine Zeile; die Marke einer Vereinbarung steht fuer
+            // deren ganze Laufzeit fest und haengt an jedem Zyklus, jeder
+            // Rechnung und der Sichtbarkeit im Portal, bis jemand sie von Hand
+            // umtraegt. Der Katalogeintrag stand die ganze Zeit schon geladen
+            // da; gelesen wurde er nur nicht.
+            'brand_id' => Brands::forCatalogueEntry($catalogue, $payment, Brands::FOR_SUBSCRIPTION),
             // The provider that will actually charge the cycles — the same one
             // resolved above, so a free first payment leaves an agreement
             // stamped with the site's provider rather than with `free`.

@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Support;
 
+use Goldnead\StatamicPayments\Models\Payment;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -43,6 +44,12 @@ final class Brands
 
     /** The sibling is installed and would not answer. Nothing may be read. */
     public const UNKNOWN = 'unknown';
+
+    /** {@see self::forCatalogueEntry()}: eine Folgezahlung entsteht. */
+    public const FOR_FOLLOW_UP = 'follow-up';
+
+    /** {@see self::forCatalogueEntry()}: eine Vereinbarung entsteht. */
+    public const FOR_SUBSCRIPTION = 'subscription';
 
     /**
      * Whether the sibling is installed and usable at all.
@@ -129,6 +136,164 @@ final class Brands
         } catch (Throwable) {
             return self::NONE;
         }
+    }
+
+    /**
+     * Wessen Marke auf einer Zeile steht, die aus einer Zahlung entsteht.
+     *
+     * Geerbt wurde sie bisher von dieser Zahlung, und als Erbe ist das richtig
+     * gedacht: hier laeuft keine Anfrage mit einer Marke — ein Nachfassangebot
+     * wird auch aus einem Hintergrundlauf angenommen, eine Vereinbarung
+     * entsteht im Webhook — und {@see self::stampId()} gaebe dort null. Nur
+     * beantwortet das Erbe die falsche Frage. Gefragt ist nicht „wessen Zahlung
+     * war das", sondern „wessen Angebot wird hier verkauft".
+     *
+     * Die beiden Antworten gehen auseinander, sobald die Zahlung falsch
+     * gestempelt war — jede Funnel-Zahlung von vor `statamic-funnels` 1.15.2
+     * trug die Standardmarke, und der Besuchs-Cookie haelt einen Monat — oder
+     * sobald ein Funnel etwas fuehrt, das einer anderen Marke gehoert als sein
+     * Erstangebot.
+     *
+     * **Das Angebot gewinnt, und der Verkauf findet trotzdem statt.** Der
+     * Kaeufer hat auf den Bestellknopf geklickt; ein Konfigurationsfehler des
+     * Betreibers ist nichts, wofuer eine Bestellung abgelehnt werden darf. Er
+     * gehoert aber ins Log, mit beiden Marken und dem Handle, denn ein fremdes
+     * Angebot ist entweder Absicht oder ein Fehler, und keins von beidem darf
+     * man raten.
+     *
+     * Nennt der Katalogeintrag keine Marke — Altbestand, ein Produkt aus der
+     * Config, ein Seeder —, bleibt es beim Erbe. Das ist die einzige Antwort,
+     * die keine Erfindung ist, und `info` statt `warning`, weil sie richtig ist
+     * und nur festhaelt, dass am Angebot etwas fehlt.
+     *
+     * Auf einem Einzelmarken-System ueberhaupt keine Frage: dort ist jede Marke
+     * null, und ein Hinweis je Bestellung waere reiner Laerm. Gefragt wird nach
+     * {@see self::mode()} und nicht nach {@see self::multiBrand()}, weil der
+     * Unterschied genau hier haengt — `multiBrand()` sagt auch dann `false`,
+     * wenn das Geschwister nicht antworten wollte ({@see self::UNKNOWN}), und
+     * das ist der Augenblick, in dem am ehesten etwas schiefgeht. Ein stiller
+     * Verkauf unter der geerbten Marke waere dann nicht mehr zu rekonstruieren,
+     * also laeuft die Pruefung auch da.
+     *
+     * **Eine Entscheidung ueber Geld, an einer Stelle.** Gerufen von
+     * {@see FollowUp::accept()} fuer eine Folgezahlung und von
+     * {@see Subscriptions::startFromPayment()} fuer eine Vereinbarung. Zwei
+     * Kopien waeren die eine, die spaeter etwas dazulernt, und die andere — und
+     * beim Abo waere der Preis dafuer besonders hoch, weil dessen Marke fuer
+     * die ganze Laufzeit feststeht: jeder Zyklus, jede Rechnung, die
+     * Sichtbarkeit im Portal.
+     *
+     * @param  array<string, mixed>  $eintrag  Der Katalogeintrag. `brand_id`
+     *                                         reicht dieselbe Durchreiche her wie `interval` und `times`:
+     *                                         {@see Catalogue::find()} behaelt, was der Katalog sonst noch deklariert.
+     * @param  self::FOR_*  $anlass  Was hier entsteht, und der Schluessel steht
+     *                               im Log. **Er ist keine Zierde.** Die Meldung
+     *                               ist derselbe Satz fuer beide Faelle, die
+     *                               Arbeit dahinter aber nicht: bei einer
+     *                               Folgezahlung zieht der Betreiber einen
+     *                               Funnel gerade, bei einer Vereinbarung muss
+     *                               er zusaetzlich eine laufende Zeile umtragen,
+     *                               an der jeder Zyklus und jede Rechnung
+     *                               haengt. Ohne diesen Schluessel steht das
+     *                               nicht in der Meldung und ist nur ueber
+     *                               `original_payment` nachzuschlagen.
+     */
+    public static function forCatalogueEntry(array $eintrag, Payment $geerbtVon, string $anlass): int
+    {
+        $geerbt = (int) $geerbtVon->brand_id;
+
+        if (self::mode() === self::SINGLE) {
+            return $geerbt;
+        }
+
+        // **Gar kein Eintrag ist etwas anderes als ein Eintrag ohne Marke**,
+        // und ohne diesen Zweig saehen die beiden im Log gleich aus.
+        //
+        // Die Aufrufer holen den Eintrag mit `find($handle) ?? []`, und `null`
+        // heisst hier nicht „nichts deklariert", sondern „zur Laufzeit nicht
+        // mehr auffindbar": ein Angebot geloescht, deaktiviert oder aus seinem
+        // Zeitfenster gelaufen, waehrend der Webhook lief. Dann faellt nicht
+        // nur die Marke aufs Erbe zurueck, sondern auch Betrag und Waehrung —
+        // und wer nach so etwas sucht, filtert nach `warning`, nicht nach einer
+        // `info`-Zeile mit leerem `product`.
+        if ($eintrag === []) {
+            Log::warning('statamic-payments: the catalogue no longer knows the thing being sold here, so the new row inherits everything from the payment it grew out of, brand included.', [
+                'original_brand' => $geerbt,
+                'original_payment' => $geerbtVon->getKey(),
+                'for' => $anlass,
+            ]);
+
+            return $geerbt;
+        }
+
+        // Nicht der blosse Cast: der Katalog ist offen, und der Eintrag kommt
+        // womoeglich aus dem Resolver eines fremden Pakets. `(int)` machte aus
+        // einem versehentlichen Array eine `1` — also eine echte Marke, die es
+        // hier zufaellig gibt. Eine Ziffernfolge im Text zaehlt dagegen: eine
+        // Eloquent-Spalte ohne Cast liefert genau die.
+        $roh = $eintrag['brand_id'] ?? null;
+        $desAngebots = match (true) {
+            is_int($roh) => $roh,
+            is_string($roh) && ctype_digit($roh) => (int) $roh,
+            default => 0,
+        };
+        $handle = (string) ($eintrag['handle'] ?? '');
+
+        if ($desAngebots < 1) {
+            // „Nichts gesagt" und „etwas gesagt, das keine Marke ist" sind
+            // nicht dasselbe, und nur das erste ist harmlos. Beim zweiten wird
+            // ebenfalls geerbt — raten waere schlimmer —, aber der Grund steht
+            // dann laut da, statt als „nennt keine Marke" verkleidet zu werden.
+            if ($roh === null || $roh === 0 || $roh === '0') {
+                Log::info('statamic-payments: this catalogue entry names no brand, so the new row inherits the brand of the payment it grew out of.', [
+                    'product' => $handle,
+                    'original_brand' => $geerbt,
+                    'original_payment' => $geerbtVon->getKey(),
+                    'for' => $anlass,
+                ]);
+            } else {
+                Log::warning('statamic-payments: this catalogue entry names something that is not a usable brand id, so the new row inherits the brand of the payment it grew out of.', [
+                    'product' => $handle,
+                    // Der Typ und nur bei einem Skalar der Wert: was hier steht,
+                    // kommt aus fremdem Code und gehoert nicht ungeprueft in
+                    // eine Logzeile.
+                    'brand_id_type' => get_debug_type($roh),
+                    'brand_id' => is_scalar($roh) ? $roh : null,
+                    'original_brand' => $geerbt,
+                    'original_payment' => $geerbtVon->getKey(),
+                    'for' => $anlass,
+                ]);
+            }
+
+            return $geerbt;
+        }
+
+        if ($desAngebots !== $geerbt) {
+            // Zwei sehr verschiedene Lagen, und die Beschriftung entscheidet,
+            // ob jemand etwas tut. Eine Zahlung auf 0 gehoerte nie einer Marke:
+            // entstanden, wo keine galt — Webhook, Kommando, Warteschlange —,
+            // also stempelte {@see self::stampId()} null. Dass die neue Zeile
+            // jetzt eine Marke bekommt, ist die Reparatur und nicht der Fehler.
+            //
+            // **Der Altbestand von vor `statamic-funnels` 1.15.2 steht
+            // ausdruecklich nicht hier.** Der trug die *Standardmarke*, und die
+            // ist groesser als null. Er landet also in der zweiten Meldung, und
+            // das ist richtig: von aussen ist eine falsch gestempelte alte
+            // Zahlung von einem Funnel mit fremdem Angebot nicht zu
+            // unterscheiden, und beide will der Betreiber sehen.
+            Log::warning($geerbt < 1
+                ? 'statamic-payments: the payment this grew out of carries no brand, so the new row takes the brand of the offer instead of inheriting none.'
+                : 'statamic-payments: this offer belongs to a different brand than the payment it grew out of; the new row is made under the brand of the offer.', [
+                    'product' => $handle,
+                    'offer' => is_string($eintrag['offer'] ?? null) ? $eintrag['offer'] : null,
+                    'offer_brand' => $desAngebots,
+                    'original_brand' => $geerbt,
+                    'original_payment' => $geerbtVon->getKey(),
+                    'for' => $anlass,
+                ]);
+        }
+
+        return $desAngebots;
     }
 
     /**

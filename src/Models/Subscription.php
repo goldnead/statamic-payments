@@ -77,9 +77,15 @@ class Subscription extends Model
 
     /**
      * Whose agreement this is. Same rule as on {@see Payment}: only set where
-     * the caller did not say, so that an agreement created from a first payment
-     * inherits that payment's brand instead of asking a webhook which tenant it
-     * is standing in.
+     * the caller did not say, so that an agreement created in a webhook does
+     * not ask which tenant it is standing in — there is none.
+     *
+     * **The caller does say, for an agreement out of a first payment.** Since
+     * 1.24.2 {@see Subscriptions::startFromPayment()} works the brand out with
+     * {@see Brands::forCatalogueEntry()}: the sold offer wins, the payment's
+     * brand is the fallback where the catalogue names none. Inheritance is the
+     * fallback here, not the rule. This hook covers what is left — an agreement
+     * built by hand, by a seeder, by an import.
      */
     protected static function booted(): void
     {

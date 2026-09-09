@@ -6,7 +6,9 @@ use Goldnead\Entitlements\Facades\Entitlements;
 use Goldnead\Entitlements\Models\Entitlement;
 use Goldnead\Entitlements\Support\SubjectReference;
 use Goldnead\IdentityContracts\ServiceProvider;
+use Goldnead\StatamicPayments\Events\SubscriptionEnded;
 use Goldnead\StatamicPayments\Integrations\EntitlementsBridge;
+use Goldnead\StatamicPayments\Listeners\FollowSubscriptionWithEntitlement;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Tests\TestCase;
@@ -107,6 +109,79 @@ class SubscriptionRenewsRealEntitlementTest extends TestCase
         app(EntitlementsBridge::class)->renewFor($this->abo(), $this->zahlung());
 
         $this->assertSame(1, Entitlement::count());
+        $this->assertSame('2026-10-01', Entitlement::first()->expires_at->format('Y-m-d'));
+    }
+
+    /**
+     * Wer alle Raten bezahlt hat, behält, wofür er bezahlt hat.
+     *
+     * **Am 09.09.2026 auf staging aufgefallen, an einem echten Testkauf.** Ein
+     * Ratenkauf über 3 × 520 € legt eine Vereinbarung mit `times = 3` an. Zahlt
+     * der Käufer die letzte Rate, setzt `recordCycle()` die Zeile auf
+     * `completed` und feuert `SubscriptionEnded` — und der Zuhörer daneben
+     * schloss daraufhin den Zugang. Ergebnis: der Kunde überweist 1.560 €,
+     * vollständig, und **verliert in derselben Sekunde**, was er gekauft hat.
+     *
+     * Zwei Wege enden in demselben Ereignis, und sie bedeuten das Gegenteil
+     * voneinander:
+     *
+     * - `cancelled` — die Mahnstrecke hat aufgegeben, es wurde nicht bezahlt.
+     *   Der Zugang läuft zum Ende des bezahlten Zeitraums aus. Richtig.
+     * - `completed` — der Plan ist durch, alles bezahlt. Zugang bleibt.
+     *
+     * Der Unterschied steht auf der Zeile, im `status`. Er war nur nie gelesen
+     * worden.
+     */
+    #[Test]
+    public function a_plan_paid_to_the_last_instalment_keeps_its_access(): void
+    {
+        $subject = new SubjectReference('email', 'wer@example.com');
+
+        // Offen vergeben: so entsteht der Zugang aus der ersten Rate. Ein
+        // Ratenkauf verkauft die Sache, nicht einen Zeitraum.
+        Entitlements::grant($subject, 'mitgliedschaft', 'statamic-payments', 'sub_1');
+
+        $this->assertNull(Entitlement::first()->expires_at);
+
+        // Die letzte Rate ist durch: `recordCycle()` setzt genau das hier und
+        // feuert dann `SubscriptionEnded`.
+        $abo = $this->abo([
+            'times' => 3,
+            'times_charged' => 3,
+            'status' => Subscription::STATUS_COMPLETED,
+            'ended_at' => Carbon::parse('2026-11-01 00:00'),
+            'next_payment_at' => null,
+        ]);
+
+        app(FollowSubscriptionWithEntitlement::class)->handleEnded(new SubscriptionEnded($abo));
+
+        $this->assertNull(
+            Entitlement::first()->expires_at,
+            'der Zugang wurde geschlossen, obwohl alle Raten bezahlt sind',
+        );
+        $this->assertNull(Entitlement::first()->revoked_at);
+    }
+
+    #[Test]
+    public function a_plan_the_dunning_gave_up_on_still_loses_its_access(): void
+    {
+        // Die Gegenprobe zum Test darüber. Dieselbe Meldung, anderer Grund:
+        // hier wurde nicht bezahlt, und der Zugang muss auslaufen. Ohne diesen
+        // Test wäre „schließe nie bei einem Ende" die bequeme Antwort, und
+        // niemand verlöre je einen Zugang.
+        $subject = new SubjectReference('email', 'wer@example.com');
+
+        Entitlements::grant($subject, 'mitgliedschaft', 'statamic-payments', 'sub_1');
+
+        $abo = $this->abo([
+            'times' => 3,
+            'times_charged' => 1,
+            'status' => Subscription::STATUS_CANCELLED,
+            'ended_at' => Carbon::parse('2026-11-01 00:00'),
+        ]);
+
+        app(FollowSubscriptionWithEntitlement::class)->handleEnded(new SubscriptionEnded($abo));
+
         $this->assertSame('2026-10-01', Entitlement::first()->expires_at->format('Y-m-d'));
     }
 

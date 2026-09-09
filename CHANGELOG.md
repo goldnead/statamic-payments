@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.23.2 — 2026-09-09
+
+### Fixed: paying the last instalment took the access away
+
+An instalment purchase over 3 × 520 € creates an agreement with `times = 3`. When the last
+instalment went through, `recordCycle()` set the row to `completed` and fired
+`SubscriptionEnded` — and the listener next to it closed the access. The buyer transferred
+1,560 €, in full, and **lost in that same second** what he had bought.
+
+`SubscriptionEnded` arrives from two directions that mean the opposite of each other, and the
+difference is written on the row:
+
+- **`cancelled`** — the dunning run gave up, nothing was paid. Access runs out at the end of
+  the paid period. Correct, and unchanged.
+- **`completed`** — the plan received its last instalment. All paid. Access stays.
+
+Only the second case was wrong, and only it could be: `closeFor()` touches grants without an
+expiry date and skips the rest. An open-ended grant is exactly what a purchase for keeps hands
+out — the thing itself, paid in instalments. A time-limited subscription hands out its window
+through `access_days` and is extended per cycle by `renewFor()`.
+
+The price of this rule, said out loud: whoever sells a time-limited subscription with an
+open-ended `grants` and relies on the ending to take it back now keeps the access. That is the
+smaller of two wrongs — the other one takes something away from somebody who paid for it.
+
+**Found on a real test purchase on staging, not in the code.** The whole chain had been green
+in the test suite; what nobody had walked was the last instalment.
+
 ## 1.23.1 — 2026-09-09
 
 ### A trial no longer books a second payment nobody made

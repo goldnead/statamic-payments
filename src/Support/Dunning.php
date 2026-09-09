@@ -394,7 +394,14 @@ class Dunning
                 'exception' => $e->getMessage(),
             ]);
 
-            return false;
+            // Und weitergeworfen, nicht als `false` zurueckgegeben. `false`
+            // heisst hier „ein anderer Lauf war schneller", ein voellig
+            // gewoehnlicher Ausgang, den niemand zaehlt. Der geschluckte Wurf
+            // haette genauso ausgesehen: der Lauf meldete Exit 0 und „0
+            // agreement(s) ended", waehrend der Zugangsentzug jede Nacht
+            // scheitert. Der Aufrufer faengt ihn, zaehlt ihn und endet mit
+            // ungleich null — genau die Stelle, an der ein Cron hinsieht.
+            throw $e;
         }
 
         if (! $claimed) {

@@ -66,8 +66,8 @@ class Abandonment
     /**
      * Die Rate eines laufenden Abos ist kein liegengebliebener Einkauf.
      *
-     * Dieselbe Wache wie in `payments:prune-unpaid`, aus demselben Grund und an
-     * derselben Zeile: ein gescheiterter Stripe-Zyklus wird als `open` angelegt
+     * Dieselbe Absicht wie in `payments:prune-unpaid`, ein Merkmal mehr: ein
+     * gescheiterter Stripe-Zyklus wird als `open` angelegt
      * und bleibt `open`, passt also genau in diese Abfrage. Es gibt aber keinen
      * Warenkorb, den jemand noch abschliessen koennte — es gibt ein Abo, dessen
      * Karte nicht mehr geht, und dafuer schreibt die Mahnstrecke. Ein „Sie haben

@@ -694,14 +694,32 @@ class Subscriptions
             return false;
         }
 
+        // War die Zeile hier schon beendet, ist der Anbieteraufruf das Einzige
+        // gewesen, was noch zu tun war — und dann gibt es auch nichts mehr
+        // anzukuendigen.
+        //
+        // `Dunning::end()` beendet lokal zuerst und laesst den Anbieter danach
+        // nachziehen; ohne diese Zeile feuerte jede durch die Mahnstrecke
+        // beendete Vereinbarung **zwei** Ereignisse fuer einen Vorgang:
+        // `SubscriptionEnded` aus der Mahnstrecke und `SubscriptionCancelled`
+        // von hier. Die beiden sind ausdruecklich verschieden gemeint (siehe
+        // `FollowSubscriptionWithEntitlement`), und ein Haus, das an
+        // `SubscriptionCancelled` eine Kuendigungsmail oder einen
+        // Churn-Zaehler haengt, bekam beides doppelt, ohne dass irgendwo eine
+        // Zeile davon erzaehlte.
+        $schonBeendet = $subscription->status === Subscription::STATUS_CANCELLED
+            && $subscription->ended_at !== null;
+
         $subscription->forceFill([
             'status' => Subscription::STATUS_CANCELLED,
-            'cancelled_at' => now(),
-            'ended_at' => now(),
+            'cancelled_at' => $subscription->cancelled_at ?? now(),
+            'ended_at' => $subscription->ended_at ?? now(),
             'next_payment_at' => null,
         ])->save();
 
-        SubscriptionCancelled::dispatch($subscription->fresh() ?? $subscription);
+        if (! $schonBeendet) {
+            SubscriptionCancelled::dispatch($subscription->fresh() ?? $subscription);
+        }
 
         return true;
     }

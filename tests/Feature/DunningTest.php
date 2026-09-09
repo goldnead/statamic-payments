@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Tests\Feature;
 
+use Goldnead\StatamicPayments\Events\SubscriptionCancelled;
 use Goldnead\StatamicPayments\Events\SubscriptionCycleFailed;
 use Goldnead\StatamicPayments\Events\SubscriptionEnded;
 use Goldnead\StatamicPayments\Mail\DunningMail;
@@ -856,7 +857,12 @@ class DunningTest extends TestCase
         });
 
         Carbon::setTestNow(Carbon::parse('2026-09-22 10:00:00'));
-        $this->artisan('payments:dunning');
+        // Und der Lauf sagt es: ein gescheiterter Zugangsentzug ist der
+        // teuerste Ausgang, den es hier gibt, und darf im Cron nicht als
+        // ruhiger Abend ankommen.
+        $this->artisan('payments:dunning')
+            ->expectsOutputToContain('1 sequence(s) threw')
+            ->assertFailed();
 
         $frisch = $subscription->fresh();
 
@@ -888,14 +894,125 @@ class DunningTest extends TestCase
         });
 
         Carbon::setTestNow(Carbon::parse('2026-09-22 10:00:00'));
-        $this->artisan('payments:dunning');
+        // Mit Zusicherung, nicht nackt: eine `PendingCommand` ohne Zusicherung
+        // laeuft erst beim Aufraeumen, also nach der naechsten Zeile — und der
+        // Wurf faende dann keinen werfenden Zuhoerer mehr vor.
+        $this->artisan('payments:dunning')->assertFailed();
 
         $kaputt = false;
-        $this->artisan('payments:dunning')->assertSuccessful();
+        $this->artisan('payments:dunning')->expectsOutputToContain('1 agreement(s) ended')->assertSuccessful();
 
         $frisch = $subscription->fresh();
         $this->assertSame(Subscription::STATUS_CANCELLED, $frisch->status);
         $this->assertNull($frisch->dunning_started_at);
+    }
+
+    #[Test]
+    public function ending_a_sequence_announces_one_thing_once(): void
+    {
+        // `Dunning::end()` beendet lokal und laesst den Anbieter danach
+        // nachziehen — und `Subscriptions::cancel()` feuerte daraufhin sein
+        // eigenes `SubscriptionCancelled` obendrauf. Fuer eine Kuendigung liefen
+        // zwei ausdruecklich verschieden gemeinte Ereignisse durch alle
+        // Zuhoerer: wer an `SubscriptionCancelled` eine Kuendigungsmail oder
+        // einen Churn-Zaehler haengt, bekam sie doppelt, und nichts sagte es.
+        [$subscription] = $this->openSequence();
+        Mail::fake();
+        Event::fake([SubscriptionEnded::class, SubscriptionCancelled::class]);
+
+        Carbon::setTestNow(Carbon::parse('2026-09-22 10:00:00'));
+        $this->artisan('payments:dunning')->assertSuccessful();
+
+        Event::assertDispatchedTimes(SubscriptionEnded::class, 1);
+        Event::assertNotDispatched(SubscriptionCancelled::class);
+
+        $this->assertSame(Subscription::STATUS_CANCELLED, $subscription->fresh()->status);
+    }
+
+    #[Test]
+    public function a_cycle_for_an_agreement_this_site_already_ended_is_said_out_loud(): void
+    {
+        // Der Anbieter bucht weiter ab, obwohl die Kuendigung dort scheiterte:
+        // die Zeile steht lokal auf gekuendigt, `announceFailedCycle()` kehrt
+        // zurueck, und ab da war jeder weitere Zyklus unsichtbar. Genau der
+        // Zustand, der Geld kostet, war der einzige ohne Meldung.
+        $subscription = $this->agreement();
+        $subscription->forceFill([
+            'status' => Subscription::STATUS_CANCELLED,
+            'ended_at' => now(),
+        ])->save();
+
+        $this->failedCycle('tr_zombie');
+        $this->gateway->markFailedCycle('tr_zombie', 'sub_1');
+
+        $meldungen = [];
+
+        Event::listen(MessageLogged::class, function (MessageLogged $m) use (&$meldungen): void {
+            $meldungen[] = $m;
+        });
+
+        $this->postJson('/!/statamic-payments/webhook', ['id' => 'tr_zombie'])->assertOk();
+
+        $passende = array_values(array_filter(
+            $meldungen,
+            fn (MessageLogged $m) => str_contains($m->message, 'already ended'),
+        ));
+
+        $this->assertNotEmpty($passende, 'the zombie cycle was reported');
+        $this->assertSame('warning', $passende[0]->level);
+    }
+
+    #[Test]
+    public function closing_the_sequences_after_the_switch_survives_a_broken_row(): void
+    {
+        // Derselbe Schutz wie im Hauptlauf: `running()` sortiert immer gleich,
+        // also stuende eine werfende Zeile morgen wieder vorn und alles
+        // dahinter bliebe eingefroren — der Zustand, den dieser Pfad gerade
+        // aufloesen soll.
+        [$erste] = $this->openSequence();
+
+        $zweite = Subscription::create([
+            'provider' => 'fake',
+            'provider_id' => 'sub_2',
+            'customer_reference' => 'cus_2',
+            'product' => 'noten-paket',
+            'amount_cent' => 1900,
+            'currency' => 'EUR',
+            'interval' => '1 month',
+            'times_charged' => 3,
+            'status' => Subscription::STATUS_ACTIVE,
+            'starts_at' => now()->subMonths(3),
+            'email' => 'zweiter@example.com',
+        ]);
+        $zyklus = $this->failedCycle('tr_cycle_2');
+        app(Dunning::class)->begin($zweite, $zyklus);
+
+        config(['statamic-payments.dunning.enabled' => false]);
+
+        $kaputteId = (int) $erste->getKey();
+        $dunning = new class extends Dunning
+        {
+            public int $kaputteId = 0;
+
+            public function stop(Subscription $subscription): void
+            {
+                if ((int) $subscription->getKey() === $this->kaputteId) {
+                    throw new \RuntimeException('diese Zeile ist kaputt');
+                }
+
+                parent::stop($subscription);
+            }
+        };
+        $dunning->kaputteId = $kaputteId;
+        $this->app->instance(Dunning::class, $dunning);
+
+        $this->artisan('payments:dunning')
+            ->expectsOutputToContain('1 sequence(s) threw')
+            ->assertFailed();
+
+        // Die zweite Zeile wurde trotzdem geschlossen.
+        $this->assertNull($zweite->fresh()->dunning_started_at);
+        $this->assertNotNull($erste->fresh()->dunning_started_at);
     }
 
     #[Test]

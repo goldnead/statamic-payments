@@ -11,6 +11,7 @@ use Goldnead\StatamicPayments\Models\PaymentItem;
 use Goldnead\StatamicPayments\Models\Withdrawal;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\Test;
 use Statamic\Facades\Role;
 use Statamic\Facades\User;
@@ -86,6 +87,38 @@ class PaymentDetailScreenTest extends TestCase
         return $this->actingAs($user ?? $this->user())
             ->withHeaders(['X-Inertia' => 'true', 'X-Inertia-Version' => ''])
             ->getJson('/cp/utilities/payments/'.$payment->id);
+    }
+
+    #[Test]
+    public function a_chargeback_is_shown_next_to_the_refunds_and_not_inside_them(): void
+    {
+        // Der Status bleibt `paid`, weil der Anbieter ihn so fuehrt — der Kreis
+        // ist das Einzige, was die Zeile von einer gewoehnlich bezahlten
+        // unterscheidet. Und die Rueckbuchung darf nicht als Erstattung
+        // gezaehlt werden: sie traegt eine Gebuehr, hat eine Frist und kann
+        // gewonnen werden.
+        $payment = $this->payment(['refunded_cent' => 0, 'refunded_at' => null]);
+
+        $payment->forceFill(['charged_back_at' => Carbon::parse('2026-09-05 12:00:00')])->save();
+
+        DB::table('payment_chargebacks')->insert([
+            'payment_id' => $payment->getKey(),
+            'reference' => 'dp_1',
+            'amount_cent' => 2400,
+            'reason' => 'fraudulent',
+            'created_at' => Carbon::parse('2026-09-05 12:00:00'),
+        ]);
+
+        $p = $this->show($payment)->assertOk()->json('props.payment');
+
+        $this->assertSame('Charged back', $p['chargeback']['label']);
+        $this->assertNotNull($p['chargeback']['at']);
+        $this->assertSame('24.00', $p['chargeback']['amount']);
+        $this->assertSame('fraudulent', $p['chargeback']['reason']);
+        $this->assertSame('dp_1', $p['chargeback']['reference']);
+
+        $this->assertSame('paid', $p['status'], 'the provider still calls it paid');
+        $this->assertNull($p['refunds']['amount'], 'a chargeback is not a refund');
     }
 
     #[Test]

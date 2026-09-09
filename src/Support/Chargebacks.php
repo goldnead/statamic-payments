@@ -103,6 +103,14 @@ class Chargebacks
         // Nach dem Commit, nie darin. Ein Listener, der den Zugang entzieht,
         // darf nicht in einer Transaktion laufen, die noch zurueckgerollt
         // werden koennte.
+        //
+        // `Dunning::end()` macht es genau andersherum, und das ist kein
+        // Widerspruch, sondern der Unterschied im Wiedereinstieg: dort kommt
+        // der naechste Cron-Lauf ohnehin wieder vorbei, ein Rollback kostet
+        // also einen Tag und nichts weiter. Hier haengt der Wiedereinstieg an
+        // der Zustellung des Anbieters, und die kommt nur, wenn wir werfen —
+        // ein Rollback wuerde die Anspruchszeile mitnehmen und die naechste
+        // Zustellung fuende nichts mehr zu tun.
         try {
             PaymentChargedBack::dispatch($payment->fresh() ?? $payment, $reference, $amountCent, $reason);
         } catch (Throwable $e) {

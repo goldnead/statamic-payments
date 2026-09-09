@@ -171,9 +171,13 @@ const detailFields = computed(() => {
                  dem gerade niemand hinterherschreibt. Der zweite sagt, dass eine
                  Mahnstrecke laeuft und wie weit sie ist. -->
             <template #cell-status="{ row }">
-                <div class="flex items-center gap-1">
+                <!-- `purple`, nicht `amber`: `suspended` ist hier schon amber,
+                     und zwei gleichfarbige Kreise nebeneinander sind wieder
+                     einer. Genau dieses Paar steht am haeufigsten zusammen —
+                     Mollie setzt `suspended`, wenn eine Abbuchung scheitert. -->
+                <div class="flex flex-wrap items-center gap-1">
                     <Badge :color="statusColor(row.status)" :text="row.status_label" />
-                    <Badge v-if="row.dunning" color="amber" :text="row.dunning.label" />
+                    <Badge v-if="row.dunning" color="purple" :text="row.dunning.label" />
                 </div>
             </template>
 
@@ -199,7 +203,7 @@ const detailFields = computed(() => {
             <div v-if="detail" class="space-y-6">
                 <div class="flex items-center gap-2">
                     <Badge :color="statusColor(detail.status)" :text="detail.status_label" />
-                    <Badge v-if="detail.dunning" color="amber" :text="detail.dunning.label" />
+                    <Badge v-if="detail.dunning" color="purple" :text="detail.dunning.label" />
                     <span class="text-sm text-gray-600 dark:text-gray-400">{{ detail.kind }}</span>
                 </div>
 

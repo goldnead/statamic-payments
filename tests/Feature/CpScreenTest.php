@@ -121,6 +121,25 @@ class CpScreenTest extends TestCase
         $this->assertSame('EUR', $row['currency']);
     }
 
+    #[Test]
+    public function a_charged_back_payment_carries_its_badge_into_the_listing(): void
+    {
+        // Der Kreis ist das Einzige, was eine zurueckgebuchte Zahlung von einer
+        // bezahlten unterscheidet: der Status bleibt `paid`, weil der Anbieter
+        // ihn so fuehrt. Ohne diese Zusicherung faellt eine Umbenennung im
+        // Resource lautlos aus und die Liste zeigt wieder nur „Bezahlt".
+        $ruhig = $this->payment(['provider_id' => 'tr_ruhig']);
+        $zurueck = $this->payment(['provider_id' => 'tr_zurueck', 'charged_back_at' => now()->subDay()]);
+
+        $rows = collect($this->actingAs($this->user())->getJson('/cp/utilities/payments')->json('data'))
+            ->keyBy('provider_id');
+
+        $this->assertNull($rows['tr_ruhig']['charged_back_at']);
+        $this->assertNotNull($rows['tr_zurueck']['charged_back_at']);
+        $this->assertSame('Charged back', $rows['tr_zurueck']['charged_back_label']);
+        $this->assertSame(Payment::STATUS_PAID, $rows['tr_zurueck']['status'], 'the provider still calls it paid');
+    }
+
     /** Filters travel as base64-encoded JSON, the way the Listing sends them. */
     protected function filter(array $filters): string
     {

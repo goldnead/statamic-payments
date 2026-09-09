@@ -185,7 +185,7 @@ jobs:
         run: >-
           php -d memory_limit=-1 ./vendor/bin/phpunit
           --fail-on-empty-test-suite
-          --filter 'StripeWebhookTest|RefundsTest|GatewayRegistryTest|WebhookTrustTest|FulfilmentOnceTest|DatabaseDriverTest|ChargebackTest|DunningTest'
+          --filter 'StripeWebhookTest|RefundsTest|GatewayRegistryTest|WebhookTrustTest|FulfilmentOnceTest|DatabaseDriverTest|ChargebackTest|DunningTest|AbandonedCheckoutTest'
 
   analyse:
     runs-on: ubuntu-latest

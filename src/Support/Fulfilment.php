@@ -201,6 +201,22 @@ class Fulfilment
         if (! $subscription || ! $subscription->isLive()) {
             // Eine beendete Vereinbarung wird nicht angemahnt. Ohne diese Zeile
             // bekaeme jemand, der gerade gekuendigt hat, drei Mahnungen.
+            //
+            // Gesagt wird es trotzdem, und zwar genau fuer den Fall, der teuer
+            // ist: die Zeile steht lokal auf gekuendigt, weil `Dunning::end()`
+            // sie beendet hat — und der Anbieter bucht weiter ab, weil seine
+            // Kuendigung scheiterte. Der einzige Hinweis darauf war bisher eine
+            // einzige Zeile im Augenblick des Fehlschlags; jeder weitere Zyklus
+            // verschwand danach kommentarlos hier. Ein Anbieter, der zu einem
+            // hier beendeten Abo noch Zyklen schickt, ist eine Meldung wert.
+            if ($subscription) {
+                Log::warning('statamic-payments: a cycle arrived for an agreement this site has already ended; the provider may still be charging it.', [
+                    'subscription_id' => $subscription->getKey(),
+                    'status' => $subscription->status,
+                    'provider_status' => $remote->status,
+                ]);
+            }
+
             return;
         }
 

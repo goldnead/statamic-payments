@@ -131,6 +131,30 @@ is seen as the same one. Stripe has a real per-dispute id and does not have this
   on a multi-brand install is the wrong brand's name on a letter about somebody's money — and
   `debug` is in nobody's channels.
 
+### What the second acceptance round changed
+
+- **Ending a sequence announces one thing once.** `Dunning::end()` ends locally and lets the
+  provider follow, and `Subscriptions::cancel()` then dispatched its own `SubscriptionCancelled` on
+  top of the `SubscriptionEnded` that had already gone out. The two are deliberately different
+  events, so anything hanging a farewell mail or a churn counter off the cancellation got both for
+  one act, and nothing said so. `cancel()` now stays quiet about an agreement that was already
+  ended here.
+- **A cycle for an agreement this site has already ended is logged.** If the provider refuses the
+  cancellation, the row is cancelled here while the provider keeps charging — and every further
+  cycle was dropped in silence. The only trace was one line at the moment the cancellation failed.
+- **The counters reset on every run.** The console keeps one instance per command, so two
+  `Artisan::call('payments:dunning')` in one process counted the first run's rows again — and with
+  the exit code now hanging off them, the second, successful run reported the first one's failure.
+- **Switching the sequence off survives a broken row.** The closing pass now catches per row like
+  the main run, for the same reason: `running()` is ordered, so one throwing row would leave
+  everything behind it frozen — the very state that pass exists to resolve.
+- **The dunning badge is `purple`, not `amber`.** `suspended` is already amber on that screen, and
+  that is exactly the pair that stands together most often, since Mollie sets `suspended` when a
+  charge fails. Two badges of one colour are one badge.
+- The chargeback badge has tests now, in the listing and on the detail screen, and
+  `AbandonedCheckoutTest` runs in the MySQL and Postgres matrix — it carries a JSON path
+  (`meta->cycle_of`) and that is what the matrix is for.
+
 ## 1.22.0 — 2026-09-08
 
 The two things 1.21.1 knowingly left open.

@@ -55,6 +55,14 @@ class RunDunning extends Command
 
     public function handle(Dunning $dunning, DunningNotice $notice): int
     {
+        // Auf null, bei jedem Lauf. Die Konsole haelt eine Instanz je Befehl:
+        // zwei `Artisan::call('payments:dunning')` in einem Prozess zaehlten
+        // sonst beim zweiten Mal die Zeilen des ersten mit — und seit der
+        // Rueckgabewert daran haengt, meldete der zweite, gelungene Lauf den
+        // Fehlschlag des ersten.
+        $this->seen = $this->sent = $this->ended = $this->stopped = 0;
+        $this->unreachable = $this->skipped = $this->withheld = $this->broken = $this->closed = 0;
+
         $dry = (bool) $this->option('dry-run');
 
         if (! $dunning->enabled()) {
@@ -110,15 +118,34 @@ class RunDunning extends Command
         $offen = 0;
 
         foreach ($dunning->running() as $subscription) {
-            $dry || $dunning->stop($subscription);
-            $offen++;
+            // Zeile fuer Zeile, wie im Hauptlauf und aus demselben Grund:
+            // `running()` sortiert nach dem Beginn der Strecke, also stuende
+            // eine kaputte Zeile morgen wieder vorn und alles dahinter bliebe
+            // eingefroren — genau der Zustand, den dieser Pfad aufloesen soll.
+            try {
+                $dry || $dunning->stop($subscription);
+                $offen++;
+            } catch (Throwable $e) {
+                $this->broken++;
+
+                Log::error('statamic-payments: closing a dunning sequence threw; the run continued with the next one.', [
+                    'subscription_id' => $subscription->getKey(),
+                    'exception' => $e->getMessage(),
+                ]);
+            }
         }
 
         $this->warn(match (true) {
-            $offen === 0 => 'statamic-payments.dunning.enabled is off; nothing was done.',
+            $offen === 0 && $this->broken === 0 => 'statamic-payments.dunning.enabled is off; nothing was done.',
             $dry => "statamic-payments.dunning.enabled is off; {$offen} running sequence(s) would be closed.",
             default => "statamic-payments.dunning.enabled is off; {$offen} running sequence(s) were closed rather than left frozen.",
         });
+
+        if ($this->broken > 0) {
+            $this->error("{$this->broken} sequence(s) threw and were skipped; see the log.");
+
+            return self::FAILURE;
+        }
 
         return self::SUCCESS;
     }

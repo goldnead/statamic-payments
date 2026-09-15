@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.24.4 — 2026-09-15
+
+### Fixed: cancelling took away the period the buyer had already paid for
+
+The rule has been written down since the bridge existed, in the class header and again in
+`FollowSubscriptionWithEntitlement`: **cancelling is not revoking. Somebody who cancels has paid for
+the period they are in and keeps it to the end.** It was not what happened.
+
+`Subscriptions::cancel()` sets `next_payment_at` to `null` and `ended_at` to now — correctly, nothing
+will be charged again — and only then dispatches `SubscriptionCancelled`. `closeFor()` read
+`next_payment_at ?? ended_at ?? now()`, found the first link of that chain freshly emptied, and
+landed on the cancellation day.
+
+Measured on a real test purchase on 15.09.2026: an instalment plan of 3 × 520 €, first instalment
+paid, cancelled — and the access expired in the same second. The buyer had paid for the running
+month and lost it.
+
+Nothing about it was a mistake in reasoning. It was an ordering, and a test that described a
+cancelled row the running system never produces: it still carried its `next_payment_at`, so the first
+link always answered and the second was never reached.
+
+`closeFor()` now asks `Subscription::paidThroughAt()` when the provider's date is gone. That date is
+derived from what actually arrived — the last paid instalment plus one interval — and survives a
+cancellation, because it is a fact rather than an intention. A **fully** refunded instalment does not
+count; the same line the refund revocation draws. A partial refund is a discount, not a withdrawal,
+and the period stays bought. With nothing ever charged, the window still closes at the cancellation:
+there is no paid period to leave anyone.
+
+### Changed: one interval calculation instead of two
+
+`Subscription::addInterval()` is now the single place that adds an interval to a date, and
+`Subscriptions::afterOneInterval()` delegates to it. Two copies would have been two ways to disagree
+about the end of a month — which is exactly what `addMonthsNoOverflow()` is there to prevent.
+
 ## 1.24.3 — 2026-09-09
 
 ### Added: `payments:subscription-brand-backfill`

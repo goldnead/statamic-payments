@@ -182,7 +182,23 @@ class EntitlementsBridge
 
         // Bis zum Ende des bezahlten Zeitraums, und wenn es keinen gibt, bis
         // jetzt. Das Datum des Anbieters ist auch hier die Wahrheit.
-        $bis = $subscription->next_payment_at ?? $subscription->ended_at ?? Carbon::now();
+        //
+        // **Das zweite Glied ist kein Schmuck.** `cancel()` setzt
+        // `next_payment_at` auf `null`, bevor `SubscriptionCancelled` feuert —
+        // richtig, es wird ja nichts mehr eingezogen. Ohne `paidThroughAt()`
+        // fiel die Kette danach auf `ended_at`, und das ist der Kündigungstag:
+        // wer kündigte, verlor den Zugang in derselben Sekunde, obwohl er den
+        // laufenden Zeitraum bezahlt hatte. Am 15.09.2026 an einem echten
+        // Testkauf gemessen, Ratenzahlung 3 × 520 €, erste Rate bezahlt.
+        //
+        // Die Absicht stand die ganze Zeit oben im Klassenkopf und in
+        // {@see \Goldnead\StatamicPayments\Listeners\FollowSubscriptionWithEntitlement}.
+        // Es war eine Reihenfolge, kein Denkfehler — und ein Test, der eine
+        // gekündigte Zeile beschrieb, wie sie im Betrieb nicht vorkommt.
+        $bis = $subscription->next_payment_at
+            ?? $subscription->paidThroughAt()
+            ?? $subscription->ended_at
+            ?? Carbon::now();
 
         foreach ($this->slugsFor($subscription->product) as $slug) {
             try {

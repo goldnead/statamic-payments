@@ -7,6 +7,7 @@ use Goldnead\StatamicPayments\Support\Money;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 
 /**
  * An agreement to be charged again, on a rhythm.
@@ -176,5 +177,94 @@ class Subscription extends Model
     public function totalCent(): ?int
     {
         return $this->times === null ? null : $this->amount_cent * $this->times;
+    }
+
+    /**
+     * Bis wann der Käufer bezahlt hat — abgeleitet aus dem, was er überwiesen
+     * hat, nicht aus einer Spalte, die jemand anders leeren darf.
+     *
+     * **Warum es das braucht.** `next_payment_at` ist die naheliegende Antwort
+     * und die richtige, solange die Vereinbarung läuft. Eine Kündigung setzt
+     * sie auf `null` ({@see \Goldnead\StatamicPayments\Support\Subscriptions::cancel()}),
+     * und zwar zu Recht: es wird nichts mehr eingezogen. Nur war sie bis dahin
+     * auch die einzige Auskunft darüber, wie lange der laufende Zeitraum noch
+     * geht — und mit ihr verschwand die Antwort auf „was habe ich schon
+     * bezahlt".
+     *
+     * Was am 15.09.2026 dabei herauskam, gemessen an einem echten Testkauf auf
+     * staging: eine Ratenzahlung über 3 × 520 €, erste Rate bezahlt, Kündigung,
+     * und der Zugang lief in derselben Sekunde ab. Der Käufer hatte den
+     * laufenden Monat bezahlt und verlor ihn.
+     *
+     * Die letzte eingegangene Rate plus ein Intervall überlebt jede Kündigung,
+     * weil sie eine Tatsache ist und keine Absicht.
+     *
+     * **Eine voll erstattete Rate zählt nicht.** Dieselbe Grenze wie beim
+     * Entzug nebenan: nur die volle Erstattung dreht die Aussage „bezahlt" um.
+     * Eine Teilerstattung ist ein Nachlass, kein Rückzug.
+     *
+     * `null`, wenn nie etwas eingegangen ist — dann gibt es auch keinen
+     * Zeitraum, den man jemandem lassen müsste.
+     */
+    public function paidThroughAt(): ?Carbon
+    {
+        $interval = trim((string) $this->interval);
+
+        if ($interval === '') {
+            return null;
+        }
+
+        $letzte = $this->payments()
+            ->where('status', Payment::STATUS_PAID)
+            ->whereNotNull('paid_at')
+            // Voll erstattet heisst nicht bezahlt. `refunded_cent` ist 0,
+            // solange nichts zurückging, deshalb reicht der Vergleich mit dem
+            // Betrag — eine Teilerstattung bleibt darunter.
+            ->where(fn ($q) => $q->whereNull('refunded_at')->orWhereColumn('refunded_cent', '<', 'amount_cent'))
+            ->orderByDesc('paid_at')
+            ->first();
+
+        if ($letzte === null) {
+            return null;
+        }
+
+        return self::addInterval(Carbon::parse($letzte->paid_at), $interval);
+    }
+
+    /**
+     * Ein Intervall auf ein Datum, in der Sprache des Anbieters.
+     *
+     * `"1 month"`, `"12 weeks"`, `"2 days"` — dieselben Worte, die der Anbieter
+     * nimmt, weshalb sie so gespeichert sind, wie sie getippt wurden, statt in
+     * eine Einheiten-Aufzählung zerlegt. Was nicht lesbar ist, fällt auf einen
+     * Monat zurück, statt zu werfen: ein leicht falsches Datum lässt sich
+     * geraderücken, eine Vereinbarung nicht aufzuzeichnen, für die jemand schon
+     * bezahlt hat, nicht.
+     *
+     * Öffentlich und statisch, weil zwei Stellen dieselbe Rechnung brauchen —
+     * {@see \Goldnead\StatamicPayments\Support\Subscriptions::afterOneInterval()}
+     * für „wann wird das nächste Mal eingezogen" und {@see self::paidThroughAt()}
+     * für „bis wann ist bezahlt". Zwei Kopien wären zwei Wege, sich über die
+     * Monatsenden zu uneinigen.
+     */
+    public static function addInterval(Carbon $von, string $interval): Carbon
+    {
+        // Ein Monat, ohne hinten herauszufallen. `add('1 month')` landet am
+        // 31. Januar auf dem 3. März: der Februar wird übersprungen, und der
+        // Anbieter rechnet danach für immer auf dem 3. weiter. Gemessen, nicht
+        // angenommen.
+        if (preg_match('/^(\d+)\s*months?$/i', trim($interval), $m)) {
+            return $von->copy()->addMonthsNoOverflow((int) $m[1]);
+        }
+
+        try {
+            return $von->copy()->add($interval);
+        } catch (\Throwable) {
+            Log::warning('statamic-payments: an interval this package cannot read; the next date is a guess.', [
+                'interval' => $interval,
+            ]);
+
+            return $von->copy()->addMonth();
+        }
     }
 }

@@ -742,21 +742,11 @@ class Subscriptions
      */
     protected function afterOneInterval(string $interval): Carbon
     {
-        // A month, without falling off the end of one. `add('1 month')` on the
-        // 31st of January lands on the 3rd of March: February is skipped and the
-        // provider then bills on the 3rd forever after. Measured, not assumed.
-        if (preg_match('/^(\d+)\s*months?$/i', trim($interval), $m)) {
-            return Carbon::now()->addMonthsNoOverflow((int) $m[1]);
-        }
-
-        try {
-            return Carbon::now()->add($interval);
-        } catch (Throwable) {
-            Log::warning('statamic-payments: an interval this package cannot read; the next date is a guess.', [
-                'interval' => $interval,
-            ]);
-
-            return Carbon::now()->addMonth();
-        }
+        // Die Rechnung selbst steht am Modell, weil eine zweite Stelle sie
+        // ebenfalls braucht: {@see Subscription::paidThroughAt()} fragt „bis
+        // wann ist bezahlt" und muss dabei dieselben Monatsenden treffen wie
+        // „wann wird das nächste Mal eingezogen". Zwei Kopien wären zwei Wege,
+        // sich darüber zu uneinigen.
+        return Subscription::addInterval(Carbon::now(), $interval);
     }
 }

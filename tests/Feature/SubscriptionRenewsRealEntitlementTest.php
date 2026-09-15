@@ -9,6 +9,7 @@ use Goldnead\Entitlements\Models\Entitlement;
 use Goldnead\Entitlements\Support\MorphSubjectResolver;
 use Goldnead\Entitlements\Support\SubjectReference;
 use Goldnead\IdentityContracts\ServiceProvider;
+use Goldnead\StatamicPayments\Events\SubscriptionCancelled;
 use Goldnead\StatamicPayments\Events\SubscriptionEnded;
 use Goldnead\StatamicPayments\Integrations\EntitlementsBridge;
 use Goldnead\StatamicPayments\Listeners\FollowSubscriptionWithEntitlement;
@@ -285,5 +286,156 @@ class SubscriptionRenewsRealEntitlementTest extends TestCase
         $this->assertSame('2026-10-01', $zugang->expires_at->format('Y-m-d'));
         // Und nicht widerrufen: der Zeitraum ist bezahlt.
         $this->assertNull($zugang->revoked_at);
+    }
+
+    /**
+     * **Und zwar auch an der Zeile, die eine echte Kündigung hinterlässt.**
+     *
+     * Der Test darüber beschreibt eine gekündigte Vereinbarung, die ihr
+     * `next_payment_at` noch trägt. So eine erzeugt {@see Subscriptions::cancel()}
+     * nie: sie setzt `next_payment_at` auf `null` und `ended_at` auf jetzt,
+     * **bevor** `SubscriptionCancelled` feuert. `closeFor()` fand das erste
+     * Glied seiner Kette dann leer vor und fiel auf `ended_at` — also auf den
+     * Kündigungstag.
+     *
+     * Folge, am 15.09.2026 auf staging an einem echten Testkauf gemessen: eine
+     * Ratenzahlung über 3 × 520 €, erste Rate bezahlt, Kündigung — und der
+     * Zugang lief in derselben Sekunde ab. Der Käufer hatte den laufenden Monat
+     * bezahlt und verlor ihn.
+     *
+     * Nichts daran war ein Denkfehler. Die Absicht steht in
+     * {@see FollowSubscriptionWithEntitlement} ausgeschrieben: „cancelling is
+     * not revoking". Es war eine Reihenfolge — und ein Test, der eine Zeile
+     * beschrieb, die im Betrieb nicht vorkommt.
+     */
+    #[Test]
+    public function a_real_cancellation_still_honours_the_month_already_paid(): void
+    {
+        $subject = new SubjectReference('email', 'wer@example.com');
+
+        Entitlements::grant($subject, 'mitgliedschaft', 'statamic-payments', 'sub_1');
+
+        // Genau der Zustand, den `cancel()` hinterlässt.
+        $abo = $this->abo([
+            'status' => Subscription::STATUS_CANCELLED,
+            'cancelled_at' => Carbon::parse('2026-09-15 12:00'),
+            'ended_at' => Carbon::parse('2026-09-15 12:00'),
+            'next_payment_at' => null,
+        ]);
+
+        // Die Rate, die den laufenden Monat bezahlt hat. Sie ist die Tatsache,
+        // aus der sich „bis wann" ableiten lässt, und sie überlebt jede
+        // Kündigung — anders als die Spalte, die `cancel()` leert.
+        Payment::create([
+            'provider' => 'fake', 'provider_id' => 'tr_rate_1', 'product' => 'mitgliedschaft',
+            'amount_cent' => 1900, 'currency' => 'EUR', 'status' => Payment::STATUS_PAID,
+            'email' => 'wer@example.com',
+            'subscription_id' => $abo->getKey(),
+            'paid_at' => Carbon::parse('2026-09-01 08:00'),
+        ]);
+
+        app(FollowSubscriptionWithEntitlement::class)->handleCancelled(
+            new SubscriptionCancelled($abo->fresh()),
+        );
+
+        $zugang = Entitlement::first();
+
+        $this->assertSame(
+            '2026-10-01',
+            $zugang->expires_at?->format('Y-m-d'),
+            'der Zugang endet am Kuendigungstag — der bezahlte Monat ist weg',
+        );
+        $this->assertNull($zugang->revoked_at);
+    }
+
+    /**
+     * Ohne eine bezahlte Rate bleibt es beim Kündigungstag.
+     *
+     * Wer kündigt, bevor je etwas eingezogen wurde, hat keinen Zeitraum
+     * bezahlt, den man ihm lassen müsste. Ein geschätztes Fenster wäre hier
+     * geschenkter Zugang, und das ist die andere Schieflage.
+     */
+    #[Test]
+    public function without_a_paid_instalment_the_window_closes_at_the_cancellation(): void
+    {
+        Entitlements::grant(new SubjectReference('email', 'wer@example.com'), 'mitgliedschaft', 'statamic-payments', 'sub_1');
+
+        $abo = $this->abo([
+            'status' => Subscription::STATUS_CANCELLED,
+            'times_charged' => 0,
+            'ended_at' => Carbon::parse('2026-09-15 12:00'),
+            'next_payment_at' => null,
+        ]);
+
+        app(FollowSubscriptionWithEntitlement::class)->handleCancelled(
+            new SubscriptionCancelled($abo->fresh()),
+        );
+
+        $this->assertSame('2026-09-15', Entitlement::first()->expires_at?->format('Y-m-d'));
+    }
+
+    /**
+     * Eine **voll** erstattete Rate zählt nicht als bezahlter Zeitraum. Wer
+     * sein Geld zurück hat, hat den Monat nicht bezahlt.
+     *
+     * Dieselbe Grenze wie bei {@see EntitlementsBridge::revokeFor()}: nur die
+     * volle Erstattung dreht die Aussage „bezahlt" um. Eine Teilerstattung ist
+     * ein Nachlass, kein Rückzug — der Zeitraum bleibt gekauft.
+     */
+    #[Test]
+    public function a_fully_refunded_instalment_does_not_extend_the_window(): void
+    {
+        Entitlements::grant(new SubjectReference('email', 'wer@example.com'), 'mitgliedschaft', 'statamic-payments', 'sub_1');
+
+        $abo = $this->abo([
+            'status' => Subscription::STATUS_CANCELLED,
+            'ended_at' => Carbon::parse('2026-09-15 12:00'),
+            'next_payment_at' => null,
+        ]);
+
+        Payment::create([
+            'provider' => 'fake', 'provider_id' => 'tr_erstattet', 'product' => 'mitgliedschaft',
+            'amount_cent' => 1900, 'currency' => 'EUR', 'status' => Payment::STATUS_PAID,
+            'email' => 'wer@example.com',
+            'subscription_id' => $abo->getKey(),
+            'paid_at' => Carbon::parse('2026-09-01 08:00'),
+            'refunded_at' => Carbon::parse('2026-09-10 08:00'),
+            'refunded_cent' => 1900,
+        ]);
+
+        app(FollowSubscriptionWithEntitlement::class)->handleCancelled(
+            new SubscriptionCancelled($abo->fresh()),
+        );
+
+        $this->assertSame('2026-09-15', Entitlement::first()->expires_at?->format('Y-m-d'));
+    }
+
+    /** Eine Teilerstattung ist ein Nachlass. Der Monat bleibt bezahlt. */
+    #[Test]
+    public function a_partly_refunded_instalment_still_counts(): void
+    {
+        Entitlements::grant(new SubjectReference('email', 'wer@example.com'), 'mitgliedschaft', 'statamic-payments', 'sub_1');
+
+        $abo = $this->abo([
+            'status' => Subscription::STATUS_CANCELLED,
+            'ended_at' => Carbon::parse('2026-09-15 12:00'),
+            'next_payment_at' => null,
+        ]);
+
+        Payment::create([
+            'provider' => 'fake', 'provider_id' => 'tr_teil', 'product' => 'mitgliedschaft',
+            'amount_cent' => 1900, 'currency' => 'EUR', 'status' => Payment::STATUS_PAID,
+            'email' => 'wer@example.com',
+            'subscription_id' => $abo->getKey(),
+            'paid_at' => Carbon::parse('2026-09-01 08:00'),
+            'refunded_at' => Carbon::parse('2026-09-10 08:00'),
+            'refunded_cent' => 500,
+        ]);
+
+        app(FollowSubscriptionWithEntitlement::class)->handleCancelled(
+            new SubscriptionCancelled($abo->fresh()),
+        );
+
+        $this->assertSame('2026-10-01', Entitlement::first()->expires_at?->format('Y-m-d'));
     }
 }

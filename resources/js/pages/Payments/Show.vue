@@ -158,7 +158,7 @@ const hasLinks = computed(() => {
                 <!-- Positionen -->
                 <Panel :heading="t('detail_section_items')">
                     <!-- Wide content scrolls inside its card; the page never does. -->
-                    <Card inset class="overflow-x-auto">
+                    <Card class="overflow-x-auto">
                         <ui-table v-if="p.items.length">
                             <ui-table-columns>
                                 <ui-table-column>{{ t('detail_item_name') }}</ui-table-column>
@@ -185,13 +185,13 @@ const hasLinks = computed(() => {
                                 </ui-table-row>
                             </ui-table-rows>
                         </ui-table>
-                        <p v-else class="p-4 text-sm text-gray-500 dark:text-gray-400">{{ t('detail_items_empty') }}</p>
+                        <p v-else class="text-sm text-gray-500 dark:text-gray-400">{{ t('detail_items_empty') }}</p>
                     </Card>
                 </Panel>
 
                 <!-- Kommunikation -->
                 <Panel :heading="t('detail_section_communications')" :subheading="t('detail_communications_hint')">
-                    <Card inset class="overflow-x-auto">
+                    <Card class="overflow-x-auto">
                         <ui-table v-if="p.communications.length">
                             <ui-table-columns>
                                 <ui-table-column>{{ t('detail_comm_when') }}</ui-table-column>
@@ -213,13 +213,13 @@ const hasLinks = computed(() => {
                                 </ui-table-row>
                             </ui-table-rows>
                         </ui-table>
-                        <p v-else class="p-4 text-sm text-gray-500 dark:text-gray-400">{{ t('detail_communications_empty') }}</p>
+                        <p v-else class="text-sm text-gray-500 dark:text-gray-400">{{ t('detail_communications_empty') }}</p>
                     </Card>
                 </Panel>
 
                 <!-- Webhook-Zustellungen: only when the neighbour answers. -->
                 <Panel v-if="p.webhooks !== null" :heading="t('detail_section_webhooks')">
-                    <Card inset class="overflow-x-auto">
+                    <Card class="overflow-x-auto">
                         <ui-table v-if="p.webhooks.length">
                             <ui-table-columns>
                                 <ui-table-column>{{ t('detail_comm_when') }}</ui-table-column>
@@ -241,7 +241,7 @@ const hasLinks = computed(() => {
                                 </ui-table-row>
                             </ui-table-rows>
                         </ui-table>
-                        <p v-else class="p-4 text-sm text-gray-500 dark:text-gray-400">{{ t('detail_webhooks_empty') }}</p>
+                        <p v-else class="text-sm text-gray-500 dark:text-gray-400">{{ t('detail_webhooks_empty') }}</p>
                     </Card>
                 </Panel>
 

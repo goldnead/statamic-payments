@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.24.5 — 2026-09-22
+
+### Fixed: the three tables on the payment detail page had lost their card padding
+
+Items, communications and webhook deliveries each sat in `<Card inset>`. `inset` is exactly
+`p-0!` under a different name — it strips the card's own `px-4 sm:px-4.5 py-5`. That padding is
+what makes `TableCell`'s built-in `first:pl-0 last:pr-0` work: the pseudo-class removes the inner
+edge of the first and last column because the card was supposed to supply the outer one. With the
+card zeroed, both edges vanished and the tables sat flush against the card border.
+
+All three cards are normal, padded `Card`s again (`overflow-x-auto` stays, wide tables still
+scroll inside their card, not the page). The `p-4` on each table's empty-state text is gone too —
+it was only there to fake the padding the zeroed card no longer gave it, and would have doubled
+up once the card supplies its own again.
+
 ## 1.24.4 — 2026-09-15
 
 ### Fixed: cancelling took away the period the buyer had already paid for

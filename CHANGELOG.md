@@ -2,6 +2,19 @@
 
 ## 1.24.5 — 2026-09-22
 
+### Fixed: static analysis had been red in CI for a week
+
+The `Tests` workflow last passed on 2026-09-09. The run of 2026-09-15 was already red, and
+nobody looked, because the check is green on any machine whose lockfile still holds Larastan
+3.11. From 3.12 Larastan verifies a `view-string` by asking the view finder whether the template
+exists — and this addon registers its `payments::` namespace at boot through `loadViewsFrom()`,
+which the analysis never runs. Sixteen findings about the analysis environment, none about a
+view.
+
+Same exception as in `statamic-marketing`, `statamic-automations` and `statamic-lead-magnets`,
+plus `reportUnmatchedIgnoredErrors: false` so an older Larastan does not fail on the *unused*
+exception instead. Nothing in `src/` changed.
+
 ### Fixed: the three tables on the payment detail page had lost their card padding
 
 Items, communications and webhook deliveries each sat in `<Card inset>`. `inset` is exactly

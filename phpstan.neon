@@ -23,3 +23,26 @@ parameters:
 
     # A ratchet for new code. The baseline is empty because the findings from the
     # first run were fixed; keep it that way rather than appending to it.
+
+    # The view-string exception below matches only when Larastan is 3.12 or
+    # newer. CI resolves fresh and gets it; a checkout with 3.11 in its lockfile
+    # does not, and would then fail on the *unused* exception instead. Same
+    # setting, same reason, as in statamic-marketing.
+    reportUnmatchedIgnoredErrors: false
+
+    ignoreErrors:
+        # Larastan (since 3.12) verifies a `view-string` by asking the view
+        # finder whether the template exists. This addon registers its
+        # `payments::` namespace at boot via loadViewsFrom(), which the
+        # analysis never runs, so every namespaced view name is "string, not
+        # view-string" — a finding about the analysis environment, not about
+        # the view. Same exception as in statamic-marketing,
+        # statamic-automations and statamic-lead-magnets.
+        #
+        # This is why the check was red in CI and green locally: CI resolves
+        # Larastan fresh and gets 3.12, the lockfile here still had 3.11. The
+        # run of 2026-09-15 was already red for this reason, a week before
+        # anyone looked.
+        -
+            identifier: argument.type
+            message: '#expects view-string(\|null)?, string given#'

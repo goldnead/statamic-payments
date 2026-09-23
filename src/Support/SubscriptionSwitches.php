@@ -81,6 +81,11 @@ class SubscriptionSwitches
                 $this->catalogue->all(),
                 fn (array $entry) => ! is_numeric($entry['brand_id'] ?? null) || (int) $entry['brand_id'] === $brand,
             ));
+
+            // Offers are not in `all()` (the catalogue lists products, and the
+            // offer form picks from it). A subscription bought through an offer
+            // had no target at all (adg staging, 1.25.0-rc.1).
+            $candidates = array_merge($candidates, $this->offerHandles($brand));
         }
 
         $targets = [];
@@ -93,6 +98,44 @@ class SubscriptionSwitches
         }
 
         return $targets;
+    }
+
+    /**
+     * The active offers of a brand, as catalogue handles, each pricing option
+     * with a rhythm on its own. Read from `statamic-offers` where installed;
+     * `fits()` and the offer's own resolver decide what is really a target
+     * (rhythm, currency, sellable).
+     *
+     * @return list<string>
+     */
+    protected function offerHandles(int $brand): array
+    {
+        $model = '\Goldnead\StatamicOffers\Models\Offer';
+
+        if (! class_exists($model)) {
+            return [];
+        }
+
+        try {
+            $prefix = $model::prefix();
+            $handles = [];
+
+            foreach ($model::query()->where('active', true)->where('brand_id', $brand)->orderBy('id')->get() as $offer) {
+                $handles[] = $prefix.$offer->handle;
+
+                foreach ($offer->pricingOptions() as $option) {
+                    if (($option['interval'] ?? null) !== null) {
+                        $handles[] = $prefix.$offer->handle.':'.$option['key'];
+                    }
+                }
+            }
+
+            return $handles;
+        } catch (Throwable $e) {
+            Log::warning('statamic-payments: the offers could not be listed as switch targets.', ['exception' => $e->getMessage()]);
+
+            return [];
+        }
     }
 
     /** Whether this agreement can move at all. */
@@ -169,16 +212,37 @@ class SubscriptionSwitches
      */
     public function switch(Subscription $subscription, string $to, string $by = 'cp'): bool
     {
+        // Every "no" before the provider is asked says why: a switch that
+        // returned false without a line was the whole staging finding.
+        $refuse = function (string $reason) use ($subscription, $to): bool {
+            Log::warning('statamic-payments: a subscription switch was not made.', [
+                'subscription_id' => $subscription->getKey(),
+                'from' => $subscription->product,
+                'to' => $to,
+                'reason' => $reason,
+            ]);
+
+            return false;
+        };
+
+        if (! $this->canSwitch($subscription)) {
+            return $refuse('this subscription cannot switch (status, plan, dunning, no next charge or no provider)');
+        }
+
         $preview = $this->preview($subscription, $to);
 
-        if ($preview === null || ! array_key_exists($to, $this->targetsFor($subscription))) {
-            return false;
+        if ($preview === null) {
+            return $refuse('the target does not fit (unknown, same product, not open-ended, other rhythm or currency)');
+        }
+
+        if (! array_key_exists($to, $this->targetsFor($subscription))) {
+            return $refuse('not a target');
         }
 
         $gateway = $this->subscriptions->gatewayFor($subscription);
 
         if ($gateway === null) {
-            return false;
+            return $refuse('no provider');
         }
 
         // Claimed first: the row moves to the new product only where it still
@@ -200,7 +264,7 @@ class SubscriptionSwitches
             ]);
 
         if ($claimed === 0) {
-            return false;
+            return $refuse('the row changed meanwhile (another switch, pause or cancellation)');
         }
 
         // Where the row came from, on the row: should this process die, a

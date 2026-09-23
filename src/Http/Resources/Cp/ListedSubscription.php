@@ -105,7 +105,15 @@ class ListedSubscription extends JsonResource
             // time zone and the reader's language, one format for the whole
             // detail. `<date-time>` formats by the browser's locale, which put
             // "9/20/2026, 12:00 PM" next to "01.11.2026" on one screen.
-            'starts_at_display' => LocalTime::moment($this->starts_at),
+            // "Starts" is when the contract began, not `starts_at`: that is
+            // the provider's rhythm (one interval after the first payment,
+            // after a trial), and on Mollie a resume starts a new agreement
+            // with a new date (adg staging, 1.25.0-rc.1). The earlier of the
+            // row's creation and `starts_at`: a backfilled row is younger than
+            // the agreement it describes.
+            'starts_at_display' => LocalTime::moment(
+                $this->created_at && $this->starts_at ? $this->created_at->min($this->starts_at) : ($this->created_at ?? $this->starts_at)
+            ),
             // A charge falls on a day; its clock time is the provider's and
             // printed "00:00" on every Mollie agreement.
             'next_payment_at_display' => LocalTime::date($this->next_payment_at),

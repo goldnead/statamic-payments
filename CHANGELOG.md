@@ -206,6 +206,19 @@ the webhook for that very payment arrives afterwards. The entitlements bridge fo
 and granted nothing. The checkout now freezes `grants` onto the payment line (`meta.grants`), and
 the bridge falls back to it when the catalogue has nothing to say.
 
+### Fixed: a subscription bought through an offer could not switch (found on staging, rc.1)
+
+- Switch targets listed only configured products, so a subscription bought through an offer
+  never had one, and `switch()` returned false without a word. The active offers of the
+  subscription's brand (with each pricing option that has a rhythm) are now targets too, read
+  from `statamic-offers` where it is installed, under the same rules: brand, rhythm, currency,
+  and the product's `switch_to` list where it has one. An offer has no `switch_to` or `pausable`
+  of its own; it inherits both from the product it sells.
+- Every switch that is not made now logs why (`reason`: cannot switch, target does not fit, not
+  a target, no provider, row changed meanwhile).
+- CP subscription detail: "Starts" shows when the contract began, no longer the provider's start
+  date, which a resume on Mollie replaces with the new agreement's.
+
 ## 1.24.5 — 2026-09-22
 
 ### Fixed: static analysis had been red in CI for a week

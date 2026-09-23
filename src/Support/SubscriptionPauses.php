@@ -60,9 +60,10 @@ class SubscriptionPauses
     /**
      * Whether the buyer may pause it from the portal.
      *
-     * The product decides where it says so (`pausable` in its catalogue entry,
-     * which `statamic-offers` fills from the offer); otherwise the site's
-     * default, `portal.allow_pause`, which is off.
+     * The product decides where it says so (`pausable` in its catalogue entry;
+     * an offer has no value of its own and inherits the one of the product it
+     * sells, through the `statamic-offers` resolver, like `switch_to`);
+     * otherwise the site's default, `portal.allow_pause`, which is off.
      */
     public function portalMayPause(Subscription $subscription): bool
     {

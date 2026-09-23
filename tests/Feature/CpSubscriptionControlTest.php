@@ -9,6 +9,7 @@ use Goldnead\StatamicPayments\Actions\ResumeSubscription;
 use Goldnead\StatamicPayments\Actions\SwitchSubscription;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\LocalTime;
 use Goldnead\StatamicPayments\Support\SubscriptionSwitches;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use Illuminate\Support\Carbon;
@@ -111,6 +112,21 @@ class CpSubscriptionControlTest extends TestCase
         $this->runAction(ResumeSubscription::handle(), [$abo->getKey()])->assertOk();
 
         $this->assertSame(Subscription::STATUS_ACTIVE, $abo->fresh()->status);
+    }
+
+    #[Test]
+    public function starts_shows_when_the_contract_began_also_after_a_resume(): void
+    {
+        // Bought on 5 August; the provider's rhythm began a month later.
+        $abo = $this->abo(['starts_at' => Carbon::parse('2026-09-05 10:00')]);
+        Subscription::query()->whereKey($abo->getKey())->toBase()->update(['created_at' => Carbon::parse('2026-08-05 10:00')]);
+
+        $this->runAction(PauseSubscription::handle(), [$abo->getKey()])->assertOk();
+        $this->runAction(ResumeSubscription::handle(), [$abo->getKey()])->assertOk();
+
+        $row = $this->actingAs($this->user())->getJson('/cp/utilities/subscriptions')->json('data.0');
+
+        $this->assertSame(LocalTime::moment(Carbon::parse('2026-08-05 10:00')), $row['starts_at_display']);
     }
 
     #[Test]

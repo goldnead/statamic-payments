@@ -81,18 +81,21 @@ const detailFields = computed(() => {
     if (! row) return [];
 
     return [
-        { label: t.field_amount, value: `${row.amount} ${row.currency}` },
+        // Every date and amount arrives formatted from the server: the shop's
+        // display time zone and the reader's language, one format throughout.
+        { label: t.field_amount, value: row.amount_display },
+        { label: t.field_coupon, value: row.coupon || null },
         { label: t.field_rhythm, value: row.rhythm },
         { label: t.field_progress, value: row.progress },
         { label: t.field_total, value: row.total ? `${row.total} ${row.currency}` : null },
-        { label: t.field_dunning_since, value: row.dunning?.started_at ?? null, date: true },
-        { label: t.field_starts_at, value: row.starts_at, date: true },
-        { label: t.field_next_payment, value: row.next_payment_at, date: true },
-        { label: t.field_paused_at, value: row.paused_at, date: true },
+        { label: t.field_dunning_since, value: row.dunning_started_at_display },
+        { label: t.field_starts_at, value: row.starts_at_display },
+        { label: t.field_next_payment, value: row.next_payment_at_display },
+        { label: t.field_paused_at, value: row.paused_at_display },
         { label: t.field_resumes_at, value: row.resumes_at },
         { label: t.field_card_expires_at, value: row.card_expires_at },
-        { label: t.field_cancelled_at, value: row.cancelled_at, date: true },
-        { label: t.field_ended_at, value: row.ended_at, date: true },
+        { label: t.field_cancelled_at, value: row.cancelled_at_display },
+        { label: t.field_ended_at, value: row.ended_at_display },
         { label: t.field_buyer, value: row.email },
         { label: t.field_name, value: row.name },
         { label: t.field_provider, value: row.provider },
@@ -153,7 +156,7 @@ const detailFields = computed(() => {
             </template>
 
             <template #cell-amount="{ row }">
-                <span class="tabular-nums">{{ row.amount }} {{ row.currency }}</span>
+                <span class="tabular-nums">{{ row.amount_display }}</span>
             </template>
 
             <template #cell-rhythm="{ row }">
@@ -165,8 +168,8 @@ const detailFields = computed(() => {
             </template>
 
             <template #cell-next_payment_at="{ row }">
-                <span v-if="row.next_payment_at" class="text-gray-600 dark:text-gray-400">
-                    <date-time :of="row.next_payment_at" />
+                <span v-if="row.next_payment_at" class="text-gray-600 dark:text-gray-400 tabular-nums">
+                    {{ row.next_payment_at_display }}
                 </span>
                 <span v-else class="text-gray-500 dark:text-gray-400">{{ t.none }}</span>
             </template>
@@ -223,8 +226,7 @@ const detailFields = computed(() => {
                     >
                         <dt class="text-sm text-gray-600 dark:text-gray-400">{{ field.label }}</dt>
                         <dd class="text-end text-sm" :class="field.mono ? 'font-mono text-xs' : 'tabular-nums'">
-                            <date-time v-if="field.date && field.value" :of="field.value" />
-                            <span v-else-if="field.value">{{ field.value }}</span>
+                            <span v-if="field.value">{{ field.value }}</span>
                             <span v-else class="text-gray-500 dark:text-gray-400">{{ t.none }}</span>
                         </dd>
                     </div>
@@ -240,9 +242,9 @@ const detailFields = computed(() => {
                             :key="index"
                             class="flex items-baseline justify-between gap-4 py-2"
                         >
-                            <dt class="text-sm">{{ line.text }}</dt>
-                            <dd class="text-end text-sm text-gray-600 dark:text-gray-400 tabular-nums">
-                                <date-time v-if="line.at" :of="line.at" />
+                            <dt class="text-sm" :class="line.failed ? 'text-red-600 dark:text-red-400' : ''">{{ line.text }}</dt>
+                            <dd class="text-end text-sm text-gray-600 dark:text-gray-400 tabular-nums whitespace-nowrap">
+                                {{ line.at_display }}
                             </dd>
                         </div>
                     </dl>
@@ -262,8 +264,8 @@ const detailFields = computed(() => {
                         </TableColumns>
                         <TableRows>
                             <TableRow v-for="payment in detail.payments" :key="payment.id">
-                                <TableCell><date-time :of="payment.created_at" /></TableCell>
-                                <TableCell class="tabular-nums">{{ payment.amount }} {{ payment.currency }}</TableCell>
+                                <TableCell class="tabular-nums">{{ payment.created_at_display }}</TableCell>
+                                <TableCell class="tabular-nums">{{ payment.amount_display }}</TableCell>
                                 <TableCell>
                                     <Badge
                                         :color="payment.status === 'paid' ? 'green' : 'default'"

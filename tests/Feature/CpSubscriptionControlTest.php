@@ -6,7 +6,9 @@ use Goldnead\StatamicPayments\Actions\CancelSubscription;
 use Goldnead\StatamicPayments\Actions\PauseSubscription;
 use Goldnead\StatamicPayments\Actions\ResumeSubscription;
 use Goldnead\StatamicPayments\Actions\SwitchSubscription;
+use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\SubscriptionSwitches;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use Illuminate\Support\Carbon;
 use PHPUnit\Framework\Attributes\Test;
@@ -132,6 +134,79 @@ class CpSubscriptionControlTest extends TestCase
 
         $this->assertSame(Subscription::STATUS_ACTIVE, $abo->fresh()->status);
         $this->assertSame('basis', $abo->fresh()->product);
+    }
+
+    /** May look at the screen, may not change what somebody pays. */
+    protected function viewer()
+    {
+        $role = tap(Role::make('abos-lesen')->addPermission('access cp')->addPermission('access subscriptions utility'))->save();
+
+        return tap(User::make()->email(uniqid().'@example.com')->assignRole($role))->save();
+    }
+
+    protected function manager()
+    {
+        $role = tap(Role::make('abos-verwalten')
+            ->addPermission('access cp')
+            ->addPermission('access subscriptions utility')
+            ->addPermission('manage payment subscriptions'))->save();
+
+        return tap(User::make()->email(uniqid().'@example.com')->assignRole($role))->save();
+    }
+
+    #[Test]
+    public function looking_at_subscriptions_is_not_changing_them(): void
+    {
+        $abo = $this->abo();
+        $viewer = $this->viewer();
+
+        $this->actingAs($viewer)->getJson('/cp/utilities/subscriptions')->assertOk();
+
+        foreach ([PauseSubscription::handle(), SwitchSubscription::handle(), CancelSubscription::handle()] as $action) {
+            $this->runAction($action, [$abo->getKey()], ['to' => 'plus'], $viewer)->assertForbidden();
+        }
+
+        $this->assertSame(Subscription::STATUS_ACTIVE, $abo->fresh()->status);
+    }
+
+    #[Test]
+    public function the_manage_permission_is_what_lets_somebody_pause(): void
+    {
+        $abo = $this->abo();
+
+        $this->runAction(PauseSubscription::handle(), [$abo->getKey()], [], $this->manager())->assertOk();
+
+        $this->assertSame(Subscription::STATUS_PAUSED, $abo->fresh()->status);
+    }
+
+    #[Test]
+    public function switch_targets_stay_within_the_brand_or_the_list(): void
+    {
+        config(['statamic-payments.products.fremd' => ['name' => 'Fremd', 'amount_cent' => 2500, 'interval' => '1 month', 'brand_id' => 7]]);
+
+        $this->assertSame(['plus' => 'Plus'], app(SubscriptionSwitches::class)->targetsFor($this->abo()));
+
+        config(['statamic-payments.products.basis.switch_to' => ['fremd']]);
+
+        $this->assertSame(['fremd' => 'Fremd'], app(SubscriptionSwitches::class)->targetsFor($this->abo()),
+            'a list on the product is the operator saying so, brand or not');
+    }
+
+    #[Test]
+    public function a_difference_that_later_fails_is_marked_on_the_agreement(): void
+    {
+        $abo = $this->abo();
+        $this->runAction(SwitchSubscription::handle(), [$abo->getKey()], ['to' => 'plus'])->assertOk();
+
+        $differenz = Payment::query()->whereNotNull('meta->subscription_change')->sole();
+        $this->gateway->markStatus($differenz->provider_id, Payment::STATUS_FAILED);
+        $this->postJson(route('statamic-payments.webhook'), ['id' => $differenz->provider_id])->assertOk();
+
+        $meta = $abo->fresh()->meta;
+        $this->assertSame($differenz->getKey(), $meta['switches'][0]['proration_failed_payment_id'] ?? null);
+
+        $row = $this->actingAs($this->user())->getJson('/cp/utilities/subscriptions')->json('data.0');
+        $this->assertStringContainsString(__('statamic-payments::subscriptions.history_proration_failed'), json_encode($row['history'], JSON_UNESCAPED_UNICODE));
     }
 
     #[Test]

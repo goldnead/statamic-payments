@@ -17,5 +17,7 @@ class CheckoutBlocked
         public readonly string $reason,
         public readonly ?string $email,
         public readonly ?string $ip,
+        /** The same reason in words a buyer can read, for the checkout page. */
+        public readonly string $message = '',
     ) {}
 }

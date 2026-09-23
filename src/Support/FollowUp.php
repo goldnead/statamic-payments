@@ -145,8 +145,17 @@ class FollowUp
      *
      * @throws \InvalidArgumentException wenn $details etwas enthält, das dem Paket gehört
      */
-    public function accept(Payment $original, string $productHandle, array $context = [], array|PaymentDetails $details = [], ?string $buyerEmail = null): ?Payment
+    public function accept(Payment $original, string $productHandle, array $context = [], array|PaymentDetails $details = [], ?string $buyerEmail = null, ?Discount $discount = null): ?Payment
     {
+        // **No `CheckoutGuard` on this path, on purpose** (decision 23.09.2026,
+        // funnels 6167932). A one-click upsell charges a card that a paid order
+        // already put on file, for the buyer of that order: there is no card
+        // number to test here, which is what the brake and the captcha guard
+        // against. `eligible()` below is this path's door.
+        //
+        // `$discount`: a funnel-wide coupon, redeemed on the upsell too. Built
+        // by the caller's server-side code like every Discount, and clamped to
+        // the price below.
         // Zuerst, und vor jeder Prüfung, die vom Zustand abhängt: ein Aufrufer,
         // der etwas Unerlaubtes mitgibt, soll das immer erfahren und nicht nur
         // dann, wenn dieses Angebot gerade zulässig ist.
@@ -172,7 +181,9 @@ class FollowUp
         // The row exists before the provider is called, exactly as at checkout:
         // the other order loses the payment if the process dies in between, and
         // the buyer has by then been charged.
-        $payment = DB::transaction(function () use ($original, $product, $context, $details): Payment {
+        $off = $discount?->against((int) $product['amount_cent']) ?? 0;
+
+        $payment = DB::transaction(function () use ($original, $product, $context, $details, $discount, $off): Payment {
             // Die Angaben des Aufrufers kommen in dasselbe INSERT wie alles
             // andere, also festgeschrieben, bevor `chargeAgain()` unten den
             // Anbieter ruft. Das ist der ganze Punkt: es gibt keinen Moment, in
@@ -189,7 +200,9 @@ class FollowUp
                 // Erbe allein die falsche Frage beantwortet.
                 'brand_id' => Brands::forCatalogueEntry($product, $original, Brands::FOR_FOLLOW_UP),
                 'product' => $product['handle'],
-                'amount_cent' => $product['amount_cent'],
+                'amount_cent' => $product['amount_cent'] - $off,
+                'discount_code' => $off > 0 ? $discount->code : null,
+                'discount_cent' => $off > 0 ? $off : null,
                 'currency' => $product['currency'],
                 'status' => Payment::STATUS_INITIATED,
                 'email' => $original->email,
@@ -234,6 +247,7 @@ class FollowUp
                 'name' => $product['name'],
                 'amount_cent' => $product['amount_cent'],
                 'quantity' => 1,
+                'discount_cent' => $off,
                 'kind' => PaymentItem::KIND_UPSELL,
                 'meta' => $context === [] ? null : $context,
             ]);

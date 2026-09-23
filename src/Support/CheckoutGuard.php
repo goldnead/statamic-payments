@@ -25,9 +25,12 @@ use Throwable;
  * start a checkout and are not affected.
  *
  * **What a refusal looks like.** `start()` answers null, which every caller
- * already handles as "this checkout cannot be started". No reason reaches the
- * page: telling a card tester which rule caught him is telling him which to
- * avoid. The reason goes to the log and to `CheckoutBlocked`.
+ * already handles as "this checkout cannot be started", and
+ * `Checkout::refusal()` then holds a sentence for the page: "too many attempts,
+ * try again in a few minutes", "please confirm you are not a robot", or, for
+ * the block list, only that the order cannot be taken. The block list's rule
+ * itself is never named: telling a card tester which rule caught him is
+ * telling him which to avoid. The code goes to the log and to `CheckoutBlocked`.
  *
  * **The captcha is off by default**, and turning it on is a promise the site
  * makes: every checkout form renders `{{ payments:captcha }}`. A form without it
@@ -52,7 +55,7 @@ class CheckoutGuard
         $ip = (string) $request->ip();
 
         $reason = $this->blocked($email, $ip)
-            ?? ($this->rateLimited($email, $ip) ? 'rate_limited' : null)
+            ?? ($this->rateLimited($email, $this->countableIp($request)) ? 'rate_limited' : null)
             ?? ($this->captchaPasses($request, $ip) ? null : 'captcha');
 
         if ($reason !== null) {
@@ -63,7 +66,7 @@ class CheckoutGuard
             ]);
 
             try {
-                CheckoutBlocked::dispatch($reason, $email !== '' ? $email : null, $ip !== '' ? $ip : null);
+                CheckoutBlocked::dispatch($reason, $email !== '' ? $email : null, $ip !== '' ? $ip : null, self::message($reason));
             } catch (Throwable $e) {
                 Log::error('statamic-payments: a listener threw on a refused checkout.', ['exception' => $e->getMessage()]);
             }
@@ -132,7 +135,7 @@ class CheckoutGuard
 
         $decay = max(1, (int) ($limit['decay_minutes'] ?? 10)) * 60;
         $keys = array_filter([
-            $ip !== '' ? ['statamic-payments.checkout.ip|'.$ip, max(1, (int) ($limit['per_ip'] ?? 20))] : null,
+            $ip !== '' ? ['statamic-payments.checkout.ip|'.$ip, max(1, (int) ($limit['per_ip'] ?? 100))] : null,
             $email !== '' ? ['statamic-payments.checkout.email|'.sha1($email), max(1, (int) ($limit['per_email'] ?? 10))] : null,
         ]);
 
@@ -147,6 +150,55 @@ class CheckoutGuard
         }
 
         return false;
+    }
+
+    /** Said once per process, not once per checkout. */
+    protected static bool $warnedAboutProxy = false;
+
+    /**
+     * The address worth counting, or '' when there is none.
+     *
+     * A private or loopback address is not a visitor's: it is a proxy this
+     * application does not trust (no TrustProxies), and every buyer arrives
+     * from it. Counting it would brake a whole shop as one person. Then only
+     * the email address is counted. Where the proxy even forwarded the real
+     * address and nobody trusts it, that is a setup fault worth one line.
+     */
+    public function countableIp(Request $request): string
+    {
+        $ip = (string) $request->ip();
+
+        if ($ip === '' || ! IpUtils::isPrivateIp($ip)) {
+            return $ip;
+        }
+
+        if ($request->headers->has('X-Forwarded-For') && ! self::$warnedAboutProxy) {
+            self::$warnedAboutProxy = true;
+
+            Log::warning('statamic-payments: checkouts arrive from a private address with X-Forwarded-For set; the proxy is not trusted (TrustProxies), so the checkout brake counts email addresses only.', [
+                'ip' => $ip,
+            ]);
+        }
+
+        return '';
+    }
+
+    /** For tests: the proxy warning may be said again. */
+    public static function forgetWarnings(): void
+    {
+        self::$warnedAboutProxy = false;
+    }
+
+    /** The reason, in words a buyer can read. */
+    public static function message(string $reason): string
+    {
+        return (string) __('statamic-payments::checkout.refused_'.match ($reason) {
+            'blocked_email', 'blocked_domain', 'blocked_ip' => 'blocked',
+            'rate_limited' => 'rate_limited',
+            'captcha' => 'captcha',
+            'country' => 'country',
+            default => 'blocked',
+        });
     }
 
     public function captchaProvider(): ?string

@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Portal;
 
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\URL;
 
@@ -36,6 +37,26 @@ class LinkTokenizer
         return URL::temporarySignedRoute(
             'statamic-payments.portal.link',
             now()->addMinutes($this->ttlMinutes()),
+            ['payLink' => $this->seal($email, $brandId)],
+        );
+    }
+
+    /**
+     * A link that works until a given moment, for a mail that announces
+     * something days ahead: the reminder before a charge has to work until the
+     * charge, not for thirty minutes after it was sent. Never shorter than the
+     * ordinary link, never longer than `$maxDays`.
+     *
+     * @return string absolute, signed, expiring URL
+     */
+    public function issueUntil(string $email, int $brandId, \DateTimeInterface $until, int $maxDays = 45): string
+    {
+        $bis = Carbon::instance($until);
+        $bis = $bis->max(now()->addMinutes($this->ttlMinutes()))->min(now()->addDays($maxDays));
+
+        return URL::temporarySignedRoute(
+            'statamic-payments.portal.link',
+            $bis,
             ['payLink' => $this->seal($email, $brandId)],
         );
     }

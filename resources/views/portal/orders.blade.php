@@ -47,6 +47,9 @@
                                     @if ($subscription['remaining'] !== null)
                                         · {{ __('statamic-payments::portal.subscription_remaining', ['count' => $subscription['remaining']]) }}
                                     @endif
+                                    @if (($subscription['coupon'] ?? '') !== '')
+                                        <span class="desc">{{ $subscription['coupon'] }}</span>
+                                    @endif
                                 </span>
                             </span>
                             <span class="amount">

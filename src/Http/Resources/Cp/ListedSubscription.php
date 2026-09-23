@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Http\Resources\Cp\Concerns\DescribesProducts;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Portal\Display;
 use Goldnead\StatamicPayments\Support\Dunning;
+use Goldnead\StatamicPayments\Support\LocalTime;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Carbon;
 
@@ -52,7 +53,12 @@ class ListedSubscription extends JsonResource
                 ? __('statamic-payments::messages.subscription_kind_plan')
                 : __('statamic-payments::messages.subscription_kind_subscription'),
 
-            'amount' => $this->amount(),
+            // What the provider charges per cycle now: a running coupon comes
+            // off. `price` is the agreement's own price.
+            'amount' => $this->chargedAmount(),
+            'price' => $this->amount(),
+            'amount_display' => Display::money($this->chargedCent(), $this->currency),
+            'coupon' => Display::coupon($this->resource),
             'currency' => $this->currency,
 
             'interval' => $this->interval,
@@ -94,10 +100,20 @@ class ListedSubscription extends JsonResource
             'cancelled_at' => $this->cancelled_at?->toIso8601String(),
             'ended_at' => $this->ended_at?->toIso8601String(),
             'paused_at' => $this->paused_at?->toIso8601String(),
-            // A day, not a moment: shown as a date in the reader's language
-            // rather than through `<date-time>`, which adds a clock time and
-            // shifts a UTC midnight into the day before or an odd 1:00.
-            'resumes_at' => $this->resumes_at?->copy()->locale(app()->getLocale())->isoFormat('LL'),
+
+            // The same moments, formatted on the server: the shop's display
+            // time zone and the reader's language, one format for the whole
+            // detail. `<date-time>` formats by the browser's locale, which put
+            // "9/20/2026, 12:00 PM" next to "01.11.2026" on one screen.
+            'starts_at_display' => LocalTime::moment($this->starts_at),
+            'next_payment_at_display' => LocalTime::moment($this->next_payment_at),
+            'cancelled_at_display' => LocalTime::moment($this->cancelled_at),
+            'ended_at_display' => LocalTime::moment($this->ended_at),
+            'paused_at_display' => LocalTime::moment($this->paused_at),
+            'dunning_started_at_display' => LocalTime::moment($this->dunning_started_at),
+
+            // A day, not a moment: the day in the shop's zone.
+            'resumes_at' => LocalTime::date($this->resumes_at),
             // Month and year, the way a card prints it.
             'card_expires_at' => $this->card_expires_at?->format('m/Y'),
 
@@ -173,7 +189,12 @@ class ListedSubscription extends JsonResource
                         'from' => $this->productName((string) ($switch['from'] ?? '')) ?? ($switch['from'] ?? ''),
                         'to' => $this->productName((string) ($switch['to'] ?? '')) ?? ($switch['to'] ?? ''),
                         'amount' => Display::money((int) ($switch['proration_cent'] ?? 0), $this->currency),
-                    ]),
+                    ]).(isset($switch['proration_failed_payment_id'])
+                        // The difference was charged and did not arrive: the
+                        // new product runs unpaid for the rest of the period.
+                        ? ' '.__('statamic-payments::subscriptions.history_proration_failed')
+                        : ''),
+                'failed' => isset($switch['proration_failed_payment_id']),
             ];
         }
 
@@ -193,7 +214,10 @@ class ListedSubscription extends JsonResource
 
         usort($lines, fn ($a, $b) => strcmp((string) $b['at'], (string) $a['at']));
 
-        return $lines;
+        return array_map(fn (array $line) => $line + [
+            'at_display' => is_string($line['at']) ? LocalTime::moment(Carbon::parse($line['at'])) : null,
+            'failed' => false,
+        ], $lines);
     }
 
     /** A stored moment as a short date in the reader's language. */
@@ -204,7 +228,7 @@ class ListedSubscription extends JsonResource
         }
 
         try {
-            return Carbon::parse($iso)->locale(app()->getLocale())->isoFormat('L');
+            return (string) LocalTime::date(Carbon::parse($iso));
         } catch (\Throwable) {
             return substr($iso, 0, 10);
         }

@@ -54,6 +54,17 @@ class Subscriptions
         protected Checkout $checkout,
     ) {}
 
+    protected ?string $refusal = null;
+
+    /**
+     * Why the last `start()` was refused at the door, in words for the page;
+     * see `Checkout::refusal()`.
+     */
+    public function refusal(): ?string
+    {
+        return $this->refusal ?? $this->checkout->refusal();
+    }
+
     /** Whether this site can run subscriptions at all. */
     public function available(): bool
     {
@@ -314,7 +325,11 @@ class Subscriptions
 
         // Die Länderregel (statamic-offers O3), vor allem anderen. Die Kasse
         // fragt sie auch, hier ist sie billiger: noch ist nichts vorbereitet.
+        $this->refusal = null;
+
         if (! Checkout::soldIn(array_map('strval', (array) $products), $buyer['country'] ?? null)) {
+            $this->refusal = CheckoutGuard::message('country');
+
             return null;
         }
 
@@ -712,6 +727,71 @@ class Subscriptions
     }
 
     /**
+     * Whether a natively paused agreement is running again at the provider,
+     * and if so, the row made to say so (`SubscriptionPauses::adoptProviderResume()`).
+     */
+    protected function resumedByProvider(Subscription $subscription): bool
+    {
+        if (data_get($subscription->meta, 'pause.mode') !== 'native') {
+            return false;
+        }
+
+        $gateway = $this->agreementGateway($subscription);
+
+        if ($gateway === null) {
+            return false;
+        }
+
+        try {
+            $remote = $gateway->fetchSubscription($subscription->customer_reference, $subscription->provider_id);
+        } catch (Throwable $e) {
+            Log::warning('statamic-payments: the provider would not say whether a paused agreement runs again.', [
+                'subscription_id' => $subscription->getKey(),
+                'exception' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
+
+        return $remote->isLive() && app(SubscriptionPauses::class)->adoptProviderResume($subscription, $remote);
+    }
+
+    /**
+     * A paid cycle on a paused row: counted, the paid period carried into the
+     * resume date, the access renewed to it.
+     */
+    protected function countDuringPause(Subscription $subscription, Payment $payment): Subscription
+    {
+        $meta = $subscription->meta ?? [];
+        $pause = is_array($meta['pause'] ?? null) ? $meta['pause'] : [];
+        $anchor = $pause['anchor'] ?? $pause['next_payment_at'] ?? null;
+
+        if (is_string($anchor)) {
+            $paid = ((int) ($pause['paid_during'] ?? 0)) + 1;
+            $pause['anchor'] = $anchor;
+            $pause['paid_during'] = $paid;
+            $pause['next_payment_at'] = Subscription::addIntervals(Carbon::parse($anchor), (string) $subscription->interval, $paid)->toIso8601String();
+            $meta['pause'] = $pause;
+        }
+
+        $subscription->forceFill([
+            'times_charged' => ((int) $subscription->times_charged) + 1,
+            'meta' => $meta,
+        ])->save();
+
+        $subscription = $subscription->fresh() ?? $subscription;
+
+        Log::info('statamic-payments: a charge settled during a pause and was counted.', [
+            'subscription_id' => $subscription->getKey(),
+            'payment_id' => $payment->getKey(),
+        ]);
+
+        SubscriptionRenewed::dispatch($subscription, $payment);
+
+        return $subscription;
+    }
+
+    /**
      * A first payment that was taken and an agreement that was not created.
      *
      * The customer paid. Not saying so anywhere would leave the only trace in a
@@ -751,10 +831,10 @@ class Subscriptions
         // Scoped to the provider of the payment that carried this cycle, not to
         // whatever the container happens to bind. A cycle id from one provider
         // must not be able to match an agreement row from another.
-        $subscription = Subscription::query()
-            ->where('provider', $payment->provider)
-            ->where('provider_id', $providerSubscriptionId)
-            ->first();
+        //
+        // The row's earlier ids count too: a debit started on an agreement a
+        // pause or switch ended can settle after it (Subscription::forProviderId()).
+        $subscription = Subscription::forProviderId((string) $payment->provider, $providerSubscriptionId);
 
         if (! $subscription) {
             Log::warning('statamic-payments: a cycle arrived for an agreement this site does not know.', [
@@ -775,6 +855,21 @@ class Subscriptions
 
         if ($counted === 0) {
             return $subscription;
+        }
+
+        // Money during a pause is money. Two ways it arrives, and neither may
+        // be thrown away (Gauntlet 23.09.2026):
+        if ($subscription->isPaused()) {
+            // Stripe lifted the pause by itself on `resumes_at` and charged.
+            // The row follows the provider, then the cycle counts as usual.
+            if ($this->resumedByProvider($subscription)) {
+                $subscription = $subscription->fresh() ?? $subscription;
+            } else {
+                // A direct debit on the agreement the pause ended (Mollie)
+                // settled late. It pays one more period: counted, and the
+                // day the pause will resume on moves one period on.
+                return $this->countDuringPause($subscription, $payment);
+            }
         }
 
         // A straggler for an agreement that is already over must not count.
@@ -841,9 +936,9 @@ class Subscriptions
         // A pause is this package's state before it is the provider's. On
         // Mollie the agreement the row still names has been ended on purpose,
         // and writing that answer down would turn a pause into a cancellation.
-        // Resuming is `SubscriptionPauses::resume()`'s job, not a refresh's.
+        // The one thing a refresh does follow: Stripe ending a pause by itself.
         if ($subscription->isPaused()) {
-            return null;
+            return $this->resumedByProvider($subscription) ? $subscription->fresh() : null;
         }
 
         $gateway = $this->agreementGateway($subscription);

@@ -27,6 +27,21 @@ class Checkout
         protected Catalogue $catalogue,
     ) {}
 
+    /** Why the last `start()` on this instance was refused, in words. */
+    protected ?string $refusal = null;
+
+    /**
+     * The sentence for the page after `start()` answered null because the
+     * door refused (block list, brake, captcha, country). Null after a
+     * checkout that started, and null for a refusal that is the caller's own
+     * mistake (an unknown product). Never names which block-list rule caught
+     * somebody.
+     */
+    public function refusal(): ?string
+    {
+        return $this->refusal;
+    }
+
     /**
      * @param  string|list<string>|array<string, int>  $products  One handle, a
      *                                                            list of handles (the first is what the buyer came for, the rest are
@@ -45,6 +60,8 @@ class Checkout
      */
     public function start(string|array $products, array $buyer = [], ?string $returnUrl = null, ?Discount $discount = null, array|PaymentDetails $details = []): ?CheckoutResult
     {
+        $this->refusal = null;
+
         // Vor allem anderen, damit ein Aufrufer-Fehler folgenlos bleibt: hier
         // ist noch keine Zeile angelegt und kein Anbieter gerufen.
         $details = PaymentDetails::from($details);
@@ -59,13 +76,18 @@ class Checkout
         // Die Kasse des Angebots prüft sie schon; hier steht sie noch einmal,
         // weil nicht jede Kasse die des Angebots ist.
         if (! self::soldIn(array_map(fn (array $l) => (string) $l['handle'], $lines), $buyer['country'] ?? null)) {
+            $this->refusal = CheckoutGuard::message('country');
+
             return null;
         }
 
         // The door (P7): block list, rate limit, captcha. Before the row and
         // before the provider, so a refused attempt costs nothing and leaves
-        // nothing behind. Null to the caller, the reason to the log.
-        if (app(CheckoutGuard::class)->check($buyer) !== null) {
+        // nothing behind. Null to the caller, a readable sentence in
+        // `refusal()`, the reason to the log.
+        if (($reason = app(CheckoutGuard::class)->check($buyer)) !== null) {
+            $this->refusal = CheckoutGuard::message($reason);
+
             return null;
         }
 

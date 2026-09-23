@@ -93,7 +93,10 @@ class OrdersController extends PortalController
         return [
             'id' => $subscription->getKey(),
             'name' => $this->nameOf($subscription->product),
-            'amount' => Display::money((int) $subscription->amount_cent, $subscription->currency),
+            // What the next charge costs, a running coupon included, and the
+            // coupon itself in words.
+            'amount' => Display::money($subscription->chargedCent(), $subscription->currency),
+            'coupon' => Display::coupon($subscription),
             'currency' => $subscription->currency,
             'rhythm' => Display::rhythm($subscription->interval),
             'status' => $subscription->status,

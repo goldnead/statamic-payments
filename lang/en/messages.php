@@ -111,6 +111,7 @@ return [
     'permission_group' => 'Payments',
     'permission_handle_withdrawals' => 'Mark withdrawals as handled',
     'permission_handle_cancellations' => 'Mark cancellations as handled',
+    'permission_manage_subscriptions' => 'Manage subscriptions (pause, resume, switch, cancel)',
 
     'withdrawals_utility_title' => 'Withdrawals',
     'withdrawals_utility_nav' => 'Withdrawals',

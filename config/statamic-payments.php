@@ -66,7 +66,7 @@ return [
     |
     | Nothing is scheduled for you:
     |
-    |     Schedule::command('payments:dunning')->daily();
+    |     Schedule::command('payments:dunning')->daily()->withoutOverlapping();
     |
     */
 
@@ -100,7 +100,7 @@ return [
     |
     | A pause with a date resumes by itself; schedule the pass that does it:
     |
-    |     Schedule::command('payments:resume-paused')->daily();
+    |     Schedule::command('payments:resume-paused')->daily()->withoutOverlapping();
     |
     */
 
@@ -150,7 +150,7 @@ return [
     | Each reminder goes out once per agreement and date, however often the
     | pass runs:
     |
-    |     Schedule::command('payments:reminders')->dailyAt('09:00');
+    |     Schedule::command('payments:reminders')->dailyAt('09:00')->withoutOverlapping();
     |
     | Note on SEPA direct debit: the scheme asks for a pre-notification before
     | each debit. Whether the provider's own notice covers it or this mail
@@ -228,9 +228,11 @@ return [
     |--------------------------------------------------------------------------
     |
     | With `expires_minutes` set, the provider sends the buyer to a signed link
-    | of this addon that is valid that long; it forwards to the page above and
-    | notes the visit in the session. The page asks
-    | `{{ payments:thanks }}{{ if valid }}…{{ /if }}{{ /payments:thanks }}`.
+    | of this addon (valid `link_hours`); it forwards to the page above and
+    | notes the visit in the session. The page is theirs for `expires_minutes`
+    | from the first visit. The page asks
+    | `{{ payments:thanks }}{{ if valid }}…{{ elseif pending }}…{{ /if }}{{ /payments:thanks }}`;
+    | `valid` needs the payment to be paid, `pending` is a debit on its way.
     | A link opened too late lands on a short page of this addon, or on
     | `expired_url`. Null or 0 switches it off (default).
     |
@@ -239,6 +241,9 @@ return [
     'thanks' => [
         'expires_minutes' => env('STATAMIC_PAYMENTS_THANKS_EXPIRES'),
         'expired_url' => null,
+        // How long the signed link itself works. The window above starts at
+        // the first visit through it, so a slow SEPA buyer still gets it.
+        'link_hours' => 24,
     ],
 
     /*
@@ -254,7 +259,10 @@ return [
     |   Panel on the shared settings screen.
     | - `rate_limit`: checkouts per IP and per address within `decay_minutes`,
     |   against card testing. On by default and generous, because a choir buying
-    |   tickets over one Wi-Fi is one IP address.
+    |   tickets over one Wi-Fi is one IP address. A private address (the
+    |   application sits behind a proxy it does not trust, so every visitor
+    |   looks like the proxy) is not counted at all, only the email address,
+    |   and the log says once that TrustProxies is missing.
     | - `captcha`: `turnstile` (Cloudflare) or `hcaptcha`, off by default. On
     |   means every checkout form renders `{{ payments:captcha }}`; a form without
     |   it is refused. The secret stays in `.env`.
@@ -272,7 +280,7 @@ return [
         ],
         'rate_limit' => [
             'enabled' => true,
-            'per_ip' => 30,
+            'per_ip' => 100,
             'per_email' => 10,
             'decay_minutes' => 10,
         ],

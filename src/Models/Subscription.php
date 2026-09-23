@@ -87,6 +87,17 @@ class Subscription extends Model
      */
     public const STATUS_PAUSED = 'paused';
 
+    /**
+     * Claims, not states. A row is in one of these only while this package is
+     * talking to the provider about it: `SubscriptionPauses` moves `active` to
+     * `pausing` and `paused` to `resuming` with a conditional UPDATE before the
+     * call, so a second request about the same row finds nothing to claim and
+     * never reaches the provider. A failed call puts the old status back.
+     */
+    public const STATUS_PAUSING = 'pausing';
+
+    public const STATUS_RESUMING = 'resuming';
+
     protected $guarded = [];
 
     /**
@@ -227,6 +238,109 @@ class Subscription extends Model
     public function chargedAmount(): string
     {
         return Money::format($this->chargedCent(), $this->currency);
+    }
+
+    /**
+     * The row a provider's agreement id belongs to.
+     *
+     * The current id first, then the ids this row had before: a pause on
+     * Mollie and a switch on a provider without an in-place change each end
+     * one agreement and start another, and a direct debit started on the old
+     * one can still settle days later. That money belongs to this row, not to
+     * the "agreement nobody knows" alarm.
+     */
+    public static function forProviderId(string $provider, string $providerId): ?self
+    {
+        return static::query()
+            ->where('provider', $provider)
+            ->where('provider_id', $providerId)
+            ->first()
+            ?? static::query()
+                ->where('provider', $provider)
+                ->whereJsonContains('meta->previous_provider_ids', $providerId)
+                ->orderByDesc('id')
+                ->first();
+    }
+
+    /** Remember an agreement id this row no longer runs on. */
+    public function rememberProviderId(string $providerId): void
+    {
+        $meta = is_array($this->meta) ? $this->meta : [];
+        $ids = array_values(array_filter((array) ($meta['previous_provider_ids'] ?? []), 'is_string'));
+
+        if (! in_array($providerId, $ids, true)) {
+            $ids[] = $providerId;
+        }
+
+        $meta['previous_provider_ids'] = $ids;
+        $this->setAttribute('meta', $meta);
+    }
+
+    /**
+     * `$times` intervals after `$von`, counted from `$von` itself.
+     *
+     * Not `addInterval()` in a loop: a month without overflow from the 31st is
+     * the 28th, and the next month from the 28th is the 28th for ever. Counted
+     * from the start, the 31st comes back wherever a month has one.
+     */
+    public static function addIntervals(Carbon $von, string $interval, int $times): Carbon
+    {
+        $interval = trim($interval);
+
+        if ($times <= 0) {
+            return $von->copy();
+        }
+
+        if (preg_match('/^(\d+)\s*months?$/i', $interval, $m)) {
+            return $von->copy()->addMonthsNoOverflow((int) $m[1] * $times);
+        }
+
+        if (preg_match('/^(\d+)\s*years?$/i', $interval, $m)) {
+            return $von->copy()->addYearsNoOverflow((int) $m[1] * $times);
+        }
+
+        $next = $von->copy();
+
+        for ($i = 0; $i < $times; $i++) {
+            $next = self::addInterval($next, $interval);
+        }
+
+        return $next;
+    }
+
+    /**
+     * A running coupon, in the words a screen needs: which, how much off the
+     * next charge, and the date of the last charge it covers (null: for ever).
+     *
+     * Null when no coupon takes anything off the next charge.
+     *
+     * @return array{code: string, discount_cent: int, until: Carbon|null, forever: bool}|null
+     */
+    public function couponSummary(): ?array
+    {
+        $coupon = is_array($this->meta) ? ($this->meta['coupon'] ?? null) : null;
+        $off = is_array($coupon) ? (int) ($coupon['current_discount_cent'] ?? 0) : 0;
+
+        if (! is_array($coupon) || $off <= 0 || isset($coupon['ended'])) {
+            return null;
+        }
+
+        $forever = ($coupon['duration'] ?? null) === 'forever';
+        $until = null;
+
+        if (! $forever && $this->next_payment_at !== null) {
+            // Payment number of the next charge: the first payment was 1.
+            $next = ((int) $this->times_charged) + 2;
+            $last = ($coupon['duration'] ?? null) === 'repeating' ? max(1, (int) ($coupon['cycles'] ?? 1)) : 1;
+            $until = self::addIntervals($this->next_payment_at, (string) $this->interval, max(0, $last - $next));
+        }
+
+        return [
+            'code' => (string) ($coupon['code'] ?? ''),
+            'discount_cent' => $off,
+            'until' => $until,
+            'forever' => $forever,
+        ];
     }
 
     /** What the whole agreement comes to, when it has an end. */

@@ -21,6 +21,10 @@
         {{ __('statamic-payments::reminders.'.$kind.'_body', ['plan' => $plan['name'], 'amount' => $plan['display'], 'date' => $date_display]) }}
     </p>
 
+    @if (($plan['coupon'] ?? '') !== '')
+        <p style="margin:0 0 16px;font-size:14px;line-height:1.5;color:#4b4b4b;">{{ $plan['coupon'] }}</p>
+    @endif
+
     <p style="margin:0 0 24px;font-size:16px;line-height:1.5;">
         {{ __('statamic-payments::reminders.'.$kind.'_next') }}
     </p>

@@ -28,13 +28,19 @@ return [
     'switch_failed' => 'Das Abo wurde nicht gewechselt. Es ist unverändert.',
     'switch_line' => 'Wechsel zu :name, anteilig bis zur nächsten Abbuchung',
 
+    // Laufender Gutschein (statamic-offers O6)
+    'coupon_until' => 'Mit Gutschein :code, :off weniger, bis einschließlich :date.',
+    'coupon_forever' => 'Mit Gutschein :code, :off weniger, dauerhaft.',
+
     // Control Panel: Detailansicht
     'field_paused_at' => 'Pausiert seit',
+    'field_coupon' => 'Gutschein',
     'field_resumes_at' => 'Läuft weiter am',
     'field_card_expires_at' => 'Karte gültig bis',
     'detail_history' => 'Verlauf',
     'history_switch' => 'Gewechselt von :from zu :to, sofort, anteilig :amount abgebucht',
     'history_switch_later' => 'Gewechselt von :from zu :to, ab der nächsten Abbuchung',
+    'history_proration_failed' => 'Die Differenz ist nicht eingegangen.',
     'history_pause' => 'Pausiert vom :from bis :to',
 
     // Kundenkonto

@@ -116,6 +116,7 @@ return [
     'permission_group' => 'Zahlungen',
     'permission_handle_withdrawals' => 'Widerrufe als erledigt markieren',
     'permission_handle_cancellations' => 'Kündigungen als erledigt markieren',
+    'permission_manage_subscriptions' => 'Abos verwalten (pausieren, fortsetzen, wechseln, kündigen)',
 
     'withdrawals_utility_title' => 'Widerrufe',
     'withdrawals_utility_nav' => 'Widerrufe',

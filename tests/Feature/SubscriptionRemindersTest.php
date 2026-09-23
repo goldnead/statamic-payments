@@ -233,9 +233,39 @@ class SubscriptionRemindersTest extends TestCase
         $html = (new SubscriptionReminderMail($abo, 'upcoming', $rendered['subject'], null, $rendered['variables']))->render();
 
         $this->assertSame('Bald wird Mitgliedschaft abgebucht', $rendered['subject']);
-        $this->assertStringContainsString('Hallo Kim,', $html);
+        // The family's transactional mails say "Guten Tag" and "Sie" (invoices,
+        // offers, the abandoned-checkout reminder, the portal).
+        $this->assertStringContainsString('Guten Tag Kim,', $html);
+        $this->assertStringContainsString('Sie', $html);
+        $this->assertDoesNotMatchRegularExpression('/\b(du|dein|deine|dir|dich)\b/i', strip_tags($html));
         $this->assertStringContainsString('19,00', $html);
         $this->assertStringContainsString('28.09.2026', $html);
         $this->assertStringContainsString('/konto/link/', $html);
+    }
+
+    #[Test]
+    public function the_dunning_letter_speaks_the_same_way(): void
+    {
+        app()->setLocale('de');
+
+        foreach (trans('statamic-payments::dunning') as $key => $text) {
+            $this->assertDoesNotMatchRegularExpression('/\b(du|dein|deine|dir|dich)\b/i', (string) $text, $key);
+        }
+    }
+
+    #[Test]
+    public function days_are_counted_in_the_shops_time_zone(): void
+    {
+        config(['statamic.system.display_timezone' => 'Europe/Berlin', 'statamic-payments.reminders.upcoming.days' => 6]);
+        Mail::fake();
+
+        // 23 September, 01:30 in Berlin; the charge is on 29 September, 14:00
+        // in Berlin. Six days there, seven in UTC.
+        Carbon::setTestNow(Carbon::parse('2026-09-22 23:30:00', 'UTC'));
+        $this->abo(['next_payment_at' => Carbon::parse('2026-09-29 12:00:00', 'UTC')]);
+
+        $this->run_();
+
+        Mail::assertSent(SubscriptionReminderMail::class, fn ($m) => $m->variables['date'] === '2026-09-29');
     }
 }

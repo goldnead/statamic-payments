@@ -46,15 +46,54 @@ class ThanksLinkTest extends TestCase
         $this->assertStringContainsString('/!/statamic-payments/danke/1', $url);
         $this->assertStringContainsString('signature=', $url);
 
+        // Paid, as the provider says before it sends the buyer back.
+        $this->gateway->markPaid('tr_1');
+        $this->postJson(route('statamic-payments.webhook'), ['id' => 'tr_1'])->assertOk();
+
         $this->get($url)->assertRedirect(url('/danke?payment=1'));
 
         $state = app(ThanksLink::class)->state(request());
         $this->assertTrue($state['valid']);
+        $this->assertTrue($state['paid']);
         $this->assertSame(1, $state['payment_id']);
 
         // The page itself stops being theirs after the same time.
         Carbon::setTestNow('2026-09-23 10:31:00');
         $this->assertFalse(app(ThanksLink::class)->state(request())['valid']);
+    }
+
+    #[Test]
+    public function an_unpaid_order_is_not_valid_but_says_it_is_pending(): void
+    {
+        config(['statamic-payments.thanks.expires_minutes' => 30]);
+        $url = $this->redirectUrl();
+
+        $this->get($url)->assertRedirect();
+
+        $state = app(ThanksLink::class)->state(request());
+        $this->assertFalse($state['valid'], 'a SEPA order not yet paid opened the download');
+        $this->assertFalse($state['paid']);
+        $this->assertTrue($state['pending']);
+    }
+
+    #[Test]
+    public function the_window_starts_at_the_first_visit_not_at_the_checkout(): void
+    {
+        config(['statamic-payments.thanks.expires_minutes' => 30]);
+        Carbon::setTestNow('2026-09-23 10:00:00');
+        $url = $this->redirectUrl();
+
+        // A SEPA buyer comes back two hours later: still theirs.
+        Carbon::setTestNow('2026-09-23 12:00:00');
+        $this->get($url)->assertRedirect(url('/danke?payment=1'));
+
+        // Reopening the same link inside the window works again.
+        Carbon::setTestNow('2026-09-23 12:20:00');
+        $this->get($url)->assertRedirect(url('/danke?payment=1'));
+
+        // After the window it does not, however long the signature still runs.
+        Carbon::setTestNow('2026-09-23 12:31:00');
+        $this->get($url)->assertStatus(410);
     }
 
     #[Test]
@@ -64,7 +103,8 @@ class ThanksLinkTest extends TestCase
         Carbon::setTestNow('2026-09-23 10:00:00');
         $url = $this->redirectUrl();
 
-        Carbon::setTestNow('2026-09-23 11:00:00');
+        // The signature runs 24 hours; after that nobody is admitted.
+        Carbon::setTestNow('2026-09-24 10:01:00');
 
         $this->get($url)
             ->assertStatus(410)
@@ -90,7 +130,7 @@ class ThanksLinkTest extends TestCase
         ]);
         Carbon::setTestNow('2026-09-23 10:00:00');
         $url = $this->redirectUrl();
-        Carbon::setTestNow('2026-09-24 10:00:00');
+        Carbon::setTestNow('2026-09-24 10:05:00');
 
         $this->get($url)->assertRedirect('/link-abgelaufen');
     }

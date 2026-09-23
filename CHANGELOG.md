@@ -90,6 +90,36 @@ the webhook for that very payment arrives afterwards. The entitlements bridge fo
 and granted nothing. The checkout now freezes `grants` onto the payment line (`meta.grants`), and
 the bridge falls back to it when the catalogue has nothing to say.
 
+### Fixed after the critique round (Gauntlet 2)
+
+- **Two requests about one agreement reach the provider once.** Pause, resume and switch claim the
+  row with a conditional UPDATE before the provider is asked (`active` → `pausing`,
+  `paused` → `resuming`, product old → new) and give the claim back on a refusal. Two resumes at
+  once on Mollie started two agreements; two switches charged the difference twice. Creating an
+  agreement now sends an `Idempotency-Key` (Mollie and Stripe). Every documented schedule line
+  says `->withoutOverlapping()`.
+- **Money during a pause is counted.** Stripe lifting a pause on its own is followed when its
+  charge arrives or on a refresh; a late direct debit on the agreement a Mollie pause ended is
+  counted and moves the resume date one period on. Charges on an agreement id the row had before
+  (after a resume or switch) find their row (`meta.previous_provider_ids`).
+- **The 31st stays the 31st.** The first charge after a pause is counted from the original day.
+- **What is charged is what is shown.** Reminder mail, portal and CP show the amount a running
+  coupon leaves, and the coupon with the date of the last charge it covers. The portal link in a
+  reminder works until the day the mail is about.
+- **Checkout brake behind a proxy.** A private address is not counted (only the email address),
+  with one log line when an untrusted proxy forwarded the real one. Per IP now 100 in 10 minutes.
+  A refusal answers with a sentence: `Checkout::refusal()`, `CheckoutBlocked::$message`, and the
+  resume page shows it.
+- **Thank-you link.** Signed for `thanks.link_hours` (24); the `expires_minutes` window starts at the
+  first visit; `valid` needs the payment paid, and the tag also hands over `paid` and `pending`.
+- **Control Panel.** New permission *Manage subscriptions* (`manage payment subscriptions`) for
+  pause, resume, switch **and cancel** (behaviour change: roles that could cancel with only the
+  screen permission need it now). Switch targets are the product's `switch_to`, otherwise the same
+  brand's products. A difference that later fails is marked in the history. Dates and amounts in
+  the detail are formatted on the server in the display time zone.
+- **Mails say "Sie"**, like the family's other transactional mails; the dunning letter too.
+- `FollowUp::accept()` takes an optional `Discount` (a funnel-wide coupon on the one-click upsell).
+
 ### Added: portal logo, greeting and cancellation per product (P9)
 
 `portal.logo_url`, `portal.logo_alt`, `portal.greeting`, `portal.self_cancel` (and `portal_cancel`

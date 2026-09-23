@@ -5,7 +5,8 @@
  *
  * Loaded by hand from the tests that need it, like the other fakes here. The two
  * methods payments calls are copied in their arithmetic from statamic-offers
- * 3d6d85b (`src/Offers.php`), so a test here says what the real one would say.
+ * ef69dcb (`src/Offers.php`, with `floor_cent`), so a test here says what the
+ * real one would say.
  * `availableIn` answers from a static list the test fills.
  */
 
@@ -45,10 +46,15 @@ if (! class_exists(Offers::class)) {
                 return 0;
             }
 
+            // ef69dcb: the floor of a pay-what-you-want price holds on later
+            // charges too.
+            $boden = $terms['floor_cent'] ?? null;
+            $hoechstens = is_int($boden) && $boden > 0 ? max(0, $amountCent - $boden) : $amountCent;
+
             $prozent = $terms['percent'] ?? null;
 
             if (is_int($prozent) && $prozent > 0) {
-                return min($amountCent, (int) round($amountCent * min($prozent, 100) / 100));
+                return min($hoechstens, (int) round($amountCent * min($prozent, 100) / 100));
             }
 
             $fest = $terms['amount_cent'] ?? null;
@@ -63,7 +69,7 @@ if (! class_exists(Offers::class)) {
                 return 0;
             }
 
-            return min($amountCent, $fest);
+            return min($hoechstens, $fest);
         }
     }
 }

@@ -227,6 +227,90 @@ class SubscriptionPauseTest extends TestCase
         $this->assertNull($abo->fresh()->ended_at);
     }
 
+    // ------------------------------- Gauntlet 2: money arriving during a pause
+
+    protected function zyklus(string $subscriptionId): void
+    {
+        $id = $this->gateway->arrive('mitgliedschaft', 1900, $subscriptionId);
+        $this->postJson(route('statamic-payments.webhook'), ['id' => $id])->assertOk();
+    }
+
+    #[Test]
+    public function a_provider_that_resumed_by_itself_is_followed_when_its_charge_arrives(): void
+    {
+        Event::fake([SubscriptionResumed::class]);
+        $gateway = $this->nativ();
+        $abo = $this->abo();
+        $this->pauses()->pause($abo, Carbon::parse('2026-11-01'));
+
+        // Stripe lifts the pause on `resumes_at` on its own and charges.
+        Carbon::setTestNow('2026-11-05 08:00:00');
+        $gateway->subscriptions['sub_1']['status'] = Subscription::STATUS_ACTIVE;
+        $this->zyklus('sub_1');
+
+        $abo->refresh();
+        $this->assertSame(Subscription::STATUS_ACTIVE, $abo->status, 'the charge was taken and the row still says paused');
+        $this->assertNull($abo->paused_at);
+        $this->assertSame(3, $abo->times_charged, 'the paid cycle was not counted');
+        Event::assertDispatched(SubscriptionResumed::class, fn ($e) => $e->by === 'provider');
+    }
+
+    #[Test]
+    public function a_refresh_follows_a_provider_that_resumed_by_itself(): void
+    {
+        $gateway = $this->nativ();
+        $abo = $this->abo();
+        $this->pauses()->pause($abo, Carbon::parse('2026-11-01'));
+
+        $gateway->subscriptions['sub_1']['status'] = Subscription::STATUS_ACTIVE;
+        app(Subscriptions::class)->refresh($abo->fresh());
+
+        $this->assertSame(Subscription::STATUS_ACTIVE, $abo->fresh()->status);
+    }
+
+    #[Test]
+    public function a_debit_on_the_ended_agreement_during_a_pause_counts_and_moves_the_paid_period(): void
+    {
+        $abo = $this->abo();
+        $this->pauses()->pause($abo);
+
+        // A SEPA debit started before the pause settles after it.
+        $this->zyklus('sub_1');
+
+        $abo->refresh();
+        $this->assertSame(Subscription::STATUS_PAUSED, $abo->status);
+        $this->assertSame(3, $abo->times_charged);
+        $this->assertSame('2026-11-05', substr($abo->meta['pause']['next_payment_at'], 0, 10),
+            'the month that was paid is not carried into the resume date');
+    }
+
+    #[Test]
+    public function a_straggler_on_the_old_agreement_after_the_resume_is_still_counted(): void
+    {
+        $this->gateway->subscriptionsCreated = 1;
+        $abo = $this->abo();
+        $this->pauses()->pause($abo);
+        $this->pauses()->resume($abo->fresh());
+        $this->assertSame('sub_2', $abo->fresh()->provider_id);
+
+        $this->zyklus('sub_1');
+
+        $this->assertSame(3, $abo->fresh()->times_charged, 'money on the old agreement id found no row');
+    }
+
+    #[Test]
+    public function the_31st_stays_the_31st_across_a_pause(): void
+    {
+        Carbon::setTestNow('2026-01-20 10:00:00');
+        $abo = $this->abo(['next_payment_at' => Carbon::parse('2026-01-31 00:00')]);
+        $this->pauses()->pause($abo);
+
+        Carbon::setTestNow('2026-03-15 10:00:00');
+        $this->pauses()->resume($abo->fresh());
+
+        $this->assertSame('2026-03-31', $this->gateway->lastSubscriptionPayload['startDate'], 'the billing day wandered to the 28th');
+    }
+
     #[Test]
     public function a_running_agreement_carries_no_end_date(): void
     {

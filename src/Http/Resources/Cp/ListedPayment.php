@@ -4,6 +4,8 @@ namespace Goldnead\StatamicPayments\Http\Resources\Cp;
 
 use Goldnead\StatamicPayments\Http\Resources\Cp\Concerns\DescribesProducts;
 use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Portal\Display;
+use Goldnead\StatamicPayments\Support\LocalTime;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
@@ -23,6 +25,10 @@ class ListedPayment extends JsonResource
         return [
             'id' => $this->id,
             'created_at' => $this->created_at?->toIso8601String(),
+            // For screens that show the moment rather than feed it to
+            // `<date-time>`: the shop's zone, the reader's language.
+            'created_at_display' => LocalTime::moment($this->created_at),
+            'amount_display' => Display::money((int) $this->amount_cent, $this->currency),
             'product' => $this->product,
             'product_name' => $this->productName($this->product),
             'amount' => $this->amount(),

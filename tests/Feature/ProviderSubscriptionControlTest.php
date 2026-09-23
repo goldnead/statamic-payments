@@ -11,6 +11,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Mollie\Api\Fake\MockMollieClient;
 use Mollie\Api\Fake\MockResponse;
+use Mollie\Api\Http\Requests\CreateSubscriptionRequest;
 use Mollie\Api\Http\Requests\GetPaginatedMandateRequest;
 use Mollie\Api\Http\Requests\UpdateSubscriptionRequest;
 use PHPUnit\Framework\Attributes\Test;
@@ -120,6 +121,50 @@ class ProviderSubscriptionControlTest extends TestCase
             && (int) $r['items'][0]['price_data']['unit_amount'] === 2900
             && $r['items'][0]['price_data']['recurring']['interval'] === 'month'
             && $r['proration_behavior'] === 'none');
+    }
+
+    #[Test]
+    public function stripe_creates_an_agreement_with_the_idempotency_key_it_was_given(): void
+    {
+        Http::fake([
+            'api.stripe.com/v1/products' => Http::response(['id' => 'prod_test_1']),
+            'api.stripe.com/v1/subscriptions' => Http::response($this->subscription()),
+        ]);
+
+        $this->stripe()->createSubscription('cus_TestBuyer', [
+            'amount' => ['currency' => 'EUR', 'value' => '19.00'],
+            'interval' => '1 month',
+            'description' => 'Mitgliedschaft',
+            'idempotencyKey' => 'statamic-payments-resume-7-1790000000',
+        ]);
+
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), '/v1/subscriptions')
+            && $r->header('Idempotency-Key') === ['statamic-payments-resume-7-1790000000']
+            && ! isset($r['idempotencyKey']));
+    }
+
+    #[Test]
+    public function mollie_creates_an_agreement_with_the_idempotency_key_it_was_given(): void
+    {
+        $this->needsMollieMocks();
+
+        [$gateway, $client] = $this->mollie([
+            CreateSubscriptionRequest::class => MockResponse::created($this->mollieSubscription('19.00')),
+        ]);
+
+        $gateway->createSubscription('cst_1', [
+            'amount' => ['currency' => 'EUR', 'value' => '19.00'],
+            'interval' => '1 month',
+            'description' => 'Mitgliedschaft',
+            'idempotencyKey' => 'statamic-payments-resume-7-1790000000',
+        ]);
+
+        $client->assertSent(function ($pending) {
+            $body = json_decode((string) $pending->createPsrRequest()->getBody(), true);
+
+            return $pending->headers()->get('Idempotency-Key') === 'statamic-payments-resume-7-1790000000'
+                && ! isset($body['idempotencyKey']);
+        });
     }
 
     #[Test]

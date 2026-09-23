@@ -170,7 +170,9 @@ class SubscriptionSwitchTest extends TestCase
     {
         $abo = $this->abo();
 
-        $this->assertSame(['plus' => 'Plus', 'klein' => 'Klein'], $this->switches()->targetsFor($abo));
+        // `switch_to` on the product is the list, in the Control Panel too.
+        $this->assertSame(['plus' => 'Plus'], $this->switches()->targetsFor($abo));
+        $this->assertFalse($this->switches()->switch($abo, 'klein'), 'a product the list does not name was switched to');
         $this->assertFalse($this->switches()->switch($abo, 'jahr'));
         $this->assertFalse($this->switches()->switch($abo, 'raten'));
         $this->assertFalse($this->switches()->switch($abo, 'einmal'));

@@ -12,7 +12,7 @@ use Illuminate\Console\Command;
  * provider knows when to start again. On Stripe the provider resumes by itself
  * on the same date; this brings the row along, and resuming twice is harmless.
  *
- *     Schedule::command('payments:resume-paused')->daily();
+ *     Schedule::command('payments:resume-paused')->daily()->withoutOverlapping();
  */
 class ResumePausedSubscriptions extends Command
 {

@@ -121,6 +121,16 @@ class OffersHandoverTest extends TestCase
     }
 
     #[Test]
+    public function the_floor_of_a_pay_what_you_want_price_is_kept_and_holds(): void
+    {
+        $abo = $this->abonniereMit(['code' => 'CHOR20', 'percent' => 20, 'duration' => 'forever', 'cycles' => null, 'floor_cent' => 1800]);
+
+        $this->assertSame(1800, $abo->meta['coupon']['floor_cent']);
+        // 20 % of 20 euro would be 4; the floor of 18 allows 2.
+        $this->assertSame('18.00', $this->gateway->lastSubscriptionPayload['amount']['value']);
+    }
+
+    #[Test]
     public function a_once_coupon_leaves_the_later_charges_alone(): void
     {
         $abo = $this->abonniereMit(['code' => 'EINMAL', 'percent' => 20, 'duration' => 'once', 'cycles' => null]);

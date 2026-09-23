@@ -29,6 +29,13 @@ use Throwable;
  * hide that. A trial that has not been charged yet (`pending`): there is no
  * running rhythm to pause.
  *
+ * **Claimed before the provider is asked.** A double click, two tabs, the
+ * scheduler next to a portal visit: two requests about one row. The first
+ * moves the status (`active` → `pausing`, `paused` → `resuming`) with a
+ * conditional UPDATE, the second finds nothing to move and stops. Without the
+ * claim two resumes on Mollie start two agreements and charge twice a month. A
+ * provider that refuses gets the old status back, so the next try can claim.
+ *
  * **The provider first, the row second.** Same rule as `Subscriptions::cancel()`:
  * nothing is written unless the provider confirmed.
  */
@@ -76,7 +83,8 @@ class SubscriptionPauses
      * Pause. True when the provider confirmed and the row says so.
      *
      * @param  Carbon|null  $resumesOn  a day in the future to resume on by
-     *                                  itself, or null: until somebody resumes
+     *                                  itself, or null: until somebody resumes.
+     *                                  A day in the shop's time zone.
      * @param  string  $by  `cp` or `portal`, carried on the event
      */
     public function pause(Subscription $subscription, ?Carbon $resumesOn = null, string $by = 'cp'): bool
@@ -85,14 +93,21 @@ class SubscriptionPauses
             return false;
         }
 
-        if ($resumesOn !== null && $resumesOn->copy()->startOfDay()->lte(Carbon::today())) {
-            return false;
+        if ($resumesOn !== null) {
+            // The day the operator or buyer picked, in the shop's zone, kept in
+            // the application's zone like every other column.
+            $resumesOn = Carbon::parse($resumesOn->toDateString(), LocalTime::zone())
+                ->startOfDay()
+                ->setTimezone((string) config('app.timezone', 'UTC'));
+
+            if ($resumesOn->lte(LocalTime::today())) {
+                return false;
+            }
         }
 
-        $resumesOn = $resumesOn?->copy()->startOfDay();
         $gateway = $this->subscriptions->gatewayFor($subscription);
 
-        if ($gateway === null) {
+        if ($gateway === null || ! $this->claim($subscription, Subscription::STATUS_ACTIVE, Subscription::STATUS_PAUSING)) {
             return false;
         }
 
@@ -109,6 +124,8 @@ class SubscriptionPauses
                 'exception' => $e->getMessage(),
             ]);
 
+            $this->release($subscription, Subscription::STATUS_PAUSING, Subscription::STATUS_ACTIVE);
+
             return false;
         }
 
@@ -120,9 +137,12 @@ class SubscriptionPauses
                 'status' => $remote->status,
             ]);
 
+            $this->release($subscription, Subscription::STATUS_PAUSING, Subscription::STATUS_ACTIVE);
+
             return false;
         }
 
+        $subscription = $subscription->fresh() ?? $subscription;
         $meta = $subscription->meta ?? [];
         $meta['pause'] = [
             'mode' => $native ? 'native' : 'recreate',
@@ -168,22 +188,30 @@ class SubscriptionPauses
 
         $gateway = $this->subscriptions->gatewayFor($subscription);
 
-        if ($gateway === null) {
+        if ($gateway === null || ! $this->claim($subscription, Subscription::STATUS_PAUSED, Subscription::STATUS_RESUMING)) {
             return false;
         }
 
+        // Read again after the claim: a debit that settled during the pause
+        // moved `meta.pause.next_payment_at` on (Subscriptions::recordCycle()).
+        $subscription = $subscription->fresh() ?? $subscription;
         $pause = is_array($subscription->meta['pause'] ?? null) ? $subscription->meta['pause'] : [];
         $next = $this->nextChargeAfterPause($subscription, $pause);
+        $recreated = false;
 
         try {
             if (($pause['mode'] ?? null) === 'native' && $gateway instanceof PausesSubscriptions) {
                 $remote = $gateway->resumeSubscription($subscription->customer_reference, $subscription->provider_id);
             } else {
+                $recreated = true;
                 $remote = $gateway->createSubscription(
                     $subscription->customer_reference,
                     $this->subscriptions->agreementPayload($subscription, $next, [
                         'resumed_subscription_id' => $subscription->getKey(),
-                    ]),
+                    ]) + [
+                        // One request, should it reach the provider twice.
+                        'idempotencyKey' => 'statamic-payments-resume-'.$subscription->getKey().'-'.($subscription->paused_at?->getTimestamp() ?? 0),
+                    ],
                 );
             }
         } catch (Throwable $e) {
@@ -191,6 +219,8 @@ class SubscriptionPauses
                 'subscription_id' => $subscription->getKey(),
                 'exception' => $e->getMessage(),
             ]);
+
+            $this->release($subscription, Subscription::STATUS_RESUMING, Subscription::STATUS_PAUSED);
 
             return false;
         }
@@ -201,9 +231,49 @@ class SubscriptionPauses
                 'status' => $remote->status,
             ]);
 
+            $this->release($subscription, Subscription::STATUS_RESUMING, Subscription::STATUS_PAUSED);
+
             return false;
         }
 
+        if ($recreated && $remote->providerId !== '' && $remote->providerId !== $subscription->provider_id) {
+            $subscription->rememberProviderId((string) $subscription->provider_id);
+        }
+
+        $this->markResumed($subscription, $remote, $next, $by);
+
+        return true;
+    }
+
+    /**
+     * The provider ended the pause by itself: Stripe does on `resumes_at`.
+     *
+     * Found when its next charge arrives or on a refresh. Nothing is asked of
+     * the provider; the row follows it. Claimed like a resume, so a refresh and
+     * a webhook arriving together do it once.
+     */
+    public function adoptProviderResume(Subscription $subscription, RemoteSubscription $remote): bool
+    {
+        if (! $subscription->isPaused() || ! $remote->isLive()) {
+            return false;
+        }
+
+        if (! $this->claim($subscription, Subscription::STATUS_PAUSED, Subscription::STATUS_RESUMING)) {
+            return false;
+        }
+
+        $subscription = $subscription->fresh() ?? $subscription;
+        $pause = is_array($subscription->meta['pause'] ?? null) ? $subscription->meta['pause'] : [];
+
+        $this->markResumed($subscription, $remote, $this->nextChargeAfterPause($subscription, $pause), 'provider');
+
+        return true;
+    }
+
+    /** Write down that it runs again, and say so. */
+    protected function markResumed(Subscription $subscription, RemoteSubscription $remote, Carbon $next, string $by): void
+    {
+        $pause = is_array($subscription->meta['pause'] ?? null) ? $subscription->meta['pause'] : [];
         $meta = $subscription->meta ?? [];
         unset($meta['pause']);
         $meta['pauses'] = array_values(array_merge((array) ($meta['pauses'] ?? []), [[
@@ -229,8 +299,6 @@ class SubscriptionPauses
         $this->bridge->resumeFor($subscription);
 
         $this->announce(fn () => SubscriptionResumed::dispatch($subscription, $by), $subscription);
-
-        return true;
     }
 
     /**
@@ -259,22 +327,48 @@ class SubscriptionPauses
     /**
      * The first charge after a pause: the old billing day, at least tomorrow.
      *
+     * Counted from the original date, not step by step: from the 31st a
+     * month is the 28th of February, and from there every month would stay on
+     * the 28th. `Subscription::addIntervals()` brings the 31st back.
+     *
      * @param  array<string, mixed>  $pause
      */
     public function nextChargeAfterPause(Subscription $subscription, array $pause = []): Carbon
     {
         $interval = trim((string) $subscription->interval) ?: '1 month';
-        $before = is_string($pause['next_payment_at'] ?? null) ? Carbon::parse($pause['next_payment_at']) : null;
-        $next = $before ?? $subscription->paidThroughAt() ?? Carbon::now()->addDay();
-        $earliest = Carbon::tomorrow();
+        // The anchor is the charge date the pause began with; periods paid
+        // during the pause (a late direct debit) move it on, counted in
+        // `paid_during`, not by overwriting the day.
+        $anchor = $pause['anchor'] ?? $pause['next_payment_at'] ?? null;
+        $start = is_string($anchor) ? Carbon::parse($anchor) : ($subscription->paidThroughAt() ?? Carbon::now()->addDay());
+        $offset = max(0, (int) ($pause['paid_during'] ?? 0));
+        $earliest = LocalTime::today()->addDay();
+        $next = Subscription::addIntervals($start, $interval, $offset);
 
-        // Bounded: an unreadable interval falls back to a month in
-        // `addInterval()`, so this ends; the bound is for a date years back.
-        for ($i = 0; $next->lt($earliest) && $i < 1000; $i++) {
-            $next = Subscription::addInterval($next, $interval);
+        // Bounded: the bound is for a date years back.
+        for ($i = $offset + 1; $next->copy()->setTimezone(LocalTime::zone())->startOfDay()->lt($earliest) && $i <= $offset + 1000; $i++) {
+            $next = Subscription::addIntervals($start, $interval, $i);
         }
 
         return $next;
+    }
+
+    /** The conditional UPDATE the whole class hangs on. */
+    protected function claim(Subscription $subscription, string $from, string $to): bool
+    {
+        return Subscription::query()
+            ->whereKey($subscription->getKey())
+            ->where('status', $from)
+            ->update(['status' => $to, 'updated_at' => Carbon::now()]) > 0;
+    }
+
+    /** Give a claim back after the provider refused. */
+    protected function release(Subscription $subscription, string $from, string $to): void
+    {
+        Subscription::query()
+            ->whereKey($subscription->getKey())
+            ->where('status', $from)
+            ->update(['status' => $to, 'updated_at' => Carbon::now()]);
     }
 
     protected function accessMode(): string

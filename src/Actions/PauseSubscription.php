@@ -56,7 +56,9 @@ class PauseSubscription extends Action
 
     public function authorize($user, $item)
     {
-        return $user->can('access subscriptions utility');
+        // Seeing the screen is the utility's right; changing what somebody
+        // pays is its own (Gauntlet 23.09.2026).
+        return $user->can('access subscriptions utility') && $user->can('manage payment subscriptions');
     }
 
     public function buttonText()

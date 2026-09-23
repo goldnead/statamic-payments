@@ -91,6 +91,13 @@ class ResumeController extends Controller
             $result = null;
         }
 
+        // Refused at the door (brake, captcha, block list): the page with the
+        // order button again, and a sentence that says what to do, rather
+        // than "this purchase cannot be resumed" for something that can.
+        if ($result === null && ($warum = $checkout->refusal()) !== null) {
+            return redirect()->back()->with('statamic-payments.portal.error', $warum);
+        }
+
         if ($result === null) {
             return $this->unavailable();
         }

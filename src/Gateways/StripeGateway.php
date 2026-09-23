@@ -440,7 +440,11 @@ class StripeGateway implements PausesSubscriptions, ReadsCardExpiry, Subscriptio
             $form['metadata'] = $metadata;
         }
 
-        return $this->asRemoteSubscription($this->post('/v1/subscriptions', $form));
+        // `idempotencyKey` is this package's word for "one request"; Stripe
+        // reads it as a header and never as a form field.
+        $key = is_string($payload['idempotencyKey'] ?? null) ? $payload['idempotencyKey'] : null;
+
+        return $this->asRemoteSubscription($this->post('/v1/subscriptions', $form, $key));
     }
 
     /**
@@ -1056,9 +1060,15 @@ class StripeGateway implements PausesSubscriptions, ReadsCardExpiry, Subscriptio
      * @param  array<string, mixed>  $form
      * @return array<string, mixed>
      */
-    protected function post(string $path, array $form): array
+    protected function post(string $path, array $form, ?string $idempotencyKey = null): array
     {
-        return $this->send(fn () => $this->client()->asForm()->post($path, $form), 'POST '.$path);
+        return $this->send(
+            fn () => $this->client()
+                ->when($idempotencyKey !== null, fn ($client) => $client->withHeaders(['Idempotency-Key' => $idempotencyKey]))
+                ->asForm()
+                ->post($path, $form),
+            'POST '.$path,
+        );
     }
 
     /** @return array<string, mixed> */

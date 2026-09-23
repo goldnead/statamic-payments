@@ -17,7 +17,7 @@ use Throwable;
  * often somebody's failed payment is looked at, and that is theirs to decide.
  * Once a day is right for a schedule counted in days:
  *
- *     Schedule::command('payments:dunning')->daily();
+ *     Schedule::command('payments:dunning')->daily()->withoutOverlapping();
  *
  * Safe to run twice: every letter is claimed with a conditional UPDATE and
  * every ending with another, so a second run in the same hour sends nothing and

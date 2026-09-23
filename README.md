@@ -625,7 +625,7 @@ Then schedule the pass. Nothing is scheduled for you, the same line this package
 abandoned-checkout sweep:
 
 ```php
-Schedule::command('payments:dunning')->daily();
+Schedule::command('payments:dunning')->daily()->withoutOverlapping();
 ```
 
 `payments:dunning --dry-run` says what would happen and changes nothing.
@@ -865,7 +865,7 @@ Then run the sweep on a schedule:
 
 ```php
 // routes/console.php
-Schedule::command('payments:sweep-abandoned')->hourly();
+Schedule::command('payments:sweep-abandoned')->hourly()->withoutOverlapping();
 ```
 
 Each unpaid checkout past the waiting period dispatches `CheckoutAbandoned` **once** — claimed with a
@@ -954,6 +954,14 @@ about it is under `statamic-payments.portal`.
 **Link to it from your site.** The two URLs worth putting in a footer are
 `route('statamic-payments.portal.request')` and, for the statutory button,
 `route('statamic-payments.portal.cancel.entry')`.
+
+### Logo, greeting, and what the portal offers
+
+`portal.logo_url` (a web address or a path on this site), `portal.logo_alt` and `portal.greeting`
+(plain text) dress the pages, per brand on the settings screen. `portal.self_cancel` (or
+`portal_cancel` on a product) takes the cancel button out of the portal; the page then points to the
+cancellation without login, which stays untouched. Pause and switch buttons appear where
+`portal.allow_pause` / `pausable` and `portal.allow_switch` with `switch_to` allow them.
 
 ### The link
 
@@ -1108,6 +1116,71 @@ as it is**, and the command exits non-zero. It derives, it never guesses.
 This is a sibling of `payments:brand-backfill` and not an option on it: that one derives an
 agreement's brand from its first payment, which is the rule this one overrules.
 
+## Running a subscription: pause, switch, remind
+
+### Pausing and resuming
+
+From the Control Panel (row actions *Pause* and *Resume* on the subscriptions screen) and, where
+`portal.allow_pause` or `pausable: true` on the product allows it, from the customer portal. A
+pause may carry a date to resume on; without one it lasts until somebody resumes it.
+
+- **Stripe** pauses natively (`pause_collection` with `void`). **Mollie** has no pause: the running
+  agreement is ended and a new one is started on resume, against the same mandate. On both, nothing
+  is charged during the pause and nothing at the moment of resuming; the next charge falls on the
+  old billing day (the 31st stays the 31st).
+- Instalment plans, trials and agreements in dunning are not paused.
+- `pause.access`: `period_end` (default, the paid period stays, then the access rests),
+  `immediate`, or `keep`.
+- A charge that settles during a pause is counted: a late direct debit on Mollie moves the resume
+  date one period on; Stripe lifting the pause on its own is followed by the row.
+- Every pause, resume and switch is claimed on the row before the provider is asked, so two
+  requests at once reach the provider once. A pause with a date needs
+  `Schedule::command('payments:resume-paused')->daily()->withoutOverlapping();`.
+
+### Switching between products
+
+Row action *Switch*, and in the portal with `portal.allow_switch`. The targets are the product's
+`switch_to` list; without one, the Control Panel offers the recurring products of the same brand,
+rhythm and currency. An upgrade applies at once and the rest of the current period is charged as
+its own payment (`meta.proration = true`); a downgrade applies from the next charge. Neither provider
+prorates on its own side. A difference that later fails is marked in the agreement's history.
+
+Changing a subscription needs the permission *Manage subscriptions* (`manage payment subscriptions`)
+on top of access to the screen.
+
+### Reminders
+
+`payments:reminders` (`->dailyAt('09:00')->withoutOverlapping()`) sends, each switch off by default:
+a mail `reminders.upcoming.days` before a charge, one `reminders.card_expiring.days` before the card
+on file expires, and one when it has. Once per agreement and date. Days are counted in Statamic's
+display time zone; the portal link in the mail works until the day it is about. A product with
+`reminders: false` gets none. A running coupon is named with the amount actually charged.
+
+### A purchase that replaces a subscription
+
+`replaces: ['monthly']` on a product ends the buyer's running `monthly` agreement when the purchase
+is paid. What was left of its period moves the new agreement's first charge back
+(`replaces_credit`, on by default).
+
+### Events
+
+`SubscriptionPaused`, `SubscriptionResumed`, `SubscriptionPaymentUpcoming`,
+`SubscriptionCardExpiring`, `SubscriptionCardExpired`, `SubscriptionAttemptFailed` (with the count),
+`SubscriptionPlanCompleted`, `SubscriptionChanged`, `SubscriptionReplaced`, `CheckoutBlocked`.
+
+## The checkout's door and the thank-you page
+
+- **Block list, brake, captcha.** `protection.blocklist.*` (addresses, domains, IP ranges, editable
+  on the settings screen), a brake per IP and per address (`protection.rate_limit`, 100 and 10 per
+  10 minutes; a private address, i.e. an untrusted proxy, is not counted), and an optional captcha
+  (`turnstile` or `hcaptcha`; every checkout form then renders `{{ payments:captcha }}`). A refused
+  checkout answers null and `Checkout::refusal()` holds a sentence for the page.
+- **Expiring thank-you link.** `thanks.expires_minutes`: the buyer comes back through a signed
+  link (valid `thanks.link_hours`), and the page is theirs for that many minutes from the first
+  visit. `{{ payments:thanks }}` hands over `valid` (in time and paid), `paid` and `pending`.
+- **Addresses of unfinished checkouts.** `abandoned.capture`: `consent` (default, only with
+  `meta.reminder_consent = true` from the form), `always`, `never`.
+
 ## Configuration
 
 | Key | Default | What happens when it is wrong |
@@ -1211,7 +1284,7 @@ Like the sweep, it is not scheduled for you:
 
 ```php
 // routes/console.php
-Schedule::command('payments:prune-legal-drafts')->daily();
+Schedule::command('payments:prune-legal-drafts')->daily()->withoutOverlapping();
 ```
 
 ## Multi-site

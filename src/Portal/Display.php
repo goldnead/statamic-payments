@@ -2,6 +2,8 @@
 
 namespace Goldnead\StatamicPayments\Portal;
 
+use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\LocalTime;
 use Goldnead\StatamicPayments\Support\Money;
 
 /**
@@ -27,6 +29,32 @@ use Goldnead\StatamicPayments\Support\Money;
  */
 final class Display
 {
+    /**
+     * A running coupon in one sentence, or an empty string: "Mit Gutschein
+     * CHOR20 (4,00 EUR weniger) bis einschließlich 05.11.2026". The same words
+     * in the reminder mail, the portal and the Control Panel.
+     */
+    public static function coupon(Subscription $subscription): string
+    {
+        $summary = $subscription->couponSummary();
+
+        if ($summary === null) {
+            return '';
+        }
+
+        $off = self::money($summary['discount_cent'], $subscription->currency);
+
+        if ($summary['forever'] || $summary['until'] === null) {
+            return (string) __('statamic-payments::subscriptions.coupon_forever', ['code' => $summary['code'], 'off' => $off]);
+        }
+
+        return (string) __('statamic-payments::subscriptions.coupon_until', [
+            'code' => $summary['code'],
+            'off' => $off,
+            'date' => LocalTime::of($summary['until'])?->translatedFormat(__('statamic-payments::portal.date_format')),
+        ]);
+    }
+
     public static function money(int $cent, ?string $currency): string
     {
         $decimals = Money::decimals($currency);

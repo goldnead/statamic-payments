@@ -198,6 +198,7 @@ class SubscriptionsController extends CpController
             'field_next_payment' => __('statamic-payments::messages.subscription_column_next_payment'),
             'field_cancelled_at' => __('statamic-payments::messages.subscription_field_cancelled_at'),
             'field_paused_at' => __('statamic-payments::subscriptions.field_paused_at'),
+            'field_coupon' => __('statamic-payments::subscriptions.field_coupon'),
             'field_resumes_at' => __('statamic-payments::subscriptions.field_resumes_at'),
             'field_card_expires_at' => __('statamic-payments::subscriptions.field_card_expires_at'),
             'detail_history' => __('statamic-payments::subscriptions.detail_history'),

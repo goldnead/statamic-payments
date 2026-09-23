@@ -24,7 +24,14 @@ class ThanksController extends Controller
             return $this->expired();
         }
 
-        $thanks->admit($request, $payment);
+        // The window starts at the first visit, not at the checkout.
+        $until = $thanks->windowFor($payment);
+
+        if ($until === null) {
+            return $this->expired();
+        }
+
+        $thanks->admit($request, $payment, $until);
 
         $to = (string) $request->query('to', '');
 

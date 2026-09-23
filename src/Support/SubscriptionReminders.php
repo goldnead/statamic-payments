@@ -13,6 +13,7 @@ use Goldnead\StatamicPayments\Models\PaymentCommunication;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Models\SubscriptionNotice;
 use Goldnead\StatamicPayments\Portal\Display;
+use Goldnead\StatamicPayments\Portal\LinkTokenizer;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -107,11 +108,13 @@ class SubscriptionReminders
             return [];
         }
 
-        $today = $now->copy()->startOfDay();
+        // Days are the shop's days: counted in the display time zone, so a
+        // German shop at 01:30 on the 23rd is on the 23rd, not the 22nd.
+        $today = $now->copy()->setTimezone(LocalTime::zone())->startOfDay();
         $due = [];
 
         if ($this->enabled(SubscriptionNotice::KIND_UPCOMING) && $subscription->next_payment_at !== null) {
-            $date = $subscription->next_payment_at->copy()->startOfDay();
+            $date = $subscription->next_payment_at->copy()->setTimezone(LocalTime::zone())->startOfDay();
             $days = (int) $today->diffInDays($date, false);
             $window = max(1, (int) config('statamic-payments.reminders.upcoming.days', 7));
 
@@ -124,6 +127,8 @@ class SubscriptionReminders
             $expiry = $this->cardExpiry($subscription, $now);
 
             if ($expiry !== null) {
+                // A card's last day is a calendar day, in the shop's zone.
+                $expiry = Carbon::parse($expiry->toDateString(), LocalTime::zone());
                 $window = max(1, (int) config('statamic-payments.reminders.card_expiring.days', 30));
 
                 if ($expiry->lt($today)) {
@@ -319,15 +324,45 @@ class SubscriptionReminders
             'plan' => [
                 'handle' => (string) $subscription->product,
                 'name' => (string) ($entry['name'] ?? $subscription->product),
-                'amount' => $subscription->amount(),
+                // What is actually charged: a running coupon comes off
+                // (statamic-offers O6). The price itself is `full`.
+                'amount' => $subscription->chargedAmount(),
                 'currency' => (string) $subscription->currency,
-                'display' => Display::money((int) $subscription->amount_cent, $subscription->currency),
+                'display' => Display::money($subscription->chargedCent(), $subscription->currency),
+                'full' => Display::money((int) $subscription->amount_cent, $subscription->currency),
+                'coupon' => Display::coupon($subscription),
                 'rhythm' => Display::rhythm((string) $subscription->interval),
             ],
             'date' => $date->toDateString(),
             'date_display' => $date->translatedFormat(__('statamic-payments::portal.date_format')),
-            'portal_url' => $this->notice->portalUrl($subscription),
+            // Valid until the day it is about: a mail five days before a charge
+            // whose link died after thirty minutes is a mail with a dead button.
+            'portal_url' => $this->portalUrl($subscription, $date),
         ];
+    }
+
+    /**
+     * The way into the portal, valid until the end of the day the mail is
+     * about in the shop's zone (a charge, a card expiry). For an expiry that
+     * has passed, until the next charge, or a week.
+     */
+    protected function portalUrl(Subscription $subscription, Carbon $date): string
+    {
+        $email = is_string($subscription->email) ? trim($subscription->email) : '';
+
+        if ($email === '') {
+            return (string) config('app.url');
+        }
+
+        $bis = Carbon::parse($date->toDateString(), LocalTime::zone())->endOfDay();
+
+        if ($bis->isPast()) {
+            $bis = $subscription->next_payment_at
+                ? LocalTime::of($subscription->next_payment_at)?->endOfDay() ?? LocalTime::now()->addWeek()
+                : LocalTime::now()->addWeek();
+        }
+
+        return app(LinkTokenizer::class)->issueUntil($email, (int) $subscription->brand_id, $bis);
     }
 
     protected function productAllows(Subscription $subscription): bool

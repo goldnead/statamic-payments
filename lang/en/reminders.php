@@ -19,6 +19,6 @@ return [
     'card_expired_next' => 'The next charge will not go through until a new card is on file.',
     'card_expired_button' => 'Add a new card',
 
-    'link_expires' => 'The link is only valid for a short time. If it has expired, you can request a new one on the same page.',
+    'link_expires' => 'If the link has expired, you can request a new one on the same page.',
     'log_suppressed' => 'Reminder not sent: :email is on the suppression list.',
 ];

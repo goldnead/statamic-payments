@@ -72,7 +72,9 @@ class Payments extends Tags
      * Whether this visit to the thank-you page is still within
      * `thanks.expires_minutes` (P5). Always valid where the setting is off, so a
      * page that uses the tag keeps working on a site that never turned it on.
-     * Hands over `valid`, `payment_id` and `expires_at`.
+     * Hands over `valid` (within the window **and** paid), `paid`, `pending`
+     * (within the window, not paid yet: a direct debit on its way),
+     * `payment_id` and `expires_at`.
      */
     public function thanks(): array|string
     {

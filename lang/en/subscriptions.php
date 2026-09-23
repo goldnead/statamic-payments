@@ -27,13 +27,19 @@ return [
     'switch_failed' => 'The subscription was not switched. It is unchanged.',
     'switch_line' => 'Switch to :name, pro rata until the next charge',
 
+    // Running coupon (statamic-offers O6)
+    'coupon_until' => 'With coupon :code, :off less, up to and including :date.',
+    'coupon_forever' => 'With coupon :code, :off less, for good.',
+
     // Control Panel: detail
     'field_paused_at' => 'Paused since',
+    'field_coupon' => 'Coupon',
     'field_resumes_at' => 'Resumes on',
     'field_card_expires_at' => 'Card valid until',
     'detail_history' => 'History',
     'history_switch' => 'Switched from :from to :to, at once, :amount charged pro rata',
     'history_switch_later' => 'Switched from :from to :to, from the next charge',
+    'history_proration_failed' => 'The difference was not paid.',
     'history_pause' => 'Paused from :from to :to',
 
     // Customer portal

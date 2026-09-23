@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\PaymentItem;
 use Goldnead\StatamicPayments\Support\Catalogue;
 use Goldnead\StatamicPayments\Support\Checkout;
+use Goldnead\StatamicPayments\Support\Discount;
 use Goldnead\StatamicPayments\Support\FollowUp;
 use Goldnead\StatamicPayments\Support\Fulfilment;
 use Goldnead\StatamicPayments\Tests\TestCase;
@@ -54,6 +55,39 @@ class FollowUpTest extends TestCase
         }
 
         return $payment->fresh();
+    }
+
+    #[Test]
+    public function a_coupon_from_the_funnel_is_redeemed_on_the_one_click_upsell(): void
+    {
+        $original = $this->paidPayment();
+        $this->gateway->mandates[] = 'cst_maria';
+        $gesendet = null;
+        $this->gateway->whileCalling = function (array $payload) use (&$gesendet) {
+            $gesendet = $payload;
+        };
+
+        $folge = app(FollowUp::class)
+            ->accept($original, 'begleit-cd', discount: new Discount('CHOR20', 240));
+
+        $this->assertNotNull($folge);
+        $this->assertSame(960, $folge->amount_cent);
+        $this->assertSame('CHOR20', $folge->discount_code);
+        $this->assertSame(240, $folge->discount_cent);
+        $this->assertSame(240, $folge->items()->sole()->discount_cent);
+        $this->assertSame('9.60', $gesendet['amount']['value'] ?? null, 'the provider charged the full price');
+    }
+
+    #[Test]
+    public function without_a_coupon_the_upsell_costs_what_it_did(): void
+    {
+        $original = $this->paidPayment();
+        $this->gateway->mandates[] = 'cst_maria';
+
+        $folge = app(FollowUp::class)->accept($original, 'begleit-cd');
+
+        $this->assertSame(1200, $folge->amount_cent);
+        $this->assertNull($folge->discount_code);
     }
 
     #[Test]

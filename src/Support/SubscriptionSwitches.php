@@ -47,9 +47,12 @@ class SubscriptionSwitches
     /**
      * Where this agreement may go, as handle => name.
      *
-     * In the Control Panel: every recurring product with the same rhythm. In the
-     * portal: only what the current product lists under `switch_to`, and only
-     * where the site allows switching there at all (`portal.allow_switch`).
+     * The product's own list (`switch_to`) where it has one: that is the
+     * operator saying where it may go, in the Control Panel and in the portal.
+     * Without a list, the Control Panel offers the recurring products with the
+     * same rhythm that belong to the agreement's own brand (a catalogue entry
+     * naming another `brand_id` is another tenant's product). The portal offers
+     * nothing without a list, and nothing unless `portal.allow_switch` is on.
      *
      * @return array<string, string>
      */
@@ -59,15 +62,25 @@ class SubscriptionSwitches
             return [];
         }
 
-        $candidates = array_keys($this->catalogue->all());
+        if ($portal && ! config('statamic-payments.portal.allow_switch', false)) {
+            return [];
+        }
 
-        if ($portal) {
-            if (! config('statamic-payments.portal.allow_switch', false)) {
-                return [];
-            }
+        $own = $this->catalogue->find($subscription->product) ?? [];
+        $list = array_key_exists('switch_to', $own)
+            ? array_values(array_filter((array) $own['switch_to'], 'is_string'))
+            : null;
 
-            $entry = $this->catalogue->find($subscription->product) ?? [];
-            $candidates = array_values(array_filter((array) ($entry['switch_to'] ?? []), 'is_string'));
+        if ($list !== null) {
+            $candidates = $list;
+        } elseif ($portal) {
+            return [];
+        } else {
+            $brand = (int) $subscription->brand_id;
+            $candidates = array_keys(array_filter(
+                $this->catalogue->all(),
+                fn (array $entry) => ! is_numeric($entry['brand_id'] ?? null) || (int) $entry['brand_id'] === $brand,
+            ));
         }
 
         $targets = [];
@@ -158,7 +171,7 @@ class SubscriptionSwitches
     {
         $preview = $this->preview($subscription, $to);
 
-        if ($preview === null) {
+        if ($preview === null || ! array_key_exists($to, $this->targetsFor($subscription))) {
             return false;
         }
 
@@ -168,6 +181,33 @@ class SubscriptionSwitches
             return false;
         }
 
+        // Claimed first: the row moves to the new product only where it still
+        // holds the old one. A second request about the same row (a double
+        // click, two tabs) finds nothing to move and charges nothing.
+        $claimed = Subscription::query()
+            ->whereKey($subscription->getKey())
+            ->where('status', Subscription::STATUS_ACTIVE)
+            ->where('product', $preview['from'])
+            ->where('amount_cent', $preview['from_amount_cent'])
+            ->update([
+                'product' => $to,
+                'amount_cent' => $preview['to_amount_cent'],
+                'updated_at' => Carbon::now(),
+            ]);
+
+        if ($claimed === 0) {
+            return false;
+        }
+
+        $giveBack = fn () => Subscription::query()
+            ->whereKey($subscription->getKey())
+            ->where('product', $to)
+            ->update([
+                'product' => $preview['from'],
+                'amount_cent' => $preview['from_amount_cent'],
+                'updated_at' => Carbon::now(),
+            ]);
+
         $entry = $this->catalogue->find($to) ?? [];
         $proration = null;
 
@@ -175,6 +215,8 @@ class SubscriptionSwitches
             $proration = $this->chargeDifference($subscription, $entry, $to, $preview['proration_cent']);
 
             if ($proration === null) {
+                $giveBack();
+
                 return false;
             }
         }
@@ -186,6 +228,7 @@ class SubscriptionSwitches
             'product' => $to,
             'amount_cent' => $preview['to_amount_cent'],
         ]);
+        $subscription->syncOriginalAttributes(['product', 'amount_cent']);
 
         try {
             if ($gateway instanceof UpdatesSubscriptions) {
@@ -205,8 +248,14 @@ class SubscriptionSwitches
                     $subscription->customer_reference,
                     $this->subscriptions->agreementPayload($subscription, $snapshot->next_payment_at ?? Carbon::tomorrow(), [
                         'switched_subscription_id' => $subscription->getKey(),
-                    ]),
+                    ]) + [
+                        'idempotencyKey' => 'statamic-payments-switch-'.$subscription->getKey().'-'.$to.'-'.Carbon::now()->getTimestamp(),
+                    ],
                 );
+
+                if ($remote->providerId !== '' && $remote->providerId !== $snapshot->provider_id) {
+                    $subscription->rememberProviderId((string) $snapshot->provider_id);
+                }
             }
         } catch (Throwable $e) {
             Log::error('statamic-payments: the provider would not take the new amount; the agreement is unchanged.', [
@@ -224,10 +273,12 @@ class SubscriptionSwitches
                 ])])->save();
             }
 
+            $giveBack();
+
             return false;
         }
 
-        $meta = $snapshot->meta ?? [];
+        $meta = $subscription->meta ?? [];
 
         // A coupon applied to the product that was left (statamic-offers O6).
         // The provider now charges the full new price; the row says the same,

@@ -11,6 +11,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\Test;
 
 /**
@@ -103,12 +104,54 @@ class CheckoutProtectionTest extends TestCase
     public function a_run_from_one_ip_is_braked_too(): void
     {
         config(['statamic-payments.protection.rate_limit.per_ip' => 2]);
-        $this->fromIp('192.0.2.10');
+        // A public address: a private one is not counted, see below.
+        $this->fromIp('185.199.108.10');
 
         $this->start('a@example.com');
         $this->start('b@example.com');
 
         $this->assertNull($this->start('c@example.com'));
+    }
+
+    // ------------------------------------------- Gauntlet 2: behind a proxy
+
+    #[Test]
+    public function behind_a_proxy_nobody_trusts_everybody_is_the_same_address_so_it_is_not_counted(): void
+    {
+        CheckoutGuard::forgetWarnings();
+        Log::spy();
+        config(['statamic-payments.protection.rate_limit.per_ip' => 2]);
+        $this->fromIp('10.0.0.5');
+        $this->app['request']->headers->set('X-Forwarded-For', '185.199.108.10');
+
+        $this->assertNotNull($this->start('a@example.com'));
+        $this->assertNotNull($this->start('b@example.com'));
+        $this->assertNotNull($this->start('c@example.com'), 'a whole choir was braked as one address');
+
+        Log::shouldHaveReceived('warning')
+            ->withArgs(fn ($message) => str_contains((string) $message, 'proxy'))
+            ->once();
+    }
+
+    #[Test]
+    public function the_brake_per_address_is_generous_for_group_orders(): void
+    {
+        $this->assertSame(100, config('statamic-payments.protection.rate_limit.per_ip'));
+    }
+
+    #[Test]
+    public function a_refusal_is_not_silent(): void
+    {
+        Event::fake([CheckoutBlocked::class]);
+        config(['statamic-payments.protection.rate_limit.per_email' => 1]);
+
+        $checkout = app(Checkout::class);
+        $this->assertNotNull($checkout->start('noten-paket', ['email' => 'kim@example.com']));
+        $this->assertNull($checkout->refusal());
+
+        $this->assertNull($checkout->start('noten-paket', ['email' => 'kim@example.com']));
+        $this->assertSame(__('statamic-payments::checkout.refused_rate_limited'), $checkout->refusal());
+        Event::assertDispatched(CheckoutBlocked::class, fn ($e) => $e->message === __('statamic-payments::checkout.refused_rate_limited'));
     }
 
     // ---------------------------------------------------------------- captcha

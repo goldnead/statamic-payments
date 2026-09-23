@@ -406,6 +406,11 @@ class ServiceProvider extends AddonServiceProvider
                 Permission::register('handle payment cancellations')
                     ->label(__('statamic-payments::messages.permission_handle_cancellations'));
 
+                // Looking at subscriptions is the utility's own right; changing
+                // what somebody pays (pause, resume, switch, cancel) is this.
+                Permission::register('manage payment subscriptions')
+                    ->label(__('statamic-payments::messages.permission_manage_subscriptions'));
+
                 // Bewacht den Abschnitt dieses Addons auf der gemeinsamen
                 // Einstellungs-Seite. Immer angemeldet, auch ohne
                 // `statamic-brand-context`: ein Recht, das nur manchmal

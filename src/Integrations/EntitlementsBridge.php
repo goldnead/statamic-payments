@@ -122,7 +122,15 @@ class EntitlementsBridge
             return;
         }
 
-        $this->extendFor($subscription, $subject, $subscription->next_payment_at);
+        // During a pause there is no next charge; a debit that settled then
+        // paid up to the day the pause will resume on.
+        $bis = $subscription->next_payment_at;
+
+        if ($bis === null && $subscription->isPaused() && is_string(data_get($subscription->meta, 'pause.next_payment_at'))) {
+            $bis = Carbon::parse((string) data_get($subscription->meta, 'pause.next_payment_at'));
+        }
+
+        $this->extendFor($subscription, $subject, $bis);
     }
 
     /**

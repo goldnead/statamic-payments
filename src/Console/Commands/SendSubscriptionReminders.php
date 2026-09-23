@@ -11,7 +11,7 @@ use Illuminate\Console\Command;
  *
  * Not scheduled by the addon, like every other pass here:
  *
- *     Schedule::command('payments:reminders')->dailyAt('09:00');
+ *     Schedule::command('payments:reminders')->dailyAt('09:00')->withoutOverlapping();
  *
  * Safe to run twice: every reminder is claimed under a unique index first.
  */

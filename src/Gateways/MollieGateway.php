@@ -97,9 +97,27 @@ class MollieGateway implements MandateGateway, ReadsCardExpiry, SubscriptionGate
         return true;
     }
 
+    /**
+     * `idempotencyKey` in the payload is not Mollie's field but this package's
+     * way of saying "this is one request": it goes into the `Idempotency-Key`
+     * header, so a retry of a resume cannot start a second agreement.
+     */
     public function createSubscription(string $customerReference, array $payload): RemoteSubscription
     {
-        $subscription = $this->client->subscriptions->createForId($customerReference, $payload);
+        $key = is_string($payload['idempotencyKey'] ?? null) ? $payload['idempotencyKey'] : null;
+        unset($payload['idempotencyKey']);
+
+        if ($key !== null) {
+            $this->client->setIdempotencyKey($key);
+        }
+
+        try {
+            $subscription = $this->client->subscriptions->createForId($customerReference, $payload);
+        } finally {
+            if ($key !== null) {
+                $this->client->resetIdempotencyKey();
+            }
+        }
 
         return $this->asRemote($subscription);
     }

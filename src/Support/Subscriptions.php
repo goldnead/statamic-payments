@@ -826,15 +826,20 @@ class Subscriptions
      * same claim, same event, so an entitlement is granted or extended per cycle
      * without this class knowing anything about entitlements.
      */
-    public function recordCycle(Payment $payment, string $providerSubscriptionId): ?Subscription
+    /**
+     * @param  array<string, mixed>  $metadata  the payment's metadata at the provider
+     */
+    public function recordCycle(Payment $payment, string $providerSubscriptionId, array $metadata = []): ?Subscription
     {
         // Scoped to the provider of the payment that carried this cycle, not to
         // whatever the container happens to bind. A cycle id from one provider
         // must not be able to match an agreement row from another.
         //
         // The row's earlier ids count too: a debit started on an agreement a
-        // pause or switch ended can settle after it (Subscription::forProviderId()).
-        $subscription = Subscription::forProviderId((string) $payment->provider, $providerSubscriptionId);
+        // pause or switch ended can settle after it. And an agreement the row
+        // never learned the id of is found by the row id in its metadata
+        // (Subscription::forCycle()).
+        $subscription = Subscription::forCycle((string) $payment->provider, $providerSubscriptionId, $metadata);
 
         if (! $subscription) {
             Log::warning('statamic-payments: a cycle arrived for an agreement this site does not know.', [
@@ -875,12 +880,25 @@ class Subscriptions
         // A straggler for an agreement that is already over must not count.
         // Without this a late cycle on a finished plan fires `SubscriptionEnded`
         // a second time and overwrites the date it ended.
-        if (! $subscription->isLive()) {
+        if (! $subscription->isLive() && ! $subscription->isClaimed()) {
             Log::warning('statamic-payments: a cycle arrived for an agreement that is already over.', [
                 'subscription_id' => $subscription->getKey(),
                 'status' => $subscription->status,
                 'payment_id' => $payment->getKey(),
             ]);
+
+            return $subscription;
+        }
+
+        // A row in a claim (pausing, resuming, switching, cancelling) is being
+        // changed right now, or was by a process that died. The money is real
+        // either way: counted and announced, and nothing else is touched, so
+        // the claim's own ending writes the status.
+        if ($subscription->isClaimed()) {
+            $subscription->increment('times_charged');
+            $subscription = $subscription->fresh() ?? $subscription;
+
+            SubscriptionRenewed::dispatch($subscription, $payment);
 
             return $subscription;
         }
@@ -941,6 +959,13 @@ class Subscriptions
             return $this->resumedByProvider($subscription) ? $subscription->fresh() : null;
         }
 
+        // A claim is settled by whoever holds it, or by the sweep
+        // (`SubscriptionClaims`). A refresh writing the provider's answer here
+        // would turn a pause half done on Mollie into a cancellation.
+        if ($subscription->isClaimed()) {
+            return null;
+        }
+
         $gateway = $this->agreementGateway($subscription);
 
         if (! $gateway) {
@@ -999,13 +1024,59 @@ class Subscriptions
             return false;
         }
 
+        // Read from the database, not from the object handed in: the question
+        // is what the row is now, and a screen that loaded it a minute ago
+        // does not know.
+        $current = $subscription->fresh() ?? $subscription;
+        $from = (string) $current->status;
+
+        // A pause, resume or switch is talking to the provider right now. A
+        // cancellation in the middle reported success and was then overwritten
+        // by the resume, which went on charging an agreement it had just
+        // started (Gauntlet 23.09.2026). So: wait for it. A claim left behind
+        // by a dead process is the exception; that one may be ended, and so
+        // is whatever agreement it left at the provider.
+        if ($current->isClaimed() && ! $current->isStuck()) {
+            Log::info('statamic-payments: a cancellation waited for a change to this agreement that is still running.', [
+                'subscription_id' => $current->getKey(),
+                'status' => $from,
+            ]);
+
+            return false;
+        }
+
+        $claimed = Subscription::query()
+            ->whereKey($current->getKey())
+            ->where('status', $from)
+            ->update(['status' => Subscription::STATUS_CANCELLING, 'updated_at' => now()]);
+
+        if ($claimed === 0) {
+            return false;
+        }
+
+        // The object knows the claim too, so the save at the end writes the
+        // status even where it was already `cancelled` before the claim.
+        $current->setAttribute('status', Subscription::STATUS_CANCELLING);
+        $current->syncOriginalAttribute('status');
+
+        $giveBack = fn () => Subscription::query()
+            ->whereKey($current->getKey())
+            ->where('status', Subscription::STATUS_CANCELLING)
+            ->update(['status' => $from, 'updated_at' => now()]);
+
         try {
-            $remote = $gateway->cancelSubscription($subscription->customer_reference, $subscription->provider_id);
+            $remote = $gateway->cancelSubscription($current->customer_reference, $current->provider_id);
+
+            if (in_array($from, Subscription::CLAIMS, true)) {
+                app(SubscriptionClaims::class)->endOrphans($current, $gateway);
+            }
         } catch (Throwable $e) {
             Log::error('statamic-payments: the provider would not cancel this agreement; the row is unchanged.', [
                 'subscription_id' => $subscription->getKey(),
                 'exception' => $e->getMessage(),
             ]);
+
+            $giveBack();
 
             return false;
         }
@@ -1016,8 +1087,12 @@ class Subscriptions
                 'status' => $remote->status,
             ]);
 
+            $giveBack();
+
             return false;
         }
+
+        $subscription = $current;
 
         // War die Zeile hier schon beendet, ist der Anbieteraufruf das Einzige
         // gewesen, was noch zu tun war — und dann gibt es auch nichts mehr
@@ -1032,7 +1107,7 @@ class Subscriptions
         // `SubscriptionCancelled` eine Kuendigungsmail oder einen
         // Churn-Zaehler haengt, bekam beides doppelt, ohne dass irgendwo eine
         // Zeile davon erzaehlte.
-        $schonBeendet = $subscription->status === Subscription::STATUS_CANCELLED
+        $schonBeendet = $from === Subscription::STATUS_CANCELLED
             && $subscription->ended_at !== null;
 
         $subscription->forceFill([

@@ -67,6 +67,10 @@ return [
     'status_active' => 'Läuft',
     'status_suspended' => 'Ausgesetzt',
     'status_paused' => 'Pausiert',
+    'status_pausing' => 'Wird pausiert',
+    'status_resuming' => 'Wird fortgesetzt',
+    'status_switching' => 'Wird gewechselt',
+    'status_cancelling' => 'Wird gekündigt',
     'status_cancelled' => 'Gekündigt',
     'status_completed' => 'Abgeschlossen',
 

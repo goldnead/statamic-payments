@@ -1134,13 +1134,19 @@ pause may carry a date to resume on; without one it lasts until somebody resumes
 - A charge that settles during a pause is counted: a late direct debit on Mollie moves the resume
   date one period on; Stripe lifting the pause on its own is followed by the row.
 - Every pause, resume and switch is claimed on the row before the provider is asked, so two
-  requests at once reach the provider once. A pause with a date needs
-  `Schedule::command('payments:resume-paused')->daily()->withoutOverlapping();`.
+  requests at once reach the provider once, and a cancellation waits for a pause, resume or switch
+  that is still talking to the provider. Schedule
+  `Schedule::command('payments:resume-paused')->daily()->withoutOverlapping();` wherever
+  subscriptions are paused: it resumes dated pauses and puts right rows a dead process left in a
+  claim for more than ten minutes (it adopts an agreement a dead resume started, finishes or undoes
+  a half pause, and logs an error for a half switch it cannot read back).
 
 ### Switching between products
 
 Row action *Switch*, and in the portal with `portal.allow_switch`. The targets are the product's
-`switch_to` list; without one, the Control Panel offers the recurring products of the same brand,
+`switch_to` list; without one, the Control Panel offers the recurring products of the same brand
+(a catalogue entry **without** `brand_id` counts as every brand's and is offered to all of them;
+give an entry a `brand_id` or give the product a `switch_to` list to narrow it),
 rhythm and currency. An upgrade applies at once and the rest of the current period is charged as
 its own payment (`meta.proration = true`); a downgrade applies from the next charge. Neither provider
 prorates on its own side. A difference that later fails is marked in the agreement's history.
@@ -1172,7 +1178,9 @@ is paid. What was left of its period moves the new agreement's first charge back
 
 - **Block list, brake, captcha.** `protection.blocklist.*` (addresses, domains, IP ranges, editable
   on the settings screen), a brake per IP and per address (`protection.rate_limit`, 100 and 10 per
-  10 minutes; a private address, i.e. an untrusted proxy, is not counted), and an optional captcha
+  10 minutes; a private address, i.e. an untrusted proxy, is not counted. **Behind Cloudflare set
+  up TrustProxies**: without it every buyer arrives from one of Cloudflare's public edge addresses,
+  which are counted, so many buyers share one brake), and an optional captcha
   (`turnstile` or `hcaptcha`; every checkout form then renders `{{ payments:captcha }}`). A refused
   checkout answers null and `Checkout::refusal()` holds a sentence for the page.
 - **Expiring thank-you link.** `thanks.expires_minutes`: the buyer comes back through a signed

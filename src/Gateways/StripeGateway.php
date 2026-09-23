@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Gateways;
 
+use Goldnead\StatamicPayments\Contracts\ListsSubscriptions;
 use Goldnead\StatamicPayments\Contracts\PausesSubscriptions;
 use Goldnead\StatamicPayments\Contracts\ReadsCardExpiry;
 use Goldnead\StatamicPayments\Contracts\SubscriptionGateway;
@@ -48,7 +49,7 @@ use RuntimeException;
  * **Which payment methods appear is the Stripe account's business**, exactly as
  * it is Mollie's. No method picker, no wallet buttons, nothing set here.
  */
-class StripeGateway implements PausesSubscriptions, ReadsCardExpiry, SubscriptionGateway, UpdatesSubscriptions
+class StripeGateway implements ListsSubscriptions, PausesSubscriptions, ReadsCardExpiry, SubscriptionGateway, UpdatesSubscriptions
 {
     /**
      * Pinned, so Stripe changing its default shape is a decision and not a Tuesday.
@@ -501,6 +502,17 @@ class StripeGateway implements PausesSubscriptions, ReadsCardExpiry, Subscriptio
         $this->assertBelongsTo($subscription, $customerReference, $subscriptionId);
 
         return $this->asRemoteSubscription($subscription);
+    }
+
+    /** Every agreement of this customer (one page of 100 is plenty for one buyer). */
+    public function subscriptionsFor(string $customerReference): array
+    {
+        $list = $this->get('/v1/subscriptions', ['customer' => $customerReference, 'status' => 'all', 'limit' => 100]);
+
+        return array_values(array_map(
+            fn (array $subscription) => $this->asRemoteSubscription($subscription),
+            array_filter((array) ($list['data'] ?? []), 'is_array'),
+        ));
     }
 
     // ------------------------------------------------ pause, change, card

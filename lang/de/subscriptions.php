@@ -31,6 +31,8 @@ return [
     // Laufender Gutschein (statamic-offers O6)
     'coupon_until' => 'Mit Gutschein :code, :off weniger, bis einschließlich :date.',
     'coupon_forever' => 'Mit Gutschein :code, :off weniger, dauerhaft.',
+    'coupon_until_short' => ':code, :off weniger, bis einschließlich :date',
+    'coupon_forever_short' => ':code, :off weniger, dauerhaft',
 
     // Control Panel: Detailansicht
     'field_paused_at' => 'Pausiert seit',

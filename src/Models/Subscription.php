@@ -54,6 +54,8 @@ use Illuminate\Support\Facades\Log;
  * @property Carbon|null $resumes_at
  * @property Carbon|null $card_expires_at
  * @property Carbon|null $card_checked_at
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
  * @property string|null $email
  * @property string|null $name
  * @property array<string, mixed>|null $meta
@@ -97,6 +99,37 @@ class Subscription extends Model
     public const STATUS_PAUSING = 'pausing';
 
     public const STATUS_RESUMING = 'resuming';
+
+    public const STATUS_SWITCHING = 'switching';
+
+    public const STATUS_CANCELLING = 'cancelling';
+
+    /**
+     * Every claim. A row in one of these is being changed at the provider right
+     * now, or was, by a process that died (see `SubscriptionClaims`).
+     */
+    public const CLAIMS = [
+        self::STATUS_PAUSING,
+        self::STATUS_RESUMING,
+        self::STATUS_SWITCHING,
+        self::STATUS_CANCELLING,
+    ];
+
+    /** After this long a claim is taken to be left behind, not in flight. */
+    public const CLAIM_STALE_MINUTES = 10;
+
+    public function isClaimed(): bool
+    {
+        return in_array($this->status, self::CLAIMS, true);
+    }
+
+    /** Claimed, and nobody has touched it for `CLAIM_STALE_MINUTES`. */
+    public function isStuck(): bool
+    {
+        return $this->isClaimed()
+            && $this->updated_at !== null
+            && $this->updated_at->lte(Carbon::now()->subMinutes(self::CLAIM_STALE_MINUTES));
+    }
 
     protected $guarded = [];
 
@@ -260,6 +293,35 @@ class Subscription extends Model
                 ->whereJsonContains('meta->previous_provider_ids', $providerId)
                 ->orderByDesc('id')
                 ->first();
+    }
+
+    /**
+     * The row a charge belongs to: by the agreement id, and where that is one
+     * nobody wrote down yet (a process died between the provider's answer and
+     * the row), by the row id this package put in the agreement's metadata,
+     * which Mollie copies onto every payment of it.
+     *
+     * @param  array<string, mixed>  $metadata  the payment's metadata
+     */
+    public static function forCycle(string $provider, string $providerId, array $metadata = []): ?self
+    {
+        $row = self::forProviderId($provider, $providerId);
+
+        if ($row !== null) {
+            return $row;
+        }
+
+        foreach (['resumed_subscription_id', 'switched_subscription_id'] as $key) {
+            if (is_numeric($metadata[$key] ?? null)) {
+                $row = static::query()->where('provider', $provider)->whereKey((int) $metadata[$key])->first();
+
+                if ($row !== null) {
+                    return $row;
+                }
+            }
+        }
+
+        return null;
     }
 
     /** Remember an agreement id this row no longer runs on. */

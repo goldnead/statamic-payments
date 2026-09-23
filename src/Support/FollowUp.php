@@ -255,6 +255,18 @@ class FollowUp
             return $payment;
         });
 
+        // Nothing left to charge (a coupon covered all of it): the free path,
+        // as a checkout of nothing takes. A provider refuses a charge of zero,
+        // and the buyer who was promised a free upsell would get an error.
+        if ((int) $payment->amount_cent <= 0) {
+            $payment->forceFill([
+                'provider' => 'free',
+                'provider_id' => 'free-'.$payment->getKey(),
+            ])->save();
+
+            return app(Fulfilment::class)->fulfilFree($payment->fresh() ?? $payment);
+        }
+
         try {
             // Der Anbieter der Erstbestellung, aus deren eigener Spalte
             // gelesen. Die gespeicherte Karte liegt bei ihm; ein anderer

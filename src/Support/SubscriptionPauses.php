@@ -111,6 +111,10 @@ class SubscriptionPauses
             return false;
         }
 
+        // The date goes onto the row with the claim, so a sweep that finds the
+        // claim left behind still knows when the pause was meant to end.
+        Subscription::query()->whereKey($subscription->getKey())->update(['resumes_at' => $resumesOn]);
+
         $nextBefore = $subscription->next_payment_at;
         $native = $gateway instanceof PausesSubscriptions;
 
@@ -124,7 +128,7 @@ class SubscriptionPauses
                 'exception' => $e->getMessage(),
             ]);
 
-            $this->release($subscription, Subscription::STATUS_PAUSING, Subscription::STATUS_ACTIVE);
+            $this->release($subscription, Subscription::STATUS_PAUSING, Subscription::STATUS_ACTIVE, ['resumes_at' => null]);
 
             return false;
         }
@@ -137,11 +141,24 @@ class SubscriptionPauses
                 'status' => $remote->status,
             ]);
 
-            $this->release($subscription, Subscription::STATUS_PAUSING, Subscription::STATUS_ACTIVE);
+            $this->release($subscription, Subscription::STATUS_PAUSING, Subscription::STATUS_ACTIVE, ['resumes_at' => null]);
 
             return false;
         }
 
+        $this->completePause($subscription, $native, $nextBefore, $resumesOn, $by);
+
+        return true;
+    }
+
+    /**
+     * Write down a pause the provider has confirmed, and say so.
+     *
+     * Public for `SubscriptionClaims`, which finishes a pause whose process
+     * died after the provider had already paused.
+     */
+    public function completePause(Subscription $subscription, bool $native, ?Carbon $nextBefore, ?Carbon $resumesOn, string $by): void
+    {
         $subscription = $subscription->fresh() ?? $subscription;
         $meta = $subscription->meta ?? [];
         $meta['pause'] = [
@@ -170,8 +187,6 @@ class SubscriptionPauses
         );
 
         $this->announce(fn () => SubscriptionPaused::dispatch($subscription, $resumesOn, $by), $subscription);
-
-        return true;
     }
 
     /**
@@ -209,8 +224,12 @@ class SubscriptionPauses
                     $this->subscriptions->agreementPayload($subscription, $next, [
                         'resumed_subscription_id' => $subscription->getKey(),
                     ]) + [
-                        // One request, should it reach the provider twice.
-                        'idempotencyKey' => 'statamic-payments-resume-'.$subscription->getKey().'-'.($subscription->paused_at?->getTimestamp() ?? 0),
+                        // One request, should it reach the provider twice. The
+                        // attempt counts up after a refusal: a provider replays
+                        // the answer it gave to a key, and a card replaced the
+                        // same day deserves a real second try.
+                        'idempotencyKey' => 'statamic-payments-resume-'.$subscription->getKey().'-'
+                            .($subscription->paused_at?->getTimestamp() ?? 0).'-'.((int) ($pause['attempt'] ?? 0)),
                     ],
                 );
             }
@@ -220,7 +239,7 @@ class SubscriptionPauses
                 'exception' => $e->getMessage(),
             ]);
 
-            $this->release($subscription, Subscription::STATUS_RESUMING, Subscription::STATUS_PAUSED);
+            $this->refused($subscription);
 
             return false;
         }
@@ -231,7 +250,7 @@ class SubscriptionPauses
                 'status' => $remote->status,
             ]);
 
-            $this->release($subscription, Subscription::STATUS_RESUMING, Subscription::STATUS_PAUSED);
+            $this->refused($subscription);
 
             return false;
         }
@@ -252,7 +271,7 @@ class SubscriptionPauses
      * the provider; the row follows it. Claimed like a resume, so a refresh and
      * a webhook arriving together do it once.
      */
-    public function adoptProviderResume(Subscription $subscription, RemoteSubscription $remote): bool
+    public function adoptProviderResume(Subscription $subscription, RemoteSubscription $remote, string $by = 'provider'): bool
     {
         if (! $subscription->isPaused() || ! $remote->isLive()) {
             return false;
@@ -265,7 +284,13 @@ class SubscriptionPauses
         $subscription = $subscription->fresh() ?? $subscription;
         $pause = is_array($subscription->meta['pause'] ?? null) ? $subscription->meta['pause'] : [];
 
-        $this->markResumed($subscription, $remote, $this->nextChargeAfterPause($subscription, $pause), 'provider');
+        // An agreement a dead resume started on Mollie: the row moves to it,
+        // and the old id stays findable for late debits.
+        if ($remote->providerId !== '' && $remote->providerId !== $subscription->provider_id) {
+            $subscription->rememberProviderId((string) $subscription->provider_id);
+        }
+
+        $this->markResumed($subscription, $remote, $this->nextChargeAfterPause($subscription, $pause), $by);
 
         return true;
     }
@@ -362,13 +387,29 @@ class SubscriptionPauses
             ->update(['status' => $to, 'updated_at' => Carbon::now()]) > 0;
     }
 
-    /** Give a claim back after the provider refused. */
-    protected function release(Subscription $subscription, string $from, string $to): void
+    /** A refused resume: paused again, and the next try gets a new key. */
+    protected function refused(Subscription $subscription): void
     {
+        $meta = ($subscription->fresh() ?? $subscription)->meta ?? [];
+        $meta['pause']['attempt'] = ((int) ($meta['pause']['attempt'] ?? 0)) + 1;
+
         Subscription::query()
             ->whereKey($subscription->getKey())
+            ->where('status', Subscription::STATUS_RESUMING)
+            ->update(['status' => Subscription::STATUS_PAUSED, 'meta' => json_encode($meta), 'updated_at' => Carbon::now()]);
+    }
+
+    /**
+     * Give a claim back after the provider refused. Public for the sweep.
+     *
+     * @param  array<string, mixed>  $also
+     */
+    public function release(Subscription $subscription, string $from, string $to, array $also = []): bool
+    {
+        return Subscription::query()
+            ->whereKey($subscription->getKey())
             ->where('status', $from)
-            ->update(['status' => $to, 'updated_at' => Carbon::now()]);
+            ->update(['status' => $to, 'updated_at' => Carbon::now()] + $also) > 0;
     }
 
     protected function accessMode(): string

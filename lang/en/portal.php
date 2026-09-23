@@ -62,6 +62,10 @@ return [
     'status_active' => 'Running',
     'status_suspended' => 'Suspended',
     'status_paused' => 'Paused',
+    'status_pausing' => 'Pausing',
+    'status_resuming' => 'Resuming',
+    'status_switching' => 'Switching',
+    'status_cancelling' => 'Cancelling',
     'status_cancelled' => 'Cancelled',
     'status_completed' => 'Completed',
 

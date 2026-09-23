@@ -120,7 +120,10 @@ class ThanksLink
         return [
             'valid' => $within && $paid,
             'paid' => $paid,
-            'pending' => $within && ! $paid,
+            // On its way, not refused: a failed or cancelled payment is not
+            // "being confirmed".
+            'pending' => $within && ! $paid && $payment !== null
+                && in_array($payment->status, [Payment::STATUS_OPEN, Payment::STATUS_INITIATED], true),
             'payment_id' => $id,
             'expires_at' => $until->toIso8601String(),
         ];

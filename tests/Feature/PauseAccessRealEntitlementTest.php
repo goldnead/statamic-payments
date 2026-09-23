@@ -108,6 +108,20 @@ class PauseAccessRealEntitlementTest extends TestCase
     }
 
     #[Test]
+    public function a_late_debit_during_the_pause_renews_the_one_access_and_writes_no_second(): void
+    {
+        $this->zugang('2026-10-05');
+        $abo = $this->abo();
+        app(SubscriptionPauses::class)->pause($abo);
+
+        $id = $this->gateway->arrive('mitgliedschaft', 1900, 'sub_1');
+        $this->postJson(route('statamic-payments.webhook'), ['id' => $id])->assertOk();
+
+        $this->assertSame(1, Entitlement::count(), 'the cycle wrote a second, open-ended access');
+        $this->assertSame('2026-11-05', Entitlement::first()->expires_at->format('Y-m-d'));
+    }
+
+    #[Test]
     public function keep_carries_the_access_to_the_day_the_pause_ends(): void
     {
         config(['statamic-payments.pause.access' => 'keep']);

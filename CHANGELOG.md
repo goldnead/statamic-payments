@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Upgrading: read this first
+
+- **New permission `manage payment subscriptions` ("Abos verwalten").** Pausing, resuming,
+  switching **and cancelling** a subscription in the Control Panel now need it on top of
+  `access subscriptions utility`. Roles that could cancel until now lose the action silently:
+  the menu entry is simply gone. Add the permission to every role that should keep it. Super
+  users are not affected.
+- **`php artisan migrate`**, one additive migration (below).
+- **`abandoned.capture` defaults to `consent`.** Sites with `abandoned.enabled` on get abandoned
+  checkouts announced only where the form passes `meta.reminder_consent = true`; `always` restores
+  the old behaviour.
+- **Behind Cloudflare or another proxy, set up TrustProxies.** Without it every checkout comes
+  from the proxy's address. A private one is skipped by the checkout brake; Cloudflare's public
+  edge addresses are not, and many buyers share a few of them.
+- **Schedule `payments:resume-paused`** (`->daily()->withoutOverlapping()`) wherever subscriptions
+  are paused: it also puts right rows a dead process left in `pausing`, `resuming`, `switching` or
+  `cancelling`.
+
 Built from the ThriveCart walk-through of 23.09.2026 (features P1 to P9). Needs
 `php artisan migrate`: one migration, additive (`subscriptions.paused_at`, `resumes_at`,
 `card_expires_at`, `card_checked_at`, table `payment_subscription_notices`).
@@ -118,7 +136,28 @@ the bridge falls back to it when the catalogue has nothing to say.
   brand's products. A difference that later fails is marked in the history. Dates and amounts in
   the detail are formatted on the server in the display time zone.
 - **Mails say "Sie"**, like the family's other transactional mails; the dunning letter too.
-- `FollowUp::accept()` takes an optional `Discount` (a funnel-wide coupon on the one-click upsell).
+- `FollowUp::accept()` takes an optional `Discount` (a funnel-wide coupon on the one-click upsell);
+  where it leaves nothing to charge, the upsell takes the free path instead of `chargeAgain()`.
+
+### Fixed after the critique round (Gauntlet 3)
+
+- **Claims of different kinds.** A switch claims the status too (`switching`), a cancellation
+  claims `cancelling` and waits for a pause, resume or switch still in flight. A cancellation during
+  a resume reported success while the resume went on starting a new agreement; a pause during a
+  switch was written over by the switch's old `meta`. The switch now reads `meta` fresh at the end.
+- **Claims a dead process left behind.** A charge on a row in a claim is counted, not discarded; a
+  charge on an agreement the row never learned the id of is found by the row id in its metadata
+  (`Subscription::forCycle()`). `refresh()` leaves claimed rows alone. `payments:resume-paused`
+  puts right rows stuck more than ten minutes (`SubscriptionClaims`): it adopts the agreement a dead
+  resume started (new optional contract `ListsSubscriptions`, Stripe and Mollie), finishes or undoes
+  a half pause, finishes a half cancellation, and logs an error for a half switch it cannot read
+  back. Cancelling a stuck row ends the agreement it left at the provider too.
+- **A late debit during a pause** no longer writes a second, open-ended access: `grantFor()` skips
+  payments that are cycles of a known agreement; their access follows `renewFor()`.
+- **A refused resume** is retried with a new idempotency key (attempt counter).
+- Thank-you link: `pending` only for an open payment, not a failed or cancelled one. CP: the coupon
+  field no longer repeats "Mit Gutschein", the next charge shows the day without "00:00", German
+  names for the claim states.
 
 ### Added: portal logo, greeting and cancellation per product (P9)
 

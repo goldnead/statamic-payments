@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Gateways;
 
+use Goldnead\StatamicPayments\Contracts\ListsSubscriptions;
 use Goldnead\StatamicPayments\Contracts\MandateGateway;
 use Goldnead\StatamicPayments\Contracts\ReadsCardExpiry;
 use Goldnead\StatamicPayments\Contracts\SubscriptionGateway;
@@ -32,7 +33,7 @@ use Mollie\Api\Types\SequenceType;
  * uninstallable on half the versions its own composer.json promises. Found by
  * installing it, not by reading it.
  */
-class MollieGateway implements MandateGateway, ReadsCardExpiry, SubscriptionGateway, UpdatesSubscriptions
+class MollieGateway implements ListsSubscriptions, MandateGateway, ReadsCardExpiry, SubscriptionGateway, UpdatesSubscriptions
 {
     public function supportsFollowUp(): bool
     {
@@ -143,6 +144,21 @@ class MollieGateway implements MandateGateway, ReadsCardExpiry, SubscriptionGate
     public function fetchSubscription(string $customerReference, string $subscriptionId): RemoteSubscription
     {
         return $this->asRemote($this->client->subscriptions->getForId($customerReference, $subscriptionId));
+    }
+
+    /**
+     * Every agreement of this customer, with its metadata. `iteratorForId()`
+     * exists under that name in SDK v2 and v3.
+     */
+    public function subscriptionsFor(string $customerReference): array
+    {
+        $out = [];
+
+        foreach ($this->client->subscriptions->iteratorForId($customerReference) as $subscription) {
+            $out[] = $this->asRemote($subscription);
+        }
+
+        return $out;
     }
 
     /**

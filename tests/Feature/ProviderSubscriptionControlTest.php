@@ -168,6 +168,22 @@ class ProviderSubscriptionControlTest extends TestCase
     }
 
     #[Test]
+    public function stripe_lists_a_customers_agreements_with_their_metadata(): void
+    {
+        Http::fake([
+            'api.stripe.com/v1/subscriptions*' => Http::response(['data' => [
+                $this->subscription(['id' => 'sub_neu', 'metadata' => ['resumed_subscription_id' => '7']]),
+            ]]),
+        ]);
+
+        $liste = $this->stripe()->subscriptionsFor('cus_TestBuyer');
+
+        $this->assertSame('sub_neu', $liste[0]->providerId);
+        $this->assertSame('7', $liste[0]->meta['resumed_subscription_id']);
+        Http::assertSent(fn (Request $r) => $r['customer'] === 'cus_TestBuyer' && $r['status'] === 'all');
+    }
+
+    #[Test]
     public function stripe_reads_the_expiry_of_the_newest_card(): void
     {
         Http::fake([

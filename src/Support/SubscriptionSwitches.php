@@ -190,6 +190,10 @@ class SubscriptionSwitches
             ->where('product', $preview['from'])
             ->where('amount_cent', $preview['from_amount_cent'])
             ->update([
+                // The status too: a pause or cancellation arriving while this
+                // runs finds `switching` and waits, instead of ending the
+                // agreement this is about to change (Gauntlet 23.09.2026).
+                'status' => Subscription::STATUS_SWITCHING,
                 'product' => $to,
                 'amount_cent' => $preview['to_amount_cent'],
                 'updated_at' => Carbon::now(),
@@ -201,8 +205,9 @@ class SubscriptionSwitches
 
         $giveBack = fn () => Subscription::query()
             ->whereKey($subscription->getKey())
-            ->where('product', $to)
+            ->where('status', Subscription::STATUS_SWITCHING)
             ->update([
+                'status' => Subscription::STATUS_ACTIVE,
                 'product' => $preview['from'],
                 'amount_cent' => $preview['from_amount_cent'],
                 'updated_at' => Carbon::now(),
@@ -224,11 +229,14 @@ class SubscriptionSwitches
         $snapshot = $subscription->replicate();
         $snapshot->setAttribute('id', $subscription->getKey());
 
+        // What the claim wrote, known to the object too, so the save at the end
+        // writes the status back and nothing it did not change.
         $subscription->forceFill([
+            'status' => Subscription::STATUS_SWITCHING,
             'product' => $to,
             'amount_cent' => $preview['to_amount_cent'],
         ]);
-        $subscription->syncOriginalAttributes(['product', 'amount_cent']);
+        $subscription->syncOriginalAttributes(['status', 'product', 'amount_cent']);
 
         try {
             if ($gateway instanceof UpdatesSubscriptions) {
@@ -278,7 +286,15 @@ class SubscriptionSwitches
             return false;
         }
 
-        $meta = $subscription->meta ?? [];
+        // Read again: whatever was written to the row while the provider was
+        // asked (a counted charge, a note) stays. The ids this switch retired
+        // are added to what is there, not written over it.
+        $retired = (array) ($subscription->meta['previous_provider_ids'] ?? []);
+        $meta = ($subscription->fresh() ?? $subscription)->meta ?? [];
+
+        if ($retired !== []) {
+            $meta['previous_provider_ids'] = array_values(array_unique(array_merge((array) ($meta['previous_provider_ids'] ?? []), $retired)));
+        }
 
         // A coupon applied to the product that was left (statamic-offers O6).
         // The provider now charges the full new price; the row says the same,
@@ -301,6 +317,7 @@ class SubscriptionSwitches
         ]]));
 
         $subscription->forceFill([
+            'status' => $remote->isLive() ? $remote->status : Subscription::STATUS_ACTIVE,
             'provider_id' => $remote->providerId !== '' ? $remote->providerId : $snapshot->provider_id,
             'meta' => $meta,
         ])->save();

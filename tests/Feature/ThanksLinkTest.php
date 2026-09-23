@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Tests\Feature;
 
+use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Support\Checkout;
 use Goldnead\StatamicPayments\Support\ThanksLink;
 use Goldnead\StatamicPayments\Tests\TestCase;
@@ -74,6 +75,21 @@ class ThanksLinkTest extends TestCase
         $this->assertFalse($state['valid'], 'a SEPA order not yet paid opened the download');
         $this->assertFalse($state['paid']);
         $this->assertTrue($state['pending']);
+    }
+
+    #[Test]
+    public function a_failed_payment_is_not_pending(): void
+    {
+        config(['statamic-payments.thanks.expires_minutes' => 30]);
+        $url = $this->redirectUrl();
+        $this->gateway->markStatus('tr_1', Payment::STATUS_FAILED);
+        $this->postJson(route('statamic-payments.webhook'), ['id' => 'tr_1'])->assertOk();
+
+        $this->get($url)->assertRedirect();
+
+        $state = app(ThanksLink::class)->state(request());
+        $this->assertFalse($state['pending'], 'a failed payment was shown as on its way');
+        $this->assertFalse($state['valid']);
     }
 
     #[Test]

@@ -211,7 +211,7 @@ class Fulfilment
             return;
         }
 
-        $subscription = Subscription::forProviderId((string) $payment->provider, $remote->subscriptionId);
+        $subscription = Subscription::forCycle((string) $payment->provider, $remote->subscriptionId, $remote->metadata);
 
         if (! $subscription || ! $subscription->isLive()) {
             // Eine beendete Vereinbarung wird nicht angemahnt. Ohne diese Zeile
@@ -359,7 +359,7 @@ class Fulfilment
             return false;
         }
 
-        $timesCharged = Subscription::forProviderId($this->gateway->provider(), $remote->subscriptionId)?->times_charged;
+        $timesCharged = Subscription::forCycle($this->gateway->provider(), $remote->subscriptionId, $remote->metadata)?->times_charged;
 
         $erstzyklus = $timesCharged !== null && (int) $timesCharged === 0;
 
@@ -411,7 +411,7 @@ class Fulfilment
         }
 
         // Earlier ids of the row count too, see Subscription::forProviderId().
-        $subscription = Subscription::forProviderId($this->gateway->provider(), $remote->subscriptionId);
+        $subscription = Subscription::forCycle($this->gateway->provider(), $remote->subscriptionId, $remote->metadata);
 
         if (! $subscription) {
             // Its own alarm, not the generic "unknown payment id" further up.
@@ -749,7 +749,7 @@ class Fulfilment
             // A payment the provider made on its own: a cycle of a running
             // agreement. The id comes from the provider, never from the caller.
             if ($remote->subscriptionId) {
-                $subscriptions->recordCycle($payment, $remote->subscriptionId);
+                $subscriptions->recordCycle($payment, $remote->subscriptionId, $remote->metadata);
 
                 return;
             }

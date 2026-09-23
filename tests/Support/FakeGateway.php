@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Tests\Support;
 
 use Closure;
+use Goldnead\StatamicPayments\Contracts\ListsSubscriptions;
 use Goldnead\StatamicPayments\Contracts\SubscriptionGateway;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
@@ -18,8 +19,22 @@ use RuntimeException;
  * claiming "paid" while the gateway still says "open", which is precisely the
  * forgery the design is meant to survive.
  */
-class FakeGateway implements SubscriptionGateway
+class FakeGateway implements ListsSubscriptions, SubscriptionGateway
 {
+    /** Every agreement of a customer, with the metadata it was created with. */
+    public function subscriptionsFor(string $customerReference): array
+    {
+        $out = [];
+
+        foreach ($this->subscriptions as $id => $sub) {
+            if (($sub['customer'] ?? null) === $customerReference) {
+                $out[] = new RemoteSubscription((string) $id, (string) ($sub['status'] ?? Subscription::STATUS_CANCELLED), meta: (array) ($sub['meta'] ?? []));
+            }
+        }
+
+        return $out;
+    }
+
     /**
      * Was in dem Augenblick gilt, in dem der Anbieter gerufen wird.
      *
@@ -67,8 +82,13 @@ class FakeGateway implements SubscriptionGateway
         return ! $this->refuseSubscriptions;
     }
 
+    /** @var list<array<string, mixed>> every create request, refused ones too */
+    public array $subscriptionAttempts = [];
+
     public function createSubscription(string $customerReference, array $payload): RemoteSubscription
     {
+        $this->subscriptionAttempts[] = $payload;
+
         if ($this->refuseSubscriptions || $this->refuseThisSubscription) {
             throw new RuntimeException('this provider would not create the subscription');
         }
@@ -79,6 +99,7 @@ class FakeGateway implements SubscriptionGateway
         $id = 'sub_'.$this->subscriptionsCreated;
 
         $this->subscriptions[$id] = [
+            'meta' => is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [],
             'customer' => $customerReference,
             // Active, even when the first charge is a month away: the
             // agreement exists because the mandate does. A provider reports

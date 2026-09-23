@@ -71,6 +71,17 @@ class EntitlementsBridge
             return;
         }
 
+        // A cycle of an agreement this site knows. Its access is the
+        // agreement's, renewed per cycle by `renewFor()`; a grant from here
+        // wrote a second, open-ended access next to it, and a debit that
+        // settled during a pause handed the paused access out for good
+        // (Gauntlet 23.09.2026).
+        $cycleOf = data_get($payment->meta, 'cycle_of.subscription_id');
+
+        if (is_numeric($cycleOf) && Subscription::query()->whereKey((int) $cycleOf)->exists()) {
+            return;
+        }
+
         $subject = $payment->email;
 
         if (! is_string($subject) || $subject === '') {

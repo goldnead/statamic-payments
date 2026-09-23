@@ -58,7 +58,7 @@ class ListedSubscription extends JsonResource
             'amount' => $this->chargedAmount(),
             'price' => $this->amount(),
             'amount_display' => Display::money($this->chargedCent(), $this->currency),
-            'coupon' => Display::coupon($this->resource),
+            'coupon' => Display::coupon($this->resource, short: true),
             'currency' => $this->currency,
 
             'interval' => $this->interval,
@@ -106,7 +106,9 @@ class ListedSubscription extends JsonResource
             // detail. `<date-time>` formats by the browser's locale, which put
             // "9/20/2026, 12:00 PM" next to "01.11.2026" on one screen.
             'starts_at_display' => LocalTime::moment($this->starts_at),
-            'next_payment_at_display' => LocalTime::moment($this->next_payment_at),
+            // A charge falls on a day; its clock time is the provider's and
+            // printed "00:00" on every Mollie agreement.
+            'next_payment_at_display' => LocalTime::date($this->next_payment_at),
             'cancelled_at_display' => LocalTime::moment($this->cancelled_at),
             'ended_at_display' => LocalTime::moment($this->ended_at),
             'paused_at_display' => LocalTime::moment($this->paused_at),

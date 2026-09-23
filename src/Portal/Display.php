@@ -34,7 +34,7 @@ final class Display
      * CHOR20 (4,00 EUR weniger) bis einschließlich 05.11.2026". The same words
      * in the reminder mail, the portal and the Control Panel.
      */
-    public static function coupon(Subscription $subscription): string
+    public static function coupon(Subscription $subscription, bool $short = false): string
     {
         $summary = $subscription->couponSummary();
 
@@ -44,11 +44,14 @@ final class Display
 
         $off = self::money($summary['discount_cent'], $subscription->currency);
 
+        // `$short`: for a field already labelled "Gutschein", without saying it again.
+        $suffix = $short ? '_short' : '';
+
         if ($summary['forever'] || $summary['until'] === null) {
-            return (string) __('statamic-payments::subscriptions.coupon_forever', ['code' => $summary['code'], 'off' => $off]);
+            return (string) __('statamic-payments::subscriptions.coupon_forever'.$suffix, ['code' => $summary['code'], 'off' => $off]);
         }
 
-        return (string) __('statamic-payments::subscriptions.coupon_until', [
+        return (string) __('statamic-payments::subscriptions.coupon_until'.$suffix, [
             'code' => $summary['code'],
             'off' => $off,
             'date' => LocalTime::of($summary['until'])?->translatedFormat(__('statamic-payments::portal.date_format')),

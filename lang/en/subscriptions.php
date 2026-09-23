@@ -30,6 +30,8 @@ return [
     // Running coupon (statamic-offers O6)
     'coupon_until' => 'With coupon :code, :off less, up to and including :date.',
     'coupon_forever' => 'With coupon :code, :off less, for good.',
+    'coupon_until_short' => ':code, :off less, up to and including :date',
+    'coupon_forever_short' => ':code, :off less, for good',
 
     // Control Panel: detail
     'field_paused_at' => 'Paused since',

@@ -79,6 +79,23 @@ class FollowUpTest extends TestCase
     }
 
     #[Test]
+    public function a_coupon_that_covers_the_whole_upsell_takes_the_free_path(): void
+    {
+        $original = $this->paidPayment();
+        $this->gateway->mandates[] = 'cst_maria';
+        $vorher = $this->gateway->created;
+
+        $folge = app(FollowUp::class)->accept($original, 'begleit-cd', discount: new Discount('GRATIS', 5000));
+
+        $this->assertNotNull($folge);
+        $this->assertSame(0, $folge->amount_cent);
+        $this->assertSame('free', $folge->provider);
+        $this->assertSame(Payment::STATUS_PAID, $folge->status);
+        $this->assertNotNull($folge->fulfilled_at);
+        $this->assertSame($vorher, $this->gateway->created, 'the provider was asked to charge nothing');
+    }
+
+    #[Test]
     public function without_a_coupon_the_upsell_costs_what_it_did(): void
     {
         $original = $this->paidPayment();

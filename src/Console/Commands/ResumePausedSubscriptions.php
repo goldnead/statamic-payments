@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Console\Commands;
 
+use Goldnead\StatamicPayments\Support\SubscriptionClaims;
 use Goldnead\StatamicPayments\Support\SubscriptionPauses;
 use Illuminate\Console\Command;
 
@@ -18,14 +19,22 @@ class ResumePausedSubscriptions extends Command
 {
     protected $signature = 'payments:resume-paused';
 
-    protected $description = 'Resume paused subscriptions whose resume date has come.';
+    protected $description = 'Put right subscriptions a dead process left in a claim, then resume paused ones whose date has come.';
 
-    public function handle(SubscriptionPauses $pauses): int
+    public function handle(SubscriptionPauses $pauses, SubscriptionClaims $claims): int
     {
+        // Claims first: a row stuck in `resuming` is a pause that wanted to end.
+        $stuck = $claims->sweep();
         $report = $pauses->resumeDue();
 
-        $this->info(sprintf('%d resumed, %d could not be resumed.', $report['resumed'], $report['failed']));
+        $this->info(sprintf(
+            '%d left-behind claim(s) put right, %d need a person; %d resumed, %d could not be resumed.',
+            $stuck['settled'],
+            $stuck['unresolved'],
+            $report['resumed'],
+            $report['failed'],
+        ));
 
-        return $report['failed'] > 0 ? self::FAILURE : self::SUCCESS;
+        return $report['failed'] + $stuck['unresolved'] > 0 ? self::FAILURE : self::SUCCESS;
     }
 }

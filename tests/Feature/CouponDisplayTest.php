@@ -120,5 +120,9 @@ class CouponDisplayTest extends TestCase
 
         $this->assertSame('16.00', $row['amount']);
         $this->assertStringContainsString('CHOR20', (string) $row['coupon']);
+        // The field is labelled "Gutschein" already; the value does not say it again.
+        $this->assertStringStartsWith('CHOR20', (string) $row['coupon']);
+        // A charge falls on a day, not at midnight.
+        $this->assertStringNotContainsString(':', (string) $row['next_payment_at_display']);
     }
 }

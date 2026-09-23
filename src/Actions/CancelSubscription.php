@@ -55,7 +55,9 @@ class CancelSubscription extends Action
         // failure nobody caused.
         // Paused counts: a paused membership is one somebody may want to end
         // for good.
-        return $item instanceof Subscription && $item->isRunning();
+        // And a row a dead process left in a claim: cancelling it also ends
+        // whatever agreement it left at the provider.
+        return $item instanceof Subscription && ($item->isRunning() || $item->isStuck());
     }
 
     public function authorize($user, $item)

@@ -28,6 +28,13 @@ return [
     'switch_failed' => 'Das Abo wurde nicht gewechselt. Es ist unverändert.',
     'switch_line' => 'Wechsel zu :name, anteilig bis zur nächsten Abbuchung',
 
+    'release' => 'Wechsel freigeben',
+    'release_keep' => 'Welcher Stand gilt?',
+    'release_keep_instructions' => 'Dieser Wechsel ist nicht fertig geworden. Sehen Sie im Konto beim Zahlungsanbieter nach, welchen Betrag er abbucht, und wählen Sie danach.',
+    'release_keep_new' => 'Neues Produkt (der Anbieter bucht den neuen Betrag ab)',
+    'release_keep_old' => 'Altes Produkt (der Anbieter bucht den alten Betrag ab)',
+    'released_bulk' => 'Das Abo ist freigegeben.|:count Abos sind freigegeben.',
+
     // Laufender Gutschein (statamic-offers O6)
     'coupon_until' => 'Mit Gutschein :code, :off weniger, bis einschließlich :date.',
     'coupon_forever' => 'Mit Gutschein :code, :off weniger, dauerhaft.',
@@ -78,5 +85,6 @@ return [
 
     'portal_back' => 'Zurück zur Übersicht',
     'portal_cancel_hint' => 'Kündigen können Sie diesen Vertrag hier:',
+    'portal_cancel_busy' => 'Dieser Vertrag wird gerade geändert. Bitte versuchen Sie es in einem Moment noch einmal.',
     'portal_cancel_elsewhere' => 'Dieser Vertrag wird über die Kündigungsseite gekündigt, nicht hier im Konto.',
 ];

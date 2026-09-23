@@ -81,10 +81,13 @@ class SubscriptionReminders
                 $report['seen']++;
 
                 try {
-                    foreach ($this->due($subscription, $now) as [$kind, $reference, $date]) {
-                        $outcome = $this->notify($subscription, $kind, $reference, $date, $now);
-                        $report[$outcome]++;
-                    }
+                    // Under the row's brand: sender, settings and listeners.
+                    Brands::runFor($subscription->brand_id, function () use ($subscription, $now, &$report) {
+                        foreach ($this->due($subscription, $now) as [$kind, $reference, $date]) {
+                            $outcome = $this->notify($subscription, $kind, $reference, $date, $now);
+                            $report[$outcome]++;
+                        }
+                    });
                 } catch (Throwable $e) {
                     $report['failed']++;
                     Log::error('statamic-payments: a reminder for this agreement could not be worked out.', [

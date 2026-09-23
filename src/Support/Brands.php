@@ -485,4 +485,46 @@ final class Brands
 
         return $query->where('brand_id', $brandId);
     }
+
+    /**
+     * Runs one row's work under that row's brand (Gauntlet 23.09.2026).
+     *
+     * Commands and webhooks arrive without a brand, so a listener that reads
+     * the current brand (mail sender, automations) would otherwise act for the
+     * default brand. Brand 0 or null, or no sibling installed: runs as before.
+     * A brand the sibling cannot resolve (row deleted) is logged and the work
+     * still runs: money paths do not stop over a missing tenant row.
+     *
+     * @template T
+     *
+     * @param  \Closure(): T  $callback
+     * @return T
+     */
+    public static function runFor(?int $brandId, \Closure $callback): mixed
+    {
+        if (! $brandId || ! self::available()) {
+            return $callback();
+        }
+
+        $ran = false;
+
+        try {
+            return app('brand-context')->runFor($brandId, function () use ($callback, &$ran) {
+                $ran = true;
+
+                return $callback();
+            });
+        } catch (Throwable $e) {
+            if ($ran) {
+                throw $e;
+            }
+
+            Log::warning('statamic-payments: the brand of this row could not be set; the work ran without it.', [
+                'brand_id' => $brandId,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return $callback();
+        }
+    }
 }

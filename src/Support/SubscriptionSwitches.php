@@ -203,6 +203,16 @@ class SubscriptionSwitches
             return false;
         }
 
+        // Where the row came from, on the row: should this process die, a
+        // person releasing the claim in the Control Panel can put it back.
+        $claimedRow = $subscription->fresh() ?? $subscription;
+        $claimedRow->forceFill(['meta' => array_merge($claimedRow->meta ?? [], ['switching' => [
+            'from' => $preview['from'],
+            'from_amount_cent' => $preview['from_amount_cent'],
+            'to' => $to,
+            'to_amount_cent' => $preview['to_amount_cent'],
+        ]])])->save();
+
         $giveBack = fn () => Subscription::query()
             ->whereKey($subscription->getKey())
             ->where('status', Subscription::STATUS_SWITCHING)
@@ -291,6 +301,8 @@ class SubscriptionSwitches
         // are added to what is there, not written over it.
         $retired = (array) ($subscription->meta['previous_provider_ids'] ?? []);
         $meta = ($subscription->fresh() ?? $subscription)->meta ?? [];
+
+        unset($meta['switching']);
 
         if ($retired !== []) {
             $meta['previous_provider_ids'] = array_values(array_unique(array_merge((array) ($meta['previous_provider_ids'] ?? []), $retired)));

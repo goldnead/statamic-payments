@@ -122,7 +122,9 @@ class Cancellations
         ])->save();
 
         // A paused agreement is still a contract, and § 312k covers ending it.
-        if (! $subscription->isRunning()) {
+        // So is one being changed right now (a claim); that one is handled
+        // below, never skipped.
+        if (! $subscription->isRunning() && ! $subscription->isClaimed()) {
             return;
         }
 
@@ -143,6 +145,15 @@ class Cancellations
         // der Meldung, dass er nacharbeiten muss.
         if ($this->subscriptions->cancel($subscription)) {
             $cancellation->forceFill(['provider_cancelled_at' => Carbon::now()])->save();
+
+            return;
+        }
+
+        // The row is being paused, resumed or switched at this moment. The
+        // statutory cancellation is not lost to that: noted on the row and
+        // carried out when the change finishes, or by `payments:resume-paused`.
+        if (($subscription->fresh() ?? $subscription)->isClaimed()) {
+            $this->subscriptions->requestCancellation($subscription, (int) $cancellation->getKey());
         }
     }
 

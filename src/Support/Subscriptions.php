@@ -11,9 +11,11 @@ use Goldnead\StatamicPayments\Events\SubscriptionPlanCompleted;
 use Goldnead\StatamicPayments\Events\SubscriptionRenewed;
 use Goldnead\StatamicPayments\Events\SubscriptionStarted;
 use Goldnead\StatamicPayments\Events\SubscriptionStartFailed;
+use Goldnead\StatamicPayments\Models\Cancellation;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -895,7 +897,18 @@ class Subscriptions
         // either way: counted and announced, and nothing else is touched, so
         // the claim's own ending writes the status.
         if ($subscription->isClaimed()) {
-            $subscription->increment('times_charged');
+            // The next date is the provider's, and a charge just moved it on.
+            // Only the date: the status belongs to the claim. Written past
+            // Eloquent's timestamps on purpose: `updated_at` is the clock that
+            // tells the sweep a claim was left behind, and a charge arriving is
+            // not the claim making progress.
+            $next = $this->nextDateFromProvider($subscription);
+
+            Subscription::query()->toBase()->where('id', $subscription->getKey())->update(array_filter([
+                'times_charged' => DB::raw('times_charged + 1'),
+                'next_payment_at' => $next?->copy()->setTimezone((string) config('app.timezone', 'UTC'))->format('Y-m-d H:i:s'),
+            ], fn ($v) => $v !== null));
+
             $subscription = $subscription->fresh() ?? $subscription;
 
             SubscriptionRenewed::dispatch($subscription, $payment);
@@ -1059,6 +1072,17 @@ class Subscriptions
         $current->setAttribute('status', Subscription::STATUS_CANCELLING);
         $current->syncOriginalAttribute('status');
 
+        // What the row was before this claim, kept on it: a sweep finishing a
+        // cancellation a dead process left must know whether the row had
+        // already been ended (dunning) and so must not announce it again.
+        if ($from !== Subscription::STATUS_CANCELLING) {
+            $current->forceFill(['meta' => array_merge($current->meta ?? [], ['cancelling_from' => $from])])->save();
+        }
+
+        $from = $from === Subscription::STATUS_CANCELLING
+            ? (string) data_get($current->meta, 'cancelling_from', Subscription::STATUS_ACTIVE)
+            : $from;
+
         $giveBack = fn () => Subscription::query()
             ->whereKey($current->getKey())
             ->where('status', Subscription::STATUS_CANCELLING)
@@ -1066,10 +1090,6 @@ class Subscriptions
 
         try {
             $remote = $gateway->cancelSubscription($current->customer_reference, $current->provider_id);
-
-            if (in_array($from, Subscription::CLAIMS, true)) {
-                app(SubscriptionClaims::class)->endOrphans($current, $gateway);
-            }
         } catch (Throwable $e) {
             Log::error('statamic-payments: the provider would not cancel this agreement; the row is unchanged.', [
                 'subscription_id' => $subscription->getKey(),
@@ -1092,6 +1112,20 @@ class Subscriptions
             return false;
         }
 
+        // Whatever a resume or switch started for this row and never wrote
+        // down (its answer lost, its process dead) ends with it, whatever state
+        // the row was in: a paused row can have one too. Its own try: the main
+        // agreement is ended either way, and a listing the provider will not
+        // give now is said loudly rather than undoing that.
+        try {
+            app(SubscriptionClaims::class)->endOrphans($current, $gateway);
+        } catch (Throwable $e) {
+            Log::error('statamic-payments: an agreement was cancelled and the provider would not list what else runs for it; check for a second agreement.', [
+                'subscription_id' => $current->getKey(),
+                'exception' => $e->getMessage(),
+            ]);
+        }
+
         $subscription = $current;
 
         // War die Zeile hier schon beendet, ist der Anbieteraufruf das Einzige
@@ -1110,6 +1144,10 @@ class Subscriptions
         $schonBeendet = $from === Subscription::STATUS_CANCELLED
             && $subscription->ended_at !== null;
 
+        $meta = $subscription->meta ?? [];
+        $requested = is_array($meta['cancel_requested'] ?? null) ? $meta['cancel_requested'] : null;
+        unset($meta['cancelling_from'], $meta['cancel_requested']);
+
         $subscription->forceFill([
             'status' => Subscription::STATUS_CANCELLED,
             'cancelled_at' => $subscription->cancelled_at ?? now(),
@@ -1118,13 +1156,71 @@ class Subscriptions
             // A paused agreement can be ended for good; its date to resume
             // must not outlive it.
             'resumes_at' => null,
+            'meta' => $meta === [] ? null : $meta,
         ])->save();
+
+        // A statutory cancellation that had to wait: its record says when it
+        // was carried out at the provider.
+        if (is_numeric($requested['cancellation_id'] ?? null)) {
+            Cancellation::query()
+                ->whereKey((int) $requested['cancellation_id'])
+                ->whereNull('provider_cancelled_at')
+                ->update(['provider_cancelled_at' => now()]);
+        }
 
         if (! $schonBeendet) {
             SubscriptionCancelled::dispatch($subscription->fresh() ?? $subscription);
         }
 
         return true;
+    }
+
+    /** The next charge date the provider reports for this row's agreement, or null. */
+    protected function nextDateFromProvider(Subscription $subscription): ?Carbon
+    {
+        $gateway = $this->agreementGateway($subscription);
+
+        if ($gateway === null || Payment::isPlaceholderProviderId($subscription->provider_id)) {
+            return null;
+        }
+
+        try {
+            $remote = $gateway->fetchSubscription($subscription->customer_reference, $subscription->provider_id);
+        } catch (Throwable) {
+            return null;
+        }
+
+        return $remote->nextPaymentAt ? Carbon::parse($remote->nextPaymentAt) : null;
+    }
+
+    /**
+     * Note a cancellation that could not be carried out because the row is
+     * being changed right now. Carried out when the change finishes
+     * (`cancelIfRequested()`), or by the sweep. A § 312k cancellation must
+     * not be lost to an unlucky moment.
+     */
+    public function requestCancellation(Subscription $subscription, ?int $cancellationId = null): void
+    {
+        $fresh = $subscription->fresh() ?? $subscription;
+        $meta = $fresh->meta ?? [];
+        $meta['cancel_requested'] = array_filter([
+            'at' => now()->toIso8601String(),
+            'cancellation_id' => $cancellationId,
+        ], fn ($v) => $v !== null);
+
+        $fresh->forceFill(['meta' => $meta])->save();
+    }
+
+    /** Carry out a noted cancellation, if there is one. True when it was. */
+    public function cancelIfRequested(Subscription $subscription): bool
+    {
+        $fresh = $subscription->fresh() ?? $subscription;
+
+        if (! is_array(data_get($fresh->meta, 'cancel_requested')) || ! $fresh->isRunning()) {
+            return false;
+        }
+
+        return $this->cancel($fresh);
     }
 
     /**

@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Tests\Feature;
 
 use Goldnead\StatamicPayments\Actions\CancelSubscription;
 use Goldnead\StatamicPayments\Actions\PauseSubscription;
+use Goldnead\StatamicPayments\Actions\ReleaseSubscription;
 use Goldnead\StatamicPayments\Actions\ResumeSubscription;
 use Goldnead\StatamicPayments\Actions\SwitchSubscription;
 use Goldnead\StatamicPayments\Models\Payment;
@@ -167,6 +168,7 @@ class CpSubscriptionControlTest extends TestCase
         }
 
         $this->assertSame(Subscription::STATUS_ACTIVE, $abo->fresh()->status);
+        $this->assertFalse((new ReleaseSubscription)->authorize($viewer, $abo));
     }
 
     #[Test]

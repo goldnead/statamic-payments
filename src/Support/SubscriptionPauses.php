@@ -123,6 +123,17 @@ class SubscriptionPauses
                 ? $gateway->pauseSubscription($subscription->customer_reference, $subscription->provider_id, $resumesOn)
                 : $gateway->cancelSubscription($subscription->customer_reference, $subscription->provider_id);
         } catch (Throwable $e) {
+            // Same rule as a resume: a lost answer leaves the claim for the
+            // sweep, which asks the provider what happened.
+            if (Transport::isTransient($e)) {
+                Log::warning('statamic-payments: the provider did not answer a pause; the row stays claimed until the sweep has asked it.', [
+                    'subscription_id' => $subscription->getKey(),
+                    'exception' => $e->getMessage(),
+                ]);
+
+                return false;
+            }
+
             Log::error('statamic-payments: the provider would not pause this agreement; the row is unchanged.', [
                 'subscription_id' => $subscription->getKey(),
                 'exception' => $e->getMessage(),
@@ -187,6 +198,8 @@ class SubscriptionPauses
         );
 
         $this->announce(fn () => SubscriptionPaused::dispatch($subscription, $resumesOn, $by), $subscription);
+
+        $this->subscriptions->cancelIfRequested($subscription);
     }
 
     /**
@@ -219,7 +232,13 @@ class SubscriptionPauses
                 $remote = $gateway->resumeSubscription($subscription->customer_reference, $subscription->provider_id);
             } else {
                 $recreated = true;
-                $remote = $gateway->createSubscription(
+
+                // An earlier try whose answer was lost may have started one
+                // already. Taken over, not started a second time: two running
+                // agreements charge the buyer twice a month.
+                $remote = app(SubscriptionClaims::class)->orphansOf($subscription, $gateway)[0] ?? null;
+
+                $remote ??= $gateway->createSubscription(
                     $subscription->customer_reference,
                     $this->subscriptions->agreementPayload($subscription, $next, [
                         'resumed_subscription_id' => $subscription->getKey(),
@@ -234,6 +253,19 @@ class SubscriptionPauses
                 );
             }
         } catch (Throwable $e) {
+            // No answer is not "no". The provider may have started the
+            // agreement and lost only the reply: the row stays in its claim,
+            // the key stays the same, and `payments:resume-paused` asks the
+            // provider (SubscriptionClaims) instead of a second request.
+            if (Transport::isTransient($e)) {
+                Log::warning('statamic-payments: the provider did not answer a resume; the row stays claimed until the sweep has asked it.', [
+                    'subscription_id' => $subscription->getKey(),
+                    'exception' => $e->getMessage(),
+                ]);
+
+                return false;
+            }
+
             Log::error('statamic-payments: the provider would not resume this agreement; it stays paused.', [
                 'subscription_id' => $subscription->getKey(),
                 'exception' => $e->getMessage(),
@@ -324,6 +356,9 @@ class SubscriptionPauses
         $this->bridge->resumeFor($subscription);
 
         $this->announce(fn () => SubscriptionResumed::dispatch($subscription, $by), $subscription);
+
+        // A § 312k cancellation that arrived while this ran is carried out now.
+        $this->subscriptions->cancelIfRequested($subscription);
     }
 
     /**
@@ -343,7 +378,7 @@ class SubscriptionPauses
             ->where('resumes_at', '<=', $now)
             ->orderBy('id')
             ->each(function (Subscription $subscription) use (&$resumed, &$failed) {
-                $this->resume($subscription, 'schedule') ? $resumed++ : $failed++;
+                Brands::runFor($subscription->brand_id, fn () => $this->resume($subscription, 'schedule')) ? $resumed++ : $failed++;
             });
 
         return ['resumed' => $resumed, 'failed' => $failed];

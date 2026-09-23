@@ -96,6 +96,14 @@ class Fulfilment
             return null;
         }
 
+        // Under the row's brand: a webhook arrives with none, and the events
+        // below (paid, renewed, cycle failed) are heard by brand-aware
+        // listeners. Brand 0 or no sibling: as before.
+        return Brands::runFor($payment->brand_id, fn () => $this->act($payment, $remote, $announcedFailure));
+    }
+
+    protected function act(Payment $payment, ?RemotePayment $remote, bool $announcedFailure): Payment
+    {
         // Vor der Statusfrage, und mit Absicht: eine zurueckgebuchte Zahlung
         // steht beim Anbieter weiter auf `paid`. Wer erst unten einsteigt,
         // erfuellt sie noch einmal und merkt von der Rueckbuchung nichts.

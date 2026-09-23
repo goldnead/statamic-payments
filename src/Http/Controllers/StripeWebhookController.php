@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Http\Controllers;
 
 use Goldnead\StatamicPayments\Gateways\StripeGateway;
 use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Support\Brands;
 use Goldnead\StatamicPayments\Support\Chargebacks;
 use Goldnead\StatamicPayments\Support\Fulfilment;
 use Goldnead\StatamicPayments\Support\Gateways;
@@ -315,12 +316,12 @@ class StripeWebhookController
             return;
         }
 
-        app(Chargebacks::class)->record(
+        Brands::runFor($payment->brand_id, fn () => app(Chargebacks::class)->record(
             $payment,
             $reference,
             (int) ($dispute['amount'] ?? 0),
             is_string($dispute['reason'] ?? null) ? $dispute['reason'] : null,
-        );
+        ));
     }
 
     /** The row for the invoice this charge paid, where it paid one. */
@@ -391,9 +392,11 @@ class StripeWebhookController
 
         $refunds = app(Refunds::class);
 
-        foreach ($gateway->refundsFor($chargeId) as $refund) {
-            $refunds->record($payment, $refund['amount'], $refund['id']);
-        }
+        Brands::runFor($payment->brand_id, function () use ($gateway, $chargeId, $refunds, $payment) {
+            foreach ($gateway->refundsFor($chargeId) as $refund) {
+                $refunds->record($payment, $refund['amount'], $refund['id']);
+            }
+        });
     }
 
     /**

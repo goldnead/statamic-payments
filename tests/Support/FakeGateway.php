@@ -8,6 +8,7 @@ use Goldnead\StatamicPayments\Contracts\SubscriptionGateway;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\CheckoutSession;
+use Goldnead\StatamicPayments\Support\ProviderUnavailable;
 use Goldnead\StatamicPayments\Support\RemotePayment;
 use Goldnead\StatamicPayments\Support\RemoteSubscription;
 use RuntimeException;
@@ -24,6 +25,10 @@ class FakeGateway implements ListsSubscriptions, SubscriptionGateway
     /** Every agreement of a customer, with the metadata it was created with. */
     public function subscriptionsFor(string $customerReference): array
     {
+        if ($this->listingUnavailable) {
+            throw new ProviderUnavailable('503 while listing agreements');
+        }
+
         $out = [];
 
         foreach ($this->subscriptions as $id => $sub) {
@@ -63,6 +68,12 @@ class FakeGateway implements ListsSubscriptions, SubscriptionGateway
 
     /** The provider can do subscriptions and refuses this one. */
     public bool $refuseThisSubscription = false;
+
+    /** The next create succeeds at the provider and then times out on the way back. */
+    public bool $loseTheAnswer = false;
+
+    /** Listing the customer's agreements fails like a 503. */
+    public bool $listingUnavailable = false;
 
     /** A cancel that the provider accepts but that leaves the thing running. */
     public bool $cancelLies = false;
@@ -108,6 +119,14 @@ class FakeGateway implements ListsSubscriptions, SubscriptionGateway
             'status' => $this->subscriptionsArePending ? Subscription::STATUS_PENDING : Subscription::STATUS_ACTIVE,
         ];
 
+        // The agreement exists at the provider, the answer never arrives: a
+        // timeout after the request was taken.
+        if ($this->loseTheAnswer) {
+            $this->loseTheAnswer = false;
+
+            throw new ProviderUnavailable('timed out after the provider took the request');
+        }
+
         return new RemoteSubscription(
             providerId: $id,
             status: $this->subscriptions[$id]['status'],
@@ -135,11 +154,15 @@ class FakeGateway implements ListsSubscriptions, SubscriptionGateway
         return new RemoteSubscription($subscriptionId, Subscription::STATUS_CANCELLED);
     }
 
+    /** @var array<string, string> agreement id => next charge date the provider reports */
+    public array $nextPaymentDates = [];
+
     public function fetchSubscription(string $customerReference, string $subscriptionId): RemoteSubscription
     {
         return new RemoteSubscription(
             providerId: $subscriptionId,
             status: $this->subscriptions[$subscriptionId]['status'] ?? Subscription::STATUS_CANCELLED,
+            nextPaymentAt: $this->nextPaymentDates[$subscriptionId] ?? null,
         );
     }
 

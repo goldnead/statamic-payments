@@ -106,10 +106,10 @@ class OrdersController extends PortalController
             'remaining' => $subscription->remaining(),
             'paused' => $subscription->isPaused(),
             'resumes_at' => $subscription->resumes_at,
-            'running' => $subscription->isRunning(),
+            'running' => $subscription->isRunning() || $subscription->isClaimed(),
             // P9: the portal button may be off for this product; the statutory
             // cancellation without login stays reachable, and the page says so.
-            'can_cancel' => $subscription->isRunning() && $this->mayCancelHere($subscription),
+            'can_cancel' => ($subscription->isRunning() || $subscription->isClaimed()) && $this->mayCancelHere($subscription),
             'cancel_elsewhere_url' => config('statamic-payments.cancellation.enabled', true)
                 ? route('statamic-payments.cancellation.form')
                 : null,

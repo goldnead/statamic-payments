@@ -2,7 +2,9 @@
 
 namespace Goldnead\StatamicPayments\Tests\Feature;
 
+use Goldnead\StatamicPayments\Actions\ReleaseSubscription;
 use Goldnead\StatamicPayments\Contracts\PaymentGateway;
+use Goldnead\StatamicPayments\Events\SubscriptionCancelled;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\RemotePayment;
@@ -12,6 +14,7 @@ use Goldnead\StatamicPayments\Support\SubscriptionSwitches;
 use Goldnead\StatamicPayments\Tests\Support\PausingFakeGateway;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\Test;
 
@@ -292,6 +295,133 @@ class SubscriptionClaimRaceTest extends TestCase
             $key = 'statamic-payments::messages.subscription_status_'.$status;
             $this->assertNotSame($key, __($key), $status);
         }
+    }
+
+    // ------------------------------- Gauntlet 4: the answer that never came back
+
+    #[Test]
+    public function a_resume_whose_answer_is_lost_stays_claimed_and_is_adopted_not_repeated(): void
+    {
+        $this->gateway->subscriptionsCreated = 1;
+        $abo = $this->abo();
+        $this->pauses()->pause($abo);
+
+        // Mollie takes the request and starts sub_2; the answer times out.
+        $this->gateway->loseTheAnswer = true;
+        $this->assertFalse($this->pauses()->resume($abo->fresh()));
+
+        $this->assertSame(Subscription::STATUS_RESUMING, $abo->fresh()->status, 'a timeout was treated as a refusal');
+        $this->assertSame(0, (int) data_get($abo->fresh()->meta, 'pause.attempt', 0), 'the next try would carry a new key and start a second agreement');
+
+        // A second click finds the claim and does nothing.
+        $this->assertFalse($this->pauses()->resume($abo->fresh()));
+        $this->assertSame(2, $this->gateway->subscriptionsCreated);
+
+        // The sweep adopts what the provider started.
+        Carbon::setTestNow(Carbon::now()->addMinutes(20));
+        $this->artisan('payments:resume-paused');
+
+        $this->assertSame(Subscription::STATUS_ACTIVE, $abo->fresh()->status);
+        $this->assertSame('sub_2', $abo->fresh()->provider_id);
+        $this->assertSame(2, $this->gateway->subscriptionsCreated, 'the buyer is now charged twice a month');
+    }
+
+    #[Test]
+    public function a_resume_looks_for_an_agreement_already_started_before_starting_one(): void
+    {
+        $this->gateway->subscriptionsCreated = 1;
+        $abo = $this->abo();
+        $this->pauses()->pause($abo);
+        $this->gateway->subscriptions['sub_7'] = ['customer' => 'cst_1', 'status' => 'active', 'meta' => ['resumed_subscription_id' => $abo->getKey()]];
+
+        $this->assertTrue($this->pauses()->resume($abo->fresh()));
+
+        $this->assertSame('sub_7', $abo->fresh()->provider_id);
+        $this->assertSame(1, $this->gateway->subscriptionsCreated);
+    }
+
+    #[Test]
+    public function cancelling_a_paused_row_ends_an_agreement_a_lost_resume_left_running(): void
+    {
+        $abo = $this->abo();
+        $this->pauses()->pause($abo);
+        $this->gateway->subscriptions['sub_7'] = ['customer' => 'cst_1', 'status' => 'active', 'meta' => ['resumed_subscription_id' => $abo->getKey()]];
+
+        $this->assertTrue(app(Subscriptions::class)->cancel($abo->fresh()));
+
+        $this->assertContains('sub_7', $this->gateway->cancelled);
+    }
+
+    #[Test]
+    public function the_sweep_keeps_the_claim_when_it_cannot_look_at_the_provider(): void
+    {
+        $abo = $this->abo();
+        $this->pauses()->pause($abo);
+        $abo = $this->haengt($abo, Subscription::STATUS_RESUMING);
+        $this->gateway->subscriptions['sub_2'] = ['customer' => 'cst_1', 'status' => 'active', 'meta' => ['resumed_subscription_id' => $abo->getKey()]];
+        $this->gateway->listingUnavailable = true;
+
+        $this->artisan('payments:resume-paused');
+
+        $this->assertSame(Subscription::STATUS_RESUMING, $abo->fresh()->status, 'the orphan went unseen and the row was given back');
+        $this->assertSame(0, $this->gateway->subscriptionsCreated, 'a second agreement was started next to the unseen one');
+    }
+
+    // ---------------------------------------------- Gauntlet 4, the small ones
+
+    #[Test]
+    public function a_charge_on_a_claimed_row_takes_the_next_date_from_the_provider(): void
+    {
+        $gateway = new PausingFakeGateway;
+        $gateway->subscriptions['sub_1'] = ['customer' => 'cst_1', 'status' => 'active', 'meta' => []];
+        $gateway->nextPaymentDates['sub_1'] = '2026-11-05';
+        $this->gateway = $gateway;
+        $this->app->instance(PaymentGateway::class, $gateway);
+        $abo = $this->haengt($this->abo(), Subscription::STATUS_SWITCHING);
+
+        $id = $gateway->arrive('basis', 1900, 'sub_1');
+        $this->postJson(route('statamic-payments.webhook'), ['id' => $id])->assertOk();
+
+        $this->assertSame('2026-11-05', $abo->fresh()->next_payment_at?->toDateString());
+    }
+
+    #[Test]
+    public function a_stuck_switch_can_be_released_from_the_control_panel(): void
+    {
+        $abo = $this->abo();
+        Subscription::query()->whereKey($abo->getKey())->update([
+            'status' => Subscription::STATUS_SWITCHING,
+            'product' => 'plus',
+            'amount_cent' => 2900,
+            'updated_at' => Carbon::now()->subMinutes(30),
+            'meta' => json_encode(['switching' => ['from' => 'basis', 'from_amount_cent' => 1900, 'to' => 'plus']]),
+        ]);
+
+        $action = new ReleaseSubscription;
+        $this->assertTrue($action->visibleTo($abo->fresh()));
+        $this->assertFalse($action->visibleTo($this->abo(['provider_id' => 'sub_x'])));
+
+        $action->run(collect([$abo->fresh()]), ['keep' => 'old']);
+
+        $abo->refresh();
+        $this->assertSame(Subscription::STATUS_ACTIVE, $abo->status);
+        $this->assertSame('basis', $abo->product);
+        $this->assertSame(1900, $abo->amount_cent);
+    }
+
+    #[Test]
+    public function a_cancellation_finished_by_the_sweep_is_announced_once(): void
+    {
+        Event::fake([SubscriptionCancelled::class]);
+
+        // Dunning ended it locally and died while telling the provider.
+        $abo = $this->haengt($this->abo(), Subscription::STATUS_CANCELLING, 20, ['cancelling_from' => Subscription::STATUS_CANCELLED]);
+        Subscription::query()->whereKey($abo->getKey())->update(['ended_at' => Carbon::now()->subMinutes(20), 'updated_at' => Carbon::now()->subMinutes(20)]);
+
+        $this->artisan('payments:resume-paused');
+
+        $this->assertSame(Subscription::STATUS_CANCELLED, $abo->fresh()->status);
+        Event::assertNotDispatched(SubscriptionCancelled::class);
     }
 
     // --------------------------------------------- 5: a new key after a refusal

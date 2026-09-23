@@ -86,11 +86,20 @@ class CancellationController extends PortalController
         // pressed a button on a page they had open while a webhook or a second
         // tab did the same thing. They are shown the confirmation they were
         // going to be shown.
-        if (! $subscription->isRunning()) {
+        // A row in a claim (being paused, resumed, switched) is not over: the
+        // cancellation is tried, and where it has to wait the buyer is told,
+        // instead of being shown "cancelled" for a contract that runs on.
+        if (! $subscription->isRunning() && ! $subscription->isClaimed()) {
             return $this->done($subscription, $access->email, $this->momentOf($subscription), false);
         }
 
         if (! app(Subscriptions::class)->cancel($subscription)) {
+            if (($subscription->fresh() ?? $subscription)->isClaimed()) {
+                return redirect()
+                    ->route('statamic-payments.portal.cancel.confirm', ['paySubscription' => $subscription->getKey()])
+                    ->with('statamic-payments.portal.error', __('statamic-payments::subscriptions.portal_cancel_busy'));
+            }
+
             // Nothing was written — that is a property of `Subscriptions::cancel()`
             // and the reason this branch can be this short. The buyer is told the
             // truth: it did not happen, and they should try again.

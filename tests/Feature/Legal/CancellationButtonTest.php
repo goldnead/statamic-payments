@@ -115,6 +115,28 @@ class CancellationButtonTest extends TestCase
     }
 
     #[Test]
+    public function a_statutory_cancellation_of_a_row_being_changed_is_kept_and_carried_out_later(): void
+    {
+        $subscription = $this->subscription(['provider_id' => 'sub_1', 'status' => Subscription::STATUS_SWITCHING]);
+
+        $this->post(route('statamic-payments.cancellation.declare'), $this->input());
+        $cancellation = Cancellation::first();
+        $this->post(route('statamic-payments.cancellation.confirm', ['payCancellation' => $cancellation->public_id]));
+
+        // Not skipped in silence: noted on the row.
+        $this->assertNotNull($subscription->fresh()->meta['cancel_requested']['at'] ?? null, 'a § 312k cancellation was lost');
+        $this->assertNull($cancellation->fresh()->provider_cancelled_at);
+
+        // The switch finishes; the next sweep carries the cancellation out.
+        Subscription::query()->whereKey($subscription->getKey())->update(['status' => Subscription::STATUS_ACTIVE]);
+        $this->artisan('payments:resume-paused');
+
+        $this->assertSame(Subscription::STATUS_CANCELLED, $subscription->fresh()->status);
+        $this->assertNotNull($cancellation->fresh()->provider_cancelled_at);
+        $this->assertArrayNotHasKey('cancel_requested', $subscription->fresh()->meta ?? []);
+    }
+
+    #[Test]
     public function confirming_cancels_the_unambiguous_running_subscription_at_the_provider(): void
     {
         $this->travelTo(now()->startOfSecond());

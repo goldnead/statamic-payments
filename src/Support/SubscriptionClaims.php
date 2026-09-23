@@ -43,7 +43,7 @@ class SubscriptionClaims
             ->orderBy('id')
             ->each(function (Subscription $row) use (&$settled, &$unresolved) {
                 try {
-                    $this->settle($row) ? $settled++ : $unresolved++;
+                    Brands::runFor($row->brand_id, fn () => $this->settle($row)) ? $settled++ : $unresolved++;
                 } catch (Throwable $e) {
                     $unresolved++;
                     Log::error('statamic-payments: a subscription left in a claim could not be put right.', [
@@ -52,6 +52,26 @@ class SubscriptionClaims
                         'exception' => $e->getMessage(),
                     ]);
                 }
+            });
+
+        // Statutory cancellations that had to wait for a change to finish.
+        Subscription::query()
+            ->whereNotNull('meta->cancel_requested')
+            ->whereNotIn('status', [Subscription::STATUS_CANCELLED, Subscription::STATUS_COMPLETED])
+            ->orderBy('id')
+            ->each(function (Subscription $row) use (&$settled, &$unresolved) {
+                if ($row->isClaimed() && ! $row->isStuck()) {
+                    return;
+                }
+
+                if (Brands::runFor($row->brand_id, fn () => $this->subscriptions->cancel($row))) {
+                    $settled++;
+
+                    return;
+                }
+
+                $unresolved++;
+                $this->alarm($row, 'a noted cancellation could not be carried out');
             });
 
         return ['settled' => $settled, 'unresolved' => $unresolved];
@@ -100,16 +120,20 @@ class SubscriptionClaims
      */
     protected function settleResume(Subscription $row, SubscriptionGateway $gateway): bool
     {
-        $this->pauses->release($row, Subscription::STATUS_RESUMING, Subscription::STATUS_PAUSED);
-        $row = $row->fresh() ?? $row;
-
+        // Ask first, give the claim back second. The other order left the row
+        // `paused` whenever the provider would not answer (a 503), and the
+        // agreement the dead resume had started ran on unseen. An exception
+        // here leaves the claim where it is for the next run.
         if (data_get($row->meta, 'pause.mode') === 'native') {
             $remote = $gateway->fetchSubscription($row->customer_reference, $row->provider_id);
+            $this->pauses->release($row, Subscription::STATUS_RESUMING, Subscription::STATUS_PAUSED);
 
-            return $remote->isLive() ? $this->pauses->adoptProviderResume($row, $remote, 'sweep') : true;
+            return $remote->isLive() ? $this->pauses->adoptProviderResume($row->fresh() ?? $row, $remote, 'sweep') : true;
         }
 
         $orphan = $this->orphansOf($row, $gateway)[0] ?? null;
+        $this->pauses->release($row, Subscription::STATUS_RESUMING, Subscription::STATUS_PAUSED);
+        $row = $row->fresh() ?? $row;
 
         return $orphan !== null
             ? $this->pauses->adoptProviderResume($row, $orphan, 'sweep')

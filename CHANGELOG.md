@@ -159,6 +159,29 @@ the bridge falls back to it when the catalogue has nothing to say.
   field no longer repeats "Mit Gutschein", the next charge shows the day without "00:00", German
   names for the claim states.
 
+### Fixed after the critique round (Gauntlet 4)
+
+- **A resume that timed out no longer starts a second agreement.** Before creating one, the resume
+  looks for an agreement an earlier attempt left at the provider and adopts it. A timeout,
+  connection error or 5xx counts as "no answer", not as a refusal: the row keeps its claim and the
+  sweep settles it later (`Support\Transport::isTransient()`). The same holds for pausing and for
+  the sweep's own resume: it searches first and keeps the claim when the provider does not answer.
+- **Cancelling always ends what a resume or switch left behind** at the provider, also when the
+  row itself was not stuck. A cancellation that has to wait for a claim no longer skips an event:
+  `SubscriptionCancelled` fires once, whether dunning or the sweep finishes it.
+- **The portal no longer reports "cancelled" for a contract it did not cancel.** A contract that is
+  being changed right now shows a "try again in a moment" message. The statutory cancellation
+  button no longer skips such a contract: the cancellation is noted on the row and carried out by
+  `payments:resume-paused` once the change is done. The CP cancel action is offered for stuck rows.
+- **New CP action "Release switch"** for a switch a dead process left behind: a person checks the
+  provider and says whether the old or the new product is true.
+- A charge on a claimed row takes the next charge date from the provider.
+- **Commands and webhooks run under the brand of the row.** `payments:reminders`,
+  `payments:resume-paused` (including the sweep), the Mollie and Stripe webhooks, Stripe refunds
+  and disputes set the row's brand through `statamic-brand-context` (`Brands::runFor()`) around
+  the work and its events, so brand-aware listeners hear the right brand. Brand 0, or no
+  brand-context installed: unchanged.
+
 ### Added: portal logo, greeting and cancellation per product (P9)
 
 `portal.logo_url`, `portal.logo_alt`, `portal.greeting`, `portal.self_cancel` (and `portal_cancel`

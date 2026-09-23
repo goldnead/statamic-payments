@@ -27,6 +27,13 @@ return [
     'switch_failed' => 'The subscription was not switched. It is unchanged.',
     'switch_line' => 'Switch to :name, pro rata until the next charge',
 
+    'release' => 'Release switch',
+    'release_keep' => 'Which state is true?',
+    'release_keep_instructions' => 'This switch did not finish. Check in the payment provider\'s account which amount it charges, and choose accordingly.',
+    'release_keep_new' => 'New product (the provider charges the new amount)',
+    'release_keep_old' => 'Old product (the provider charges the old amount)',
+    'released_bulk' => 'The subscription is released.|:count subscriptions are released.',
+
     // Running coupon (statamic-offers O6)
     'coupon_until' => 'With coupon :code, :off less, up to and including :date.',
     'coupon_forever' => 'With coupon :code, :off less, for good.',
@@ -77,5 +84,6 @@ return [
 
     'portal_back' => 'Back to the overview',
     'portal_cancel_hint' => 'You can cancel this contract here:',
+    'portal_cancel_busy' => 'This contract is being changed right now. Please try again in a moment.',
     'portal_cancel_elsewhere' => 'This contract is cancelled on the cancellation page, not here in your account.',
 ];

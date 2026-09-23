@@ -216,6 +216,31 @@ class SubscriptionControlTest extends TestCase
     }
 
     #[Test]
+    public function a_cancellation_while_the_row_is_being_changed_says_so_instead_of_pretending(): void
+    {
+        Subscription::query()->whereKey($this->subscription->getKey())->update(['status' => Subscription::STATUS_RESUMING]);
+
+        $this->post($this->route('cancel.run'))
+            ->assertRedirect($this->route('cancel.confirm'))
+            ->assertSessionHas('statamic-payments.portal.error', __('statamic-payments::subscriptions.portal_cancel_busy'));
+
+        $this->assertSame(Subscription::STATUS_RESUMING, $this->subscription->fresh()->status);
+    }
+
+    #[Test]
+    public function a_stuck_row_can_be_cancelled_from_the_portal(): void
+    {
+        Subscription::query()->whereKey($this->subscription->getKey())->update([
+            'status' => Subscription::STATUS_RESUMING,
+            'updated_at' => now()->subMinutes(30),
+        ]);
+
+        $this->post($this->route('cancel.run'))->assertOk();
+
+        $this->assertSame(Subscription::STATUS_CANCELLED, $this->subscription->fresh()->status);
+    }
+
+    #[Test]
     public function by_default_the_portal_still_cancels(): void
     {
         $this->get(route('statamic-payments.portal.show'))->assertSee($this->route('cancel.confirm'), false);

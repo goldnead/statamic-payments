@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.25.0 — 2026-09-23
 
 ### Upgrading: read this first
 
@@ -9,20 +9,26 @@
   `access subscriptions utility`. Roles that could cancel until now lose the action silently:
   the menu entry is simply gone. Add the permission to every role that should keep it. Super
   users are not affected.
-- **`php artisan migrate`**, one additive migration (below).
+- **`php artisan migrate`**, one additive migration: `subscriptions.paused_at`, `resumes_at`,
+  `card_expires_at`, `card_checked_at`, and the table `payment_subscription_notices`.
 - **`abandoned.capture` defaults to `consent`.** Sites with `abandoned.enabled` on get abandoned
   checkouts announced only where the form passes `meta.reminder_consent = true`; `always` restores
   the old behaviour.
+- **The checkout brake is on by default**: 100 checkouts per IP address and 10 per email address
+  within 10 minutes (`protection.rate_limit`), editable on the settings screen.
 - **Behind Cloudflare or another proxy, set up TrustProxies.** Without it every checkout comes
   from the proxy's address. A private one is skipped by the checkout brake; Cloudflare's public
   edge addresses are not, and many buyers share a few of them.
-- **Schedule `payments:resume-paused`** (`->daily()->withoutOverlapping()`) wherever subscriptions
-  are paused: it also puts right rows a dead process left in `pausing`, `resuming`, `switching` or
-  `cancelling`.
-
-Built from the ThriveCart walk-through of 23.09.2026 (features P1 to P9). Needs
-`php artisan migrate`: one migration, additive (`subscriptions.paused_at`, `resumes_at`,
-`card_expires_at`, `card_checked_at`, table `payment_subscription_notices`).
+- **Schedule the new commands**, each with `->withoutOverlapping()`:
+  `payments:resume-paused` (`->daily()`) wherever subscriptions can be paused; it also puts right
+  rows a dead process left in `pausing`, `resuming`, `switching` or `cancelling`. And
+  `payments:reminders` (for example `->dailyAt('09:00')`) once you switch reminders on.
+- **Published views:** if you ran `vendor:publish --tag=statamic-payments-views` before, publish
+  again with `--force` (or merge by hand). The portal (`layout`, `orders`, `cancel`), the abandoned
+  checkout's resume page and the new pause, switch, reminder and expired-link views changed or are
+  new; an old copy hides the new portal actions.
+- Coupons on later charges, the second country check and the setup-fee line need
+  statamic-offers 1.12. Against an older statamic-offers nothing of this applies.
 
 ### Added: pause and resume a subscription (P1)
 
@@ -36,6 +42,14 @@ Payment plans, trials and agreements in dunning are not paused. `pause.access` d
 during a pause: `period_end` (default), `immediate` or `keep`. A pause with a date is resumed by
 `payments:resume-paused` (schedule it daily). A paused agreement can still be cancelled; `refresh()`
 leaves it alone and now also clears a stale `ended_at` once the provider runs an agreement again.
+
+- The first charge after a pause is counted from the original day: the 31st stays the 31st.
+- Money during a pause is counted. Stripe lifting a pause on its own is followed when its charge
+  arrives or on a refresh; a late direct debit on the agreement a Mollie pause ended is counted
+  and moves the resume date one period on. Charges on an agreement id the row had before (after a
+  resume or switch) find their row (`meta.previous_provider_ids`). A late debit during a pause
+  does not write a second, open-ended access: `grantFor()` skips payments that are cycles of a
+  known agreement, and their access follows `renewFor()`.
 
 ### Added: switch between products with pro-rata difference (P2)
 
@@ -53,7 +67,9 @@ side (`proration_behavior=none` on Stripe). Below `switch.min_proration_cent` no
 kind off by default, each claimed once per agreement and date in `payment_subscription_notices`.
 Card expiry from Stripe (newest card) and Mollie (valid credit card mandate), cached on the row. A
 product with `reminders: false` gets none. Mails through email-templates when a slug is set,
-otherwise built-in Blade, with the portal link to replace the card.
+otherwise built-in Blade, with the portal link to replace the card. The mail, the portal and the
+Control Panel show the amount a running coupon leaves, and the coupon with the date of the last
+charge it covers. The portal link in a reminder works until the day the mail is about.
 
 ### Added: a purchase can end another subscription (P4)
 
@@ -67,6 +83,10 @@ back (`replaces_credit`, on by default). Event `SubscriptionReplaced`.
 the thank-you page and notes the visit; `{{ payments:thanks }}{{ if valid }}…` on the page. A late
 link gets a short page or `thanks.expired_url`. Off by default.
 
+The link is signed for `thanks.link_hours` (24); the `expires_minutes` window starts at the first
+visit. `valid` needs the payment paid; the tag also hands over `paid` and `pending` (`pending` only
+for an open payment, not a failed or cancelled one).
+
 ### Added: events (P6)
 
 `SubscriptionPaused`, `SubscriptionResumed`, `SubscriptionPaymentUpcoming`,
@@ -77,9 +97,14 @@ counted since the last paid cycle), `SubscriptionPlanCompleted`, `SubscriptionCh
 ### Added: checkout protection (P7)
 
 Block list for addresses, domains and IP ranges, a rate limit per IP and per address (on by
-default, 30 and 10 per 10 minutes), and an optional captcha (Cloudflare Turnstile or hCaptcha,
+default, 100 and 10 per 10 minutes), and an optional captcha (Cloudflare Turnstile or hCaptcha,
 `{{ payments:captcha }}` in the form, secret in `.env`). Checked in `Checkout::start()` before
 anything is written. Editable on the settings screen.
+
+A private IP address (the application sits behind a proxy it does not trust) is not counted, only
+the email address, and the log says once that TrustProxies is missing. A refusal answers with a
+sentence the checkout can show: `Checkout::refusal()`, `CheckoutBlocked::$message`; the abandoned
+checkout's resume page shows it.
 
 ### Changed: abandoned-checkout addresses need their own consent by default (P8)
 
@@ -87,6 +112,19 @@ anything is written. Editable on the settings screen.
 carries `meta.reminder_consent = true` is announced as abandoned and reminded. **Behaviour change**
 for sites that had `abandoned.enabled` on: set `abandoned.capture` to `always` for the old
 behaviour, or pass the consent from the checkout form.
+
+### Changed: Control Panel permission for subscription actions
+
+New permission *Manage subscriptions* (`manage payment subscriptions`) for pause, resume, switch
+**and cancel**. Roles that could cancel with only the screen permission need it now (see
+Upgrading). Switch targets are the product's `switch_to`, otherwise the same brand's products. A
+difference that later fails is marked in the history. Dates and amounts in the detail are
+formatted on the server in the display time zone.
+
+### Changed: mails say "Sie"
+
+The mails address the buyer formally, like the family's other transactional mails; the dunning
+letter too.
 
 ### Added: what statamic-offers hands over (O6, O3, O2)
 
@@ -101,102 +139,72 @@ behaviour, or pass the consent from the checkout form.
 - **Setup fee (O2).** A line whose catalogue entry says `setup_fee: true` takes no share of a
   coupon, and the coupon is measured against the lines it may reduce.
 
-### Fixed: the buyer of the last piece of a limited offer got no access
+### Added: portal logo, greeting and cancellation per product (P9)
 
-An offer with a quantity limit stops resolving in the catalogue once its last piece is paid, and
-the webhook for that very payment arrives afterwards. The entitlements bridge found no `grants`
-and granted nothing. The checkout now freezes `grants` onto the payment line (`meta.grants`), and
-the bridge falls back to it when the catalogue has nothing to say.
+`portal.logo_url`, `portal.logo_alt`, `portal.greeting`, `portal.self_cancel` (and `portal_cancel`
+per product). With the portal button off the page points to the statutory cancellation without
+login, which stays untouched.
 
-### Fixed after the critique round (Gauntlet 2)
+### Added: a coupon on the one-click upsell
 
-- **Two requests about one agreement reach the provider once.** Pause, resume and switch claim the
-  row with a conditional UPDATE before the provider is asked (`active` → `pausing`,
-  `paused` → `resuming`, product old → new) and give the claim back on a refusal. Two resumes at
-  once on Mollie started two agreements; two switches charged the difference twice. Creating an
-  agreement now sends an `Idempotency-Key` (Mollie and Stripe). Every documented schedule line
-  says `->withoutOverlapping()`.
-- **Money during a pause is counted.** Stripe lifting a pause on its own is followed when its
-  charge arrives or on a refresh; a late direct debit on the agreement a Mollie pause ended is
-  counted and moves the resume date one period on. Charges on an agreement id the row had before
-  (after a resume or switch) find their row (`meta.previous_provider_ids`).
-- **The 31st stays the 31st.** The first charge after a pause is counted from the original day.
-- **What is charged is what is shown.** Reminder mail, portal and CP show the amount a running
-  coupon leaves, and the coupon with the date of the last charge it covers. The portal link in a
-  reminder works until the day the mail is about.
-- **Checkout brake behind a proxy.** A private address is not counted (only the email address),
-  with one log line when an untrusted proxy forwarded the real one. Per IP now 100 in 10 minutes.
-  A refusal answers with a sentence: `Checkout::refusal()`, `CheckoutBlocked::$message`, and the
-  resume page shows it.
-- **Thank-you link.** Signed for `thanks.link_hours` (24); the `expires_minutes` window starts at the
-  first visit; `valid` needs the payment paid, and the tag also hands over `paid` and `pending`.
-- **Control Panel.** New permission *Manage subscriptions* (`manage payment subscriptions`) for
-  pause, resume, switch **and cancel** (behaviour change: roles that could cancel with only the
-  screen permission need it now). Switch targets are the product's `switch_to`, otherwise the same
-  brand's products. A difference that later fails is marked in the history. Dates and amounts in
-  the detail are formatted on the server in the display time zone.
-- **Mails say "Sie"**, like the family's other transactional mails; the dunning letter too.
-- `FollowUp::accept()` takes an optional `Discount` (a funnel-wide coupon on the one-click upsell);
-  where it leaves nothing to charge, the upsell takes the free path instead of `chargeAgain()`.
+`FollowUp::accept()` takes an optional `Discount` (a funnel-wide coupon on the one-click upsell);
+where it leaves nothing to charge, the upsell takes the free path instead of `chargeAgain()`.
 
-### Fixed after the critique round (Gauntlet 3)
+### How pause, resume, switch and cancel hold up
 
-- **Claims of different kinds.** A switch claims the status too (`switching`), a cancellation
-  claims `cancelling` and waits for a pause, resume or switch still in flight. A cancellation during
-  a resume reported success while the resume went on starting a new agreement; a pause during a
-  switch was written over by the switch's old `meta`. The switch now reads `meta` fresh at the end.
-- **Claims a dead process left behind.** A charge on a row in a claim is counted, not discarded; a
+Changing a running agreement means asking a provider that can be slow, answer twice or not at
+all, while a webhook, a second click or the statutory cancellation button arrives at the same
+time. The rules:
+
+- **Two requests about one agreement reach the provider once.** Pause, resume, switch and cancel
+  claim the row with a conditional UPDATE before the provider is asked (`pausing`, `resuming`,
+  `switching`, `cancelling`) and give the claim back on a refusal. A cancellation waits for a
+  pause, resume or switch still in flight. Creating an agreement and `chargeAgain()` send an
+  `Idempotency-Key` (Stripe and Mollie); a refused resume is retried under a new key (attempt
+  counter). Every documented schedule line says `->withoutOverlapping()`.
+- **No answer is not a refusal.** A timeout, connection error or 5xx
+  (`Support\Transport::isTransient()`) leaves the row in its claim, and the sweep settles it later.
+  Before creating an agreement, a resume looks for one an earlier attempt left at the provider and
+  adopts it, so a resume that timed out never starts a second agreement. Pausing and the sweep's
+  own resume do the same.
+- **Rows a dead process left behind.** `payments:resume-paused` puts right rows claimed for more
+  than ten minutes (`SubscriptionClaims`): it adopts the agreement a dead resume started (new
+  optional contract `ListsSubscriptions`, Stripe and Mollie), finishes or undoes a half pause,
+  finishes a half cancellation, and logs an error for a half switch it cannot read back. A charge
+  on a claimed row is counted, not discarded, and takes the next charge date from the provider; a
   charge on an agreement the row never learned the id of is found by the row id in its metadata
-  (`Subscription::forCycle()`). `refresh()` leaves claimed rows alone. `payments:resume-paused`
-  puts right rows stuck more than ten minutes (`SubscriptionClaims`): it adopts the agreement a dead
-  resume started (new optional contract `ListsSubscriptions`, Stripe and Mollie), finishes or undoes
-  a half pause, finishes a half cancellation, and logs an error for a half switch it cannot read
-  back. Cancelling a stuck row ends the agreement it left at the provider too.
-- **A late debit during a pause** no longer writes a second, open-ended access: `grantFor()` skips
-  payments that are cycles of a known agreement; their access follows `renewFor()`.
-- **A refused resume** is retried with a new idempotency key (attempt counter).
-- Thank-you link: `pending` only for an open payment, not a failed or cancelled one. CP: the coupon
-  field no longer repeats "Mit Gutschein", the next charge shows the day without "00:00", German
-  names for the claim states.
-
-### Fixed after the critique round (Gauntlet 4)
-
-- **A resume that timed out no longer starts a second agreement.** Before creating one, the resume
-  looks for an agreement an earlier attempt left at the provider and adopts it. A timeout,
-  connection error or 5xx counts as "no answer", not as a refusal: the row keeps its claim and the
-  sweep settles it later (`Support\Transport::isTransient()`). The same holds for pausing and for
-  the sweep's own resume: it searches first and keeps the claim when the provider does not answer.
-- **Cancelling always ends what a resume or switch left behind** at the provider, also when the
-  row itself was not stuck. A cancellation that has to wait for a claim no longer skips an event:
-  `SubscriptionCancelled` fires once, whether dunning or the sweep finishes it.
-- **The portal no longer reports "cancelled" for a contract it did not cancel.** A contract that is
-  being changed right now shows a "try again in a moment" message. The statutory cancellation
-  button no longer skips such a contract: the cancellation is noted on the row and carried out by
-  `payments:resume-paused` once the change is done. The CP cancel action is offered for stuck rows.
+  (`Subscription::forCycle()`). `refresh()` leaves claimed rows alone.
 - **New CP action "Release switch"** for a switch a dead process left behind: a person checks the
-  provider and says whether the old or the new product is true.
-- A charge on a claimed row takes the next charge date from the provider.
-- **A statutory cancellation noted during a resume is no longer lost.** Resume, the provider's own
-  resume, cancel and the sweep's adoption of a switch read `meta` fresh right before they save, so
-  `cancel_requested` written meanwhile survives and is carried out. Noting it no longer resets the
-  clock by which a claim counts as stuck; a refused cancellation no longer leaves `cancelling_from`
-  behind.
-- **A switch whose answer was lost keeps its claim** instead of going back to the old product, and
-  the difference is charged at most once per switch: `chargeAgain()` sends an idempotency key
-  (Stripe and Mollie), a difference whose answer was lost is asked again under the same key, and a
-  new try of the same switch in the same period uses a difference already charged and not used
-  ("Release switch" to the old product leaves it unused, to the new product marks it used).
+  provider and says whether the old or the new product is true. The CP cancel action is offered
+  for stuck rows too, and ends the agreement they left at the provider.
+- **Switching.** A switch whose answer was lost keeps its claim instead of going back to the old
+  product. The difference is charged at most once per switch: a difference whose answer was lost
+  is asked again under the same key, and a new try of the same switch in the same period uses a
+  difference already charged and not used ("Release switch" to the old product leaves it unused,
+  to the new product marks it used). The switch reads `meta` fresh at the end, so a pause in
+  between is not written over.
+- **Cancelling.** Cancelling always ends what a resume or switch left behind at the provider, also
+  when the row itself was not stuck. `SubscriptionCancelled` fires once, whether dunning or the
+  sweep finishes it. Resume, the provider's own resume, cancel and the sweep's adoption of a
+  switch read `meta` fresh right before they save, so a `cancel_requested` written meanwhile
+  survives and is carried out. Noting it does not reset the clock by which a claim counts as
+  stuck, and a refused cancellation leaves no `cancelling_from` behind.
+- **The portal never reports "cancelled" for a contract it did not cancel.** A contract being
+  changed right now shows a "try again in a moment" message. The statutory cancellation button
+  does not skip such a contract: the cancellation is noted on the row and carried out by
+  `payments:resume-paused` once the change is done.
 - **Commands and webhooks run under the brand of the row.** `payments:reminders`,
   `payments:resume-paused` (including the sweep), the Mollie and Stripe webhooks, Stripe refunds
   and disputes set the row's brand through `statamic-brand-context` (`Brands::runFor()`) around
   the work and its events, so brand-aware listeners hear the right brand. Brand 0, or no
   brand-context installed: unchanged.
 
-### Added: portal logo, greeting and cancellation per product (P9)
+### Fixed: the buyer of the last piece of a limited offer got no access
 
-`portal.logo_url`, `portal.logo_alt`, `portal.greeting`, `portal.self_cancel` (and `portal_cancel`
-per product). With the portal button off the page points to the statutory cancellation without
-login, which stays untouched.
+An offer with a quantity limit stops resolving in the catalogue once its last piece is paid, and
+the webhook for that very payment arrives afterwards. The entitlements bridge found no `grants`
+and granted nothing. The checkout now freezes `grants` onto the payment line (`meta.grants`), and
+the bridge falls back to it when the catalogue has nothing to say.
 
 ## 1.24.5 — 2026-09-22
 

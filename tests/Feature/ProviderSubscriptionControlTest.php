@@ -146,6 +146,12 @@ class ProviderSubscriptionControlTest extends TestCase
 
     protected function mollie(array $responses): array
     {
+        // The SDK's mock client exists from v3 on; composer also allows v2,
+        // which CI's prefer-lowest job installs.
+        if (! class_exists(MockMollieClient::class)) {
+            $this->markTestSkipped('mollie/mollie-api-php v2 has no mock client');
+        }
+
         $client = new MockMollieClient($responses);
 
         return [new MollieGateway($client), $client];

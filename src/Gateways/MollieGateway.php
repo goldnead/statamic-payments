@@ -157,7 +157,10 @@ class MollieGateway implements MandateGateway, ReadsCardExpiry, SubscriptionGate
     {
         $newest = null;
 
-        foreach ($this->client->mandates->pageForId($customerReference) as $mandate) {
+        // `iteratorForId()` because it is the one name v2 and v3 share (v3
+        // calls a page `pageForId()`, v2 `listForId()`), and composer allows
+        // both majors. A customer has a handful of mandates.
+        foreach ($this->client->mandates->iteratorForId($customerReference) as $mandate) {
             if (($mandate->status ?? null) !== 'valid' || ($mandate->method ?? null) !== 'creditcard') {
                 continue;
             }

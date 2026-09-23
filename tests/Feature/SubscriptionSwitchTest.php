@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Tests\Feature;
 
+use Goldnead\StatamicPayments\Actions\ReleaseSubscription;
 use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Events\SubscriptionChanged;
 use Goldnead\StatamicPayments\Models\Payment;
@@ -197,5 +198,85 @@ class SubscriptionSwitchTest extends TestCase
         $abo = $this->abo(['product' => 'raten', 'times' => 2, 'amount_cent' => 5000]);
 
         $this->assertSame([], $this->switches()->targetsFor($abo));
+    }
+
+    // ---------------------------------------------- no answer (Gauntlet 4)
+
+    protected function differences()
+    {
+        return Payment::query()->whereNotNull('meta->subscription_change')->get();
+    }
+
+    #[Test]
+    public function a_lost_answer_to_the_new_amount_keeps_the_claim_and_charges_the_difference_once(): void
+    {
+        $gateway = $this->nativ();
+        $abo = $this->abo();
+        $gateway->loseTheUpdateAnswer = true;
+
+        $this->assertFalse($this->switches()->switch($abo, 'plus'));
+
+        // The provider may well charge the new amount: the row does not claim otherwise.
+        $fresh = $abo->fresh();
+        $this->assertSame(Subscription::STATUS_SWITCHING, $fresh->status);
+        $this->assertSame('plus', $fresh->product);
+        $this->assertSame($this->differences()->sole()->getKey(), $fresh->meta['switching']['proration_payment_id'] ?? null);
+
+        // A second click finds the claim and charges nothing.
+        $this->assertFalse($this->switches()->switch($abo->fresh(), 'plus'));
+        $this->assertSame(1, $gateway->charged);
+    }
+
+    #[Test]
+    public function released_to_the_old_product_a_new_try_uses_the_difference_already_charged(): void
+    {
+        $gateway = $this->nativ();
+        $abo = $this->abo();
+        $gateway->loseTheUpdateAnswer = true;
+        $this->switches()->switch($abo, 'plus');
+
+        Carbon::setTestNow('2026-09-23 10:30:00');
+        (new ReleaseSubscription)->run(collect([$abo->fresh()]), ['keep' => 'old']);
+        $this->assertSame('basis', $abo->fresh()->product);
+
+        $this->assertTrue($this->switches()->switch($abo->fresh(), 'plus'));
+
+        $this->assertSame(1, $gateway->charged, 'the difference was charged twice for one switch');
+        $differenz = $this->differences()->sole();
+        $this->assertSame($differenz->getKey(), $abo->fresh()->meta['switches'][0]['proration_payment_id']);
+    }
+
+    #[Test]
+    public function released_to_the_new_product_the_difference_counts_as_used(): void
+    {
+        $gateway = $this->nativ();
+        $abo = $this->abo();
+        $gateway->loseTheUpdateAnswer = true;
+        $this->switches()->switch($abo, 'plus');
+
+        Carbon::setTestNow('2026-09-23 10:30:00');
+        (new ReleaseSubscription)->run(collect([$abo->fresh()]), ['keep' => 'new']);
+
+        $fresh = $abo->fresh();
+        $this->assertSame(Subscription::STATUS_ACTIVE, $fresh->status);
+        $this->assertSame('plus', $fresh->product);
+        $this->assertSame($this->differences()->sole()->getKey(), $fresh->meta['switches'][0]['proration_payment_id'] ?? null);
+    }
+
+    #[Test]
+    public function a_lost_answer_to_the_difference_is_asked_again_with_the_same_key(): void
+    {
+        $gateway = $this->nativ();
+        $abo = $this->abo();
+        $gateway->loseTheChargeAnswer = true;
+
+        $this->assertFalse($this->switches()->switch($abo, 'plus'));
+        $this->assertSame('basis', $abo->fresh()->product, 'nothing switched without a confirmed difference');
+
+        $this->assertTrue($this->switches()->switch($abo->fresh(), 'plus'));
+
+        $this->assertSame(1, $gateway->charged, 'the difference was charged twice for one switch');
+        $this->assertCount(1, $this->differences());
+        $this->assertNotSame(Payment::STATUS_FAILED, $this->differences()->sole()->status);
     }
 }

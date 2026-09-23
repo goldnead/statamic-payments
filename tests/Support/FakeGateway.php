@@ -72,6 +72,15 @@ class FakeGateway implements ListsSubscriptions, SubscriptionGateway
     /** The next create succeeds at the provider and then times out on the way back. */
     public bool $loseTheAnswer = false;
 
+    /** `chargeAgain()` takes the money, then the answer is lost. */
+    public bool $loseTheChargeAnswer = false;
+
+    /** Charges actually taken by `chargeAgain()`, deduplicated by key. */
+    public int $charged = 0;
+
+    /** @var array<string, string> idempotency key => payment id */
+    public array $chargesByKey = [];
+
     /** Listing the customer's agreements fails like a 503. */
     public bool $listingUnavailable = false;
 
@@ -267,7 +276,16 @@ class FakeGateway implements ListsSubscriptions, SubscriptionGateway
             }
         }
 
+        // Like the providers: the same idempotency key answers with the same
+        // charge instead of taking the money again.
+        $key = is_string($payload['idempotencyKey'] ?? null) ? $payload['idempotencyKey'] : null;
+
+        if ($key !== null && isset($this->chargesByKey[$key])) {
+            return $this->remote[$this->chargesByKey[$key]];
+        }
+
         $this->created++;
+        $this->charged++;
         $id = 'tr_folge_'.$this->created;
         $this->metadata[$id] = is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [];
 
@@ -275,6 +293,16 @@ class FakeGateway implements ListsSubscriptions, SubscriptionGateway
         // first and confirmed later; a fake that answered `paid` straight away
         // would hide every mistake that treats acceptance as payment.
         $this->remote[$id] = new RemotePayment($id, Payment::STATUS_OPEN, $this->metadata[$id]);
+
+        if ($key !== null) {
+            $this->chargesByKey[$key] = $id;
+        }
+
+        if ($this->loseTheChargeAnswer) {
+            $this->loseTheChargeAnswer = false;
+
+            throw new ProviderUnavailable('timed out after the provider took the charge');
+        }
 
         return $this->remote[$id];
     }

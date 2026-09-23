@@ -227,13 +227,20 @@ class SubscriptionSwitches
         $proration = null;
 
         if ($preview['proration_cent'] > 0) {
-            $proration = $this->chargeDifference($subscription, $entry, $to, $preview['proration_cent']);
+            // One switch, one difference: the same switch in the same period
+            // (after a lost answer, a release to the old product) uses the
+            // difference already charged instead of charging it again.
+            $key = 'switch-'.$subscription->getKey().'-'.$preview['from'].'-'.$to.'-'
+                .($subscription->next_payment_at?->getTimestamp() ?? 0);
+            $proration = $this->chargeDifference($subscription, $entry, $to, $preview['proration_cent'], $key);
 
             if ($proration === null) {
                 $giveBack();
 
                 return false;
             }
+
+            $this->noteOnSwitching($subscription, ['proration_payment_id' => $proration->getKey()]);
         }
 
         $snapshot = $subscription->replicate();
@@ -276,6 +283,21 @@ class SubscriptionSwitches
                 }
             }
         } catch (Throwable $e) {
+            // No answer is not "no": the provider may charge the new amount
+            // already. Putting the row back on the old product would let the
+            // next click charge the difference again. The claim stays; the
+            // sweep adopts what it can, "Release switch" settles the rest.
+            if (Transport::isTransient($e)) {
+                Log::warning('statamic-payments: the provider did not answer a switch; the row stays claimed until it is settled.', [
+                    'subscription_id' => $subscription->getKey(),
+                    'to' => $to,
+                    'proration_payment_id' => $proration?->getKey(),
+                    'exception' => $e->getMessage(),
+                ]);
+
+                return false;
+            }
+
             Log::error('statamic-payments: the provider would not take the new amount; the agreement is unchanged.', [
                 'subscription_id' => $subscription->getKey(),
                 'to' => $to,
@@ -373,7 +395,21 @@ class SubscriptionSwitches
      *
      * @param  array<string, mixed>  $entry
      */
-    protected function chargeDifference(Subscription $subscription, array $entry, string $to, int $cent): ?Payment
+    /**
+     * Add to `meta.switching` on the claimed row, fresh and without touching
+     * `updated_at` (the clock by which a claim counts as stuck).
+     *
+     * @param  array<string, mixed>  $add
+     */
+    protected function noteOnSwitching(Subscription $subscription, array $add): void
+    {
+        $meta = ($subscription->fresh() ?? $subscription)->meta ?? [];
+        $meta['switching'] = array_merge((array) ($meta['switching'] ?? []), $add);
+
+        Subscription::query()->whereKey($subscription->getKey())->toBase()->update(['meta' => json_encode($meta)]);
+    }
+
+    protected function chargeDifference(Subscription $subscription, array $entry, string $to, int $cent, string $key): ?Payment
     {
         $gateway = $this->subscriptions->gatewayFor($subscription);
 
@@ -384,7 +420,27 @@ class SubscriptionSwitches
         $name = (string) ($entry['name'] ?? $to);
         $label = __('statamic-payments::subscriptions.switch_line', ['name' => $name]);
 
-        $payment = DB::transaction(function () use ($subscription, $to, $cent, $label): Payment {
+        // Charged already for this switch and not used by a finished one.
+        $consumed = array_map(
+            fn ($s) => (int) (is_array($s) ? ($s['proration_payment_id'] ?? 0) : 0),
+            (array) (($subscription->fresh() ?? $subscription)->meta['switches'] ?? []),
+        );
+
+        $payment = Payment::query()
+            ->where('meta->subscription_change->key', $key)
+            ->whereNotIn('status', [Payment::STATUS_FAILED, Payment::STATUS_EXPIRED, Payment::STATUS_CANCELED])
+            ->whereNotIn('id', $consumed)
+            ->latest('id')
+            ->first();
+
+        if ($payment !== null && ! Payment::isPlaceholderProviderId($payment->provider_id)) {
+            return $payment;
+        }
+
+        // A placeholder is a charge whose answer was lost: asked again below
+        // with its own key and amount, so the provider answers with the same
+        // charge instead of taking the money twice.
+        $payment ??= DB::transaction(function () use ($subscription, $to, $cent, $label, $key): Payment {
             $payment = Payment::create([
                 'provider' => $subscription->provider,
                 'provider_id' => Payment::PLACEHOLDER_PROVIDER_PREFIX.Str::uuid(),
@@ -405,6 +461,7 @@ class SubscriptionSwitches
                         'subscription_id' => $subscription->getKey(),
                         'from' => $subscription->product,
                         'to' => $to,
+                        'key' => $key,
                     ],
                 ],
             ]);
@@ -433,8 +490,21 @@ class SubscriptionSwitches
                     'product' => $to,
                     'email' => $payment->email,
                 ],
+                'idempotencyKey' => 'statamic-payments-difference-'.$payment->getKey(),
             ]);
         } catch (Throwable $e) {
+            // No answer: the charge may have gone through. The row stays a
+            // placeholder, and the next try asks again under the same key.
+            if (Transport::isTransient($e)) {
+                Log::warning('statamic-payments: the provider did not answer the difference for a switch; nothing was switched, the next try asks again.', [
+                    'subscription_id' => $subscription->getKey(),
+                    'payment_id' => $payment->getKey(),
+                    'exception' => $e->getMessage(),
+                ]);
+
+                return null;
+            }
+
             Log::warning('statamic-payments: the difference for a switch was refused; nothing was switched.', [
                 'subscription_id' => $subscription->getKey(),
                 'payment_id' => $payment->getKey(),

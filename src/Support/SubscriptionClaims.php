@@ -153,8 +153,13 @@ class SubscriptionClaims
             return $this->alarm($row, 'a switch to ['.$row->product.'] did not finish; check the amount the provider charges, then set the row to active or back to the old product');
         }
 
+        // Fresh after asking the provider: a note written meanwhile stays.
+        $row = $row->fresh() ?? $row;
         $row->rememberProviderId((string) $row->provider_id);
-        $row->forceFill(['status' => $orphan->status, 'provider_id' => $orphan->providerId])->save();
+        $meta = $row->meta ?? [];
+        unset($meta['switching']);
+        $row->forceFill(['status' => $orphan->status, 'provider_id' => $orphan->providerId, 'meta' => $meta])->save();
+        $this->subscriptions->cancelIfRequested($row);
 
         return true;
     }

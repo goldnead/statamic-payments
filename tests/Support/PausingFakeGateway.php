@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Contracts\PausesSubscriptions;
 use Goldnead\StatamicPayments\Contracts\ReadsCardExpiry;
 use Goldnead\StatamicPayments\Contracts\UpdatesSubscriptions;
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\ProviderUnavailable;
 use Goldnead\StatamicPayments\Support\RemoteSubscription;
 use Illuminate\Support\Carbon;
 use RuntimeException;
@@ -32,6 +33,9 @@ class PausingFakeGateway extends FakeGateway implements PausesSubscriptions, Rea
     public bool $refuseToPause = false;
 
     public bool $refuseToUpdate = false;
+
+    /** `updateSubscription()` takes the new amount, then the answer is lost. */
+    public bool $loseTheUpdateAnswer = false;
 
     /** @var array<string, string|null> customer => Y-m-d */
     public array $cardExpiries = [];
@@ -65,6 +69,12 @@ class PausingFakeGateway extends FakeGateway implements PausesSubscriptions, Rea
         }
 
         $this->updated[] = ['id' => $subscriptionId, 'payload' => $payload];
+
+        if ($this->loseTheUpdateAnswer) {
+            $this->loseTheUpdateAnswer = false;
+
+            throw new ProviderUnavailable('timed out after the provider took the new amount');
+        }
 
         return new RemoteSubscription($subscriptionId, $this->subscriptions[$subscriptionId]['status'] ?? Subscription::STATUS_ACTIVE);
     }

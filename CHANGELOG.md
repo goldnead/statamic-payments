@@ -176,6 +176,16 @@ the bridge falls back to it when the catalogue has nothing to say.
 - **New CP action "Release switch"** for a switch a dead process left behind: a person checks the
   provider and says whether the old or the new product is true.
 - A charge on a claimed row takes the next charge date from the provider.
+- **A statutory cancellation noted during a resume is no longer lost.** Resume, the provider's own
+  resume, cancel and the sweep's adoption of a switch read `meta` fresh right before they save, so
+  `cancel_requested` written meanwhile survives and is carried out. Noting it no longer resets the
+  clock by which a claim counts as stuck; a refused cancellation no longer leaves `cancelling_from`
+  behind.
+- **A switch whose answer was lost keeps its claim** instead of going back to the old product, and
+  the difference is charged at most once per switch: `chargeAgain()` sends an idempotency key
+  (Stripe and Mollie), a difference whose answer was lost is asked again under the same key, and a
+  new try of the same switch in the same period uses a difference already charged and not used
+  ("Release switch" to the old product leaves it unused, to the new product marks it used).
 - **Commands and webhooks run under the brand of the row.** `payments:reminders`,
   `payments:resume-paused` (including the sweep), the Mollie and Stripe webhooks, Stripe refunds
   and disputes set the row's brand through `statamic-brand-context` (`Brands::runFor()`) around

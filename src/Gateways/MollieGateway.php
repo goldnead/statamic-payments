@@ -283,9 +283,24 @@ class MollieGateway implements ListsSubscriptions, MandateGateway, ReadsCardExpi
      */
     public function chargeAgain(string $customerReference, array $payload): RemotePayment
     {
-        $payment = $this->client->customerPayments->createForId($customerReference, $payload + [
-            'sequenceType' => SequenceType::RECURRING,
-        ]);
+        // Same as `createSubscription()`: a retry after a timeout must not
+        // charge twice (the difference of a switch, Gauntlet 23.09.2026).
+        $key = is_string($payload['idempotencyKey'] ?? null) ? $payload['idempotencyKey'] : null;
+        unset($payload['idempotencyKey']);
+
+        if ($key !== null) {
+            $this->client->setIdempotencyKey($key);
+        }
+
+        try {
+            $payment = $this->client->customerPayments->createForId($customerReference, $payload + [
+                'sequenceType' => SequenceType::RECURRING,
+            ]);
+        } finally {
+            if ($key !== null) {
+                $this->client->resetIdempotencyKey();
+            }
+        }
 
         return new RemotePayment(
             providerId: (string) $payment->id,

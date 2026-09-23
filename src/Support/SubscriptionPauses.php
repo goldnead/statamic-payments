@@ -330,9 +330,19 @@ class SubscriptionPauses
     /** Write down that it runs again, and say so. */
     protected function markResumed(Subscription $subscription, RemoteSubscription $remote, Carbon $next, string $by): void
     {
+        // Read right before the save, not from the object that waited for the
+        // provider: a § 312k cancellation noted meanwhile (`cancel_requested`)
+        // was written over and lost (Gauntlet 23.09.2026).
+        // The ids this resume retired live only on the object so far.
+        $retired = (array) ($subscription->meta['previous_provider_ids'] ?? []);
+        $subscription = $subscription->fresh() ?? $subscription;
         $pause = is_array($subscription->meta['pause'] ?? null) ? $subscription->meta['pause'] : [];
         $meta = $subscription->meta ?? [];
         unset($meta['pause']);
+
+        if ($retired !== []) {
+            $meta['previous_provider_ids'] = array_values(array_unique(array_merge((array) ($meta['previous_provider_ids'] ?? []), $retired)));
+        }
         $meta['pauses'] = array_values(array_merge((array) ($meta['pauses'] ?? []), [[
             'paused_at' => $subscription->paused_at?->toIso8601String(),
             'resumed_at' => Carbon::now()->toIso8601String(),

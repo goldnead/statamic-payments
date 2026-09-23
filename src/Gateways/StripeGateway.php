@@ -376,7 +376,8 @@ class StripeGateway implements ListsSubscriptions, PausesSubscriptions, ReadsCar
             $form['payment_method'] = $mandate;
         }
 
-        $intent = $this->post('/v1/payment_intents', $form);
+        $key = is_string($payload['idempotencyKey'] ?? null) ? $payload['idempotencyKey'] : null;
+        $intent = $this->post('/v1/payment_intents', $form, $key);
 
         return $this->fetchIntent((string) ($intent['id'] ?? ''));
     }

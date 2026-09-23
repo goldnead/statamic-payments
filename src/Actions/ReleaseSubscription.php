@@ -81,6 +81,22 @@ class ReleaseSubscription extends Action
                 $update['amount_cent'] = (int) $switching['from_amount_cent'];
             }
 
+            // Kept new: the switch happened, and a difference charged for it
+            // is used. Kept old: it stays unused, and the next try of the
+            // same switch takes it instead of charging again.
+            if ($keep === 'new' && isset($switching['from'], $switching['to'])) {
+                $meta['switches'] = array_values(array_merge((array) ($meta['switches'] ?? []), [[
+                    'from' => $switching['from'],
+                    'to' => $switching['to'],
+                    'from_amount_cent' => $switching['from_amount_cent'] ?? null,
+                    'to_amount_cent' => $switching['to_amount_cent'] ?? null,
+                    'proration_payment_id' => $switching['proration_payment_id'] ?? null,
+                    'by' => 'release',
+                    'at' => now()->toIso8601String(),
+                ]]));
+                $update['meta'] = $meta;
+            }
+
             $subscription->forceFill($update)->save();
 
             Log::warning('statamic-payments: a switch left behind was released by hand.', [

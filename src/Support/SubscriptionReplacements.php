@@ -131,6 +131,7 @@ class SubscriptionReplacements
         }
 
         if ($replacement !== null && $creditDays > 0) {
+            $replacement = $replacement->fresh() ?? $replacement;
             $replacement->forceFill(['meta' => array_merge($replacement->meta ?? [], [
                 'credit' => ['cent' => $creditCent, 'days' => $creditDays, 'from' => $replaced->map(fn (Subscription $s) => $s->getKey())->values()->all()],
             ])])->save();

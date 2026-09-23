@@ -1083,10 +1083,17 @@ class Subscriptions
             ? (string) data_get($current->meta, 'cancelling_from', Subscription::STATUS_ACTIVE)
             : $from;
 
-        $giveBack = fn () => Subscription::query()
-            ->whereKey($current->getKey())
-            ->where('status', Subscription::STATUS_CANCELLING)
-            ->update(['status' => $from, 'updated_at' => now()]);
+        // Back to where it was, without the note of where it was: a stale
+        // `cancelling_from` would tell a later sweep a wrong story.
+        $giveBack = function () use ($current, $from) {
+            $meta = ($current->fresh() ?? $current)->meta ?? [];
+            unset($meta['cancelling_from']);
+
+            return Subscription::query()
+                ->whereKey($current->getKey())
+                ->where('status', Subscription::STATUS_CANCELLING)
+                ->update(['status' => $from, 'meta' => $meta === [] ? null : json_encode($meta), 'updated_at' => now()]);
+        };
 
         try {
             $remote = $gateway->cancelSubscription($current->customer_reference, $current->provider_id);
@@ -1144,7 +1151,8 @@ class Subscriptions
         $schonBeendet = $from === Subscription::STATUS_CANCELLED
             && $subscription->ended_at !== null;
 
-        $meta = $subscription->meta ?? [];
+        // Fresh: whatever was noted while the provider was asked stays.
+        $meta = ($subscription->fresh() ?? $subscription)->meta ?? [];
         $requested = is_array($meta['cancel_requested'] ?? null) ? $meta['cancel_requested'] : null;
         unset($meta['cancelling_from'], $meta['cancel_requested']);
 
@@ -1208,7 +1216,9 @@ class Subscriptions
             'cancellation_id' => $cancellationId,
         ], fn ($v) => $v !== null);
 
-        $fresh->forceFill(['meta' => $meta])->save();
+        // Without touching `updated_at`: that is the clock by which a claim
+        // counts as stuck, and a note must not restart it.
+        Subscription::query()->whereKey($fresh->getKey())->toBase()->update(['meta' => json_encode($meta)]);
     }
 
     /** Carry out a noted cancellation, if there is one. True when it was. */

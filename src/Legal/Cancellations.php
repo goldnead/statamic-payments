@@ -121,7 +121,8 @@ class Cancellations
             'brand_id' => $subscription->brand_id,
         ])->save();
 
-        if (! $subscription->isLive()) {
+        // A paused agreement is still a contract, and § 312k covers ending it.
+        if (! $subscription->isRunning()) {
             return;
         }
 

@@ -54,6 +54,9 @@
             </label>
         </div>
 
+        {{-- The captcha, where the site has one (P7). This order starts a checkout like any other. --}}
+        {!! app(\Goldnead\StatamicPayments\Support\CheckoutGuard::class)->widget() !!}
+
         <button type="submit" class="btn">{{ __('statamic-payments::abandoned.resume_button') }}</button>
         <p class="muted" style="margin-top:10px; text-align:center;">{{ __('statamic-payments::abandoned.resume_button_hint') }}</p>
     </form>

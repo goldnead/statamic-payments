@@ -63,6 +63,14 @@ class EntitlementsBridge
             return;
         }
 
+        // The difference an upgrade charges for the rest of a period. The access
+        // it pays for was opened when the switch happened, up to the next
+        // charge (`switchFor()`); a grant from here would add a second one,
+        // open-ended, for the same product.
+        if (is_array(data_get($payment->meta, 'subscription_change'))) {
+            return;
+        }
+
         $subject = $payment->email;
 
         if (! is_string($subject) || $subject === '') {
@@ -110,8 +118,112 @@ class EntitlementsBridge
             return;
         }
 
-        $bis = $subscription->next_payment_at;
+        $this->extendFor($subscription, $subject, $subscription->next_payment_at);
+    }
 
+    /**
+     * A paused agreement runs again: the access runs to its next charge.
+     *
+     * The same verb as a renewal, and on purpose: whatever the pause did to the
+     * window, `renew()` pushes it to the next charge and never shortens it.
+     */
+    public function resumeFor(Subscription $subscription): void
+    {
+        if (! $this->available() || ! $this->canRenew()) {
+            return;
+        }
+
+        $subject = $subscription->email;
+
+        if (! is_string($subject) || $subject === '') {
+            return;
+        }
+
+        $this->extendFor($subscription, $subject, $subscription->next_payment_at);
+    }
+
+    /**
+     * An upgrade: the new product's access starts now and runs to the next charge.
+     *
+     * The old product is closed by {@see closeFor()} as on a cancellation — its
+     * paid period stays.
+     */
+    public function switchFor(Subscription $subscription): void
+    {
+        $this->resumeFor($subscription);
+    }
+
+    /**
+     * What a pause does to the access, as `pause.access` says.
+     *
+     * - `period_end` (default): the paid period stays, then the access rests. A
+     *   grant with an end date already ends there, because nothing renews it; an
+     *   open-ended one is given that end here.
+     * - `immediate`: the access ends now. Not a revocation — resuming renews it.
+     * - `keep`: the access stays. With a date to resume on, a grant is pushed
+     *   to that date so it does not lapse in between.
+     *
+     * @param  Carbon|null  $paidThrough  the end of the paid period, taken before
+     *                                    the pause cleared `next_payment_at`
+     */
+    public function pauseFor(Subscription $subscription, string $mode, ?Carbon $paidThrough, ?Carbon $resumesAt): void
+    {
+        if (! $this->available() || ! $this->canRenew()) {
+            return;
+        }
+
+        $subject = $subscription->email;
+
+        if (! is_string($subject) || $subject === '') {
+            return;
+        }
+
+        foreach ($this->slugsFor($subscription->product) as $slug) {
+            try {
+                $facade = self::FACADE;
+
+                if ($mode === 'keep') {
+                    if ($resumesAt !== null) {
+                        $facade::renew($this->subjectFor($subject), $slug, $resumesAt);
+                    }
+
+                    continue;
+                }
+
+                $query = $facade::forSubject($this->subjectFor($subject))
+                    ->where('product_slug', $slug)
+                    ->whereNull('revoked_at');
+
+                if ($mode === 'immediate') {
+                    $now = Carbon::now();
+                    $query->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', $now))
+                        ->get()
+                        ->each(fn ($grant) => $grant->forceFill(['expires_at' => $now])->save());
+
+                    continue;
+                }
+
+                $bis = $paidThrough ?? $subscription->paidThroughAt() ?? Carbon::now();
+
+                $query->whereNull('expires_at')
+                    ->get()
+                    ->each(fn ($grant) => $grant->forceFill(['expires_at' => $bis])->save());
+            } catch (Throwable $e) {
+                Log::error('statamic-payments: the entitlements bridge could not follow a pause.', [
+                    'subscription_id' => $subscription->getKey(),
+                    'grants' => $slug,
+                    'mode' => $mode,
+                    'exception' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Push every grant of this agreement's product to `$bis`, or grant it.
+     */
+    protected function extendFor(Subscription $subscription, string $subject, ?Carbon $bis): void
+    {
         if ($bis === null) {
             // Kein Datum vom Anbieter: lieber nichts verlaengern als raten. Ein
             // geratenes Ende ist ein Zugang, der zu frueh oder zu spaet endet,

@@ -756,7 +756,12 @@ class Fulfilment
 
             // A first payment that carried the intention to start one. Only now
             // is there a mandate to build it on.
-            $subscriptions->startFromPayment($payment);
+            // A product may end another agreement of the same buyer
+            // (`replaces`). What is left of the old period moves the new
+            // agreement's first charge back, so it is worked out first.
+            $replacements = app(SubscriptionReplacements::class);
+            $new = $subscriptions->startFromPayment($payment, $replacements->creditDays($payment));
+            $replacements->apply($payment, $new);
         } catch (Throwable $e) {
             Log::error('statamic-payments: the agreement could not be brought up to date; the payment stands.', [
                 'payment_id' => $payment->getKey(),

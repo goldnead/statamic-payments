@@ -8,8 +8,10 @@ use Goldnead\StatamicPayments\Http\Controllers\Portal\InvoiceController;
 use Goldnead\StatamicPayments\Http\Controllers\Portal\MagicLinkController as PortalMagicLinkController;
 use Goldnead\StatamicPayments\Http\Controllers\Portal\OrdersController;
 use Goldnead\StatamicPayments\Http\Controllers\Portal\PaymentMethodController;
+use Goldnead\StatamicPayments\Http\Controllers\Portal\SubscriptionControlController;
 use Goldnead\StatamicPayments\Http\Controllers\ResumeController;
 use Goldnead\StatamicPayments\Http\Controllers\StripeWebhookController;
+use Goldnead\StatamicPayments\Http\Controllers\ThanksController;
 use Goldnead\StatamicPayments\Http\Controllers\WebhookController;
 use Goldnead\StatamicPayments\Http\Middleware\SetBrandFromPortalSession;
 use Goldnead\StatamicPayments\Portal\TrackingParameters;
@@ -68,6 +70,16 @@ Route::post('/!/statamic-payments/webhook/stripe', StripeWebhookController::clas
         'Illuminate\Foundation\Http\Middleware\PreventRequestForgery',
     ])
     ->name('statamic-payments.webhook.stripe');
+
+/*
+ * The thank-you link that expires (P5). Only used with
+ * `thanks.expires_minutes` set; the controller checks the signature itself so
+ * that an expired link gets a page and not a bare 403.
+ */
+Route::get('/!/statamic-payments/danke/{payPayment}', ThanksController::class)
+    ->whereNumber('payPayment')
+    ->middleware(['web', ThrottleRequests::class.':30,1'])
+    ->name('statamic-payments.thanks');
 
 /*
  * Accepting a follow-up offer.
@@ -172,6 +184,31 @@ Route::prefix(config('statamic-payments.portal.prefix', '!/statamic-payments/kon
                 ->whereNumber('paySubscription')
                 ->middleware(ThrottleRequests::class.':10,1')
                 ->name('cancel.run');
+
+            // Pausing, resuming and switching (P1, P2). Same discipline as the
+            // cancellation: a GET that shows, a POST that acts.
+            Route::get('/abo/{paySubscription}/pausieren', [SubscriptionControlController::class, 'pauseConfirm'])
+                ->whereNumber('paySubscription')
+                ->name('pause.confirm');
+
+            Route::post('/abo/{paySubscription}/pausieren', [SubscriptionControlController::class, 'pause'])
+                ->whereNumber('paySubscription')
+                ->middleware(ThrottleRequests::class.':10,1')
+                ->name('pause.run');
+
+            Route::post('/abo/{paySubscription}/fortsetzen', [SubscriptionControlController::class, 'resume'])
+                ->whereNumber('paySubscription')
+                ->middleware(ThrottleRequests::class.':10,1')
+                ->name('resume.run');
+
+            Route::get('/abo/{paySubscription}/wechseln', [SubscriptionControlController::class, 'switchConfirm'])
+                ->whereNumber('paySubscription')
+                ->name('switch.confirm');
+
+            Route::post('/abo/{paySubscription}/wechseln', [SubscriptionControlController::class, 'switch'])
+                ->whereNumber('paySubscription')
+                ->middleware(ThrottleRequests::class.':10,1')
+                ->name('switch.run');
 
             Route::post('/abo/{paySubscription}/zahlungsmittel', [PaymentMethodController::class, 'start'])
                 ->whereNumber('paySubscription')

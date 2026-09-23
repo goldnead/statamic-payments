@@ -6,6 +6,11 @@
     <h1>{{ __('statamic-payments::portal.orders_title') }}</h1>
     <p class="muted">{{ __('statamic-payments::portal.orders_for', ['email' => $email]) }}</p>
 
+    @if ($greeting !== '')
+        {{-- The shop's own words (portal.greeting). Plain text: escaped, line breaks kept. --}}
+        <p class="lede greeting">{!! nl2br(e($greeting)) !!}</p>
+    @endif
+
     <div class="block">
         <h2>{{ __('statamic-payments::portal.subscriptions_heading') }}</h2>
 
@@ -26,10 +31,17 @@
                             <span class="what">
                                 <span class="name">{{ $subscription['name'] }}</span>
                                 <span class="desc">
-                                    {{ __('statamic-payments::portal.status_'.$subscription['status']) }}
+                                    @if ($subscription['paused'])
+                                        {{-- One phrase for a pause: "Pausiert bis …" already says the status. --}}
+                                        {{ $subscription['resumes_at']
+                                            ? __('statamic-payments::subscriptions.portal_paused_until', ['date' => $subscription['resumes_at']->translatedFormat(__('statamic-payments::portal.date_format'))])
+                                            : __('statamic-payments::subscriptions.portal_paused_open') }}
+                                    @else
+                                        {{ __('statamic-payments::portal.status_'.$subscription['status']) }}
+                                    @endif
                                     @if ($subscription['live'] && $subscription['next_payment_at'])
                                         · {{ __('statamic-payments::portal.subscription_next', ['date' => $subscription['next_payment_at']->translatedFormat(__('statamic-payments::portal.date_format'))]) }}
-                                    @elseif (! $subscription['live'] && $subscription['cancelled_at'])
+                                    @elseif (! $subscription['live'] && ! $subscription['paused'] && $subscription['cancelled_at'])
                                         · {{ __('statamic-payments::portal.subscription_ended', ['date' => $subscription['cancelled_at']->translatedFormat(__('statamic-payments::portal.date_format'))]) }}
                                     @endif
                                     @if ($subscription['remaining'] !== null)
@@ -43,8 +55,27 @@
                             </span>
                         </div>
 
-                        @if ($subscription['live'])
+                        @if ($subscription['running'])
                             <div class="actions">
+                                {{-- Pausing, resuming and switching come first: they are
+                                     the ways to stay, and the cancel button below them
+                                     stays exactly where the statute wants it. --}}
+                                @if ($subscription['can_resume'])
+                                    <form method="POST" action="{{ route('statamic-payments.portal.resume.run', ['paySubscription' => $subscription['id']]) }}">
+                                        @csrf
+                                        <button type="submit" class="btn">{{ __('statamic-payments::subscriptions.portal_resume_button') }}</button>
+                                        <p class="hint">{{ __('statamic-payments::subscriptions.portal_resume_note') }}</p>
+                                    </form>
+                                @endif
+
+                                @if ($subscription['can_switch'])
+                                    <a class="btn btn-plain" href="{{ route('statamic-payments.portal.switch.confirm', ['paySubscription' => $subscription['id']]) }}">{{ __('statamic-payments::subscriptions.portal_switch_button') }}</a>
+                                @endif
+
+                                @if ($subscription['can_pause'])
+                                    <a class="btn btn-plain" href="{{ route('statamic-payments.portal.pause.confirm', ['paySubscription' => $subscription['id']]) }}">{{ __('statamic-payments::subscriptions.portal_pause_button') }}</a>
+                                @endif
+
                                 {{--
                                     § 312k BGB, step one as it appears to somebody
                                     already inside: the button with the wording the
@@ -52,8 +83,19 @@
                                     page and nowhere else. A link, not a form —
                                     pressing it cancels nothing, which is the point
                                     of there being a second page.
+
+                                    Where the product keeps cancellation out of the
+                                    portal (P9), the statutory flow without login is
+                                    named instead. It is never switched off here.
                                 --}}
-                                <a class="btn btn-quiet" href="{{ route('statamic-payments.portal.cancel.confirm', ['paySubscription' => $subscription['id']]) }}">{{ __('statamic-payments::portal.cancel_button') }}</a>
+                                @if ($subscription['can_cancel'])
+                                    <a class="btn btn-quiet" href="{{ route('statamic-payments.portal.cancel.confirm', ['paySubscription' => $subscription['id']]) }}">{{ __('statamic-payments::portal.cancel_button') }}</a>
+                                @elseif ($subscription['cancel_elsewhere_url'])
+                                    <p class="hint">
+                                        {{ __('statamic-payments::subscriptions.portal_cancel_hint') }}
+                                        <a href="{{ $subscription['cancel_elsewhere_url'] }}">{{ __('statamic-payments::cancellation.button') }}</a>
+                                    </p>
+                                @endif
 
                                 @if ($subscription['can_change_method'])
                                     <form method="POST" action="{{ route('statamic-payments.portal.method.start', ['paySubscription' => $subscription['id']]) }}">

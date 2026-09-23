@@ -8,6 +8,8 @@ use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Portal\Display;
 use Goldnead\StatamicPayments\Support\Gateways;
 use Goldnead\StatamicPayments\Support\Invoices;
+use Goldnead\StatamicPayments\Support\SubscriptionPauses;
+use Goldnead\StatamicPayments\Support\SubscriptionSwitches;
 use Illuminate\Http\Request;
 
 /**
@@ -29,6 +31,8 @@ class OrdersController extends PortalController
 
         return response()->view('statamic-payments::portal.orders', [
             'email' => $access->email,
+            // P9: the shop's own words above the list, as plain text.
+            'greeting' => trim((string) config('statamic-payments.portal.greeting', '')),
             'orders' => $this->orders->ordersFor($access)->map(fn (Payment $payment) => [
                 'id' => $payment->getKey(),
                 'name' => $this->nameOf($payment->product),
@@ -84,6 +88,7 @@ class OrdersController extends PortalController
     protected function asRow(Subscription $subscription): array
     {
         $gateway = app(Gateways::class)->for($subscription);
+        $pauses = app(SubscriptionPauses::class);
 
         return [
             'id' => $subscription->getKey(),
@@ -96,10 +101,22 @@ class OrdersController extends PortalController
             'next_payment_at' => $subscription->next_payment_at,
             'cancelled_at' => $subscription->cancelled_at,
             'remaining' => $subscription->remaining(),
+            'paused' => $subscription->isPaused(),
+            'resumes_at' => $subscription->resumes_at,
+            'running' => $subscription->isRunning(),
+            // P9: the portal button may be off for this product; the statutory
+            // cancellation without login stays reachable, and the page says so.
+            'can_cancel' => $subscription->isRunning() && $this->mayCancelHere($subscription),
+            'cancel_elsewhere_url' => config('statamic-payments.cancellation.enabled', true)
+                ? route('statamic-payments.cancellation.form')
+                : null,
+            'can_pause' => $pauses->portalMayPause($subscription),
+            'can_resume' => $subscription->isPaused() && $pauses->portalAllows($subscription),
+            'can_switch' => app(SubscriptionSwitches::class)->targetsFor($subscription, portal: true) !== [],
             // Two conditions, both real: the provider has to be able to take a
             // new mandate at all, and this agreement has to have one to replace.
             // Neither is a property of the screen, which is why the screen asks.
-            'can_change_method' => $subscription->isLive()
+            'can_change_method' => $subscription->isRunning()
                 && $gateway instanceof MandateGateway
                 && $gateway->supportsMandateUpdate()
                 && $subscription->customer_reference !== '',

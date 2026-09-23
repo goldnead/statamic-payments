@@ -46,6 +46,7 @@ const statusColor = (status) => ({
     pending: 'blue',
     initiated: 'default',
     suspended: 'amber',
+    paused: 'sky',
     cancelled: 'red',
     completed: 'default',
 }[status] ?? 'default');
@@ -87,6 +88,9 @@ const detailFields = computed(() => {
         { label: t.field_dunning_since, value: row.dunning?.started_at ?? null, date: true },
         { label: t.field_starts_at, value: row.starts_at, date: true },
         { label: t.field_next_payment, value: row.next_payment_at, date: true },
+        { label: t.field_paused_at, value: row.paused_at, date: true },
+        { label: t.field_resumes_at, value: row.resumes_at },
+        { label: t.field_card_expires_at, value: row.card_expires_at },
         { label: t.field_cancelled_at, value: row.cancelled_at, date: true },
         { label: t.field_ended_at, value: row.ended_at, date: true },
         { label: t.field_buyer, value: row.email },
@@ -225,6 +229,24 @@ const detailFields = computed(() => {
                         </dd>
                     </div>
                 </dl>
+
+                <!-- Pauses and switches. Only when there are any: an empty
+                     heading on every agreement that never changed is noise. -->
+                <div v-if="detail.history && detail.history.length" class="space-y-3">
+                    <Heading :text="t.detail_history" size="base" />
+                    <dl class="divide-y divide-content-border border-y border-content-border">
+                        <div
+                            v-for="(line, index) in detail.history"
+                            :key="index"
+                            class="flex items-baseline justify-between gap-4 py-2"
+                        >
+                            <dt class="text-sm">{{ line.text }}</dt>
+                            <dd class="text-end text-sm text-gray-600 dark:text-gray-400 tabular-nums">
+                                <date-time v-if="line.at" :of="line.at" />
+                            </dd>
+                        </div>
+                    </dl>
+                </div>
 
                 <div class="space-y-3">
                     <Heading :text="t.detail_payments" size="base" />

@@ -66,6 +66,7 @@ return [
     'status_pending' => 'Beginnt später',
     'status_active' => 'Läuft',
     'status_suspended' => 'Ausgesetzt',
+    'status_paused' => 'Pausiert',
     'status_cancelled' => 'Gekündigt',
     'status_completed' => 'Abgeschlossen',
 

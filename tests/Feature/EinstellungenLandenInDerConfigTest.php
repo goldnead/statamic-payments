@@ -5,6 +5,7 @@ namespace Goldnead\StatamicPayments\Tests\Feature;
 use Goldnead\BrandContext\ServiceProvider as BrandContextServiceProvider;
 use Goldnead\BrandContext\Settings\SettingsManager;
 use Goldnead\BrandContext\Settings\SettingsRegistry;
+use Goldnead\StatamicPayments\Support\Checkout;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use ReflectionClass;
 
@@ -70,6 +71,37 @@ class EinstellungenLandenInDerConfigTest extends TestCase
         $this->assertSame('kuendigung@example.test', config('statamic-payments.cancellation.notify'));
         $this->assertFalse(config('statamic-payments.portal.enabled'));
         $this->assertSame(['_se', 'mc_cid'], config('statamic-payments.portal.ignored_query_parameters'));
+    }
+
+    /**
+     * Die Sperrliste der Kasse wird im Control Panel gepflegt (P7), und was
+     * dort gespeichert wird, hält die Kasse wirklich auf.
+     */
+    public function test_die_sperrliste_aus_dem_control_panel_sperrt_die_kasse(): void
+    {
+        $manager = app(SettingsManager::class);
+
+        $manager->for('payments')->save([
+            'protection.blocklist.emails' => ['betrug@example.com'],
+            'protection.blocklist.domains' => ['wegwerf.example'],
+            'protection.captcha.provider' => 'off',
+            'portal.greeting' => 'Schön, dass du da bist.',
+            'reminders.upcoming.enabled' => true,
+        ]);
+
+        $manager->apply(force: true);
+
+        $this->assertSame(['wegwerf.example'], config('statamic-payments.protection.blocklist.domains'));
+        $this->assertSame('Schön, dass du da bist.', config('statamic-payments.portal.greeting'));
+        $this->assertTrue(config('statamic-payments.reminders.upcoming.enabled'));
+
+        $this->assertNull(app(Checkout::class)->start('noten-paket', ['email' => 'x@wegwerf.example']));
+        $this->assertNotNull(app(Checkout::class)->start('noten-paket', ['email' => 'x@example.com']));
+    }
+
+    public function test_das_captcha_geheimnis_steht_nicht_auf_der_seite(): void
+    {
+        $this->assertNotContains('protection.captcha.secret', array_keys(app(SettingsRegistry::class)->fields('payments')));
     }
 
     /**

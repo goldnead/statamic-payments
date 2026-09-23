@@ -54,7 +54,7 @@ class PaymentMethodController extends PortalController
         // already ended, is a button that should not have been on the page — and
         // the buyer who got there anyway is told what is true rather than shown
         // a 500.
-        if (! $gateway instanceof MandateGateway || ! $gateway->supportsMandateUpdate() || ! $subscription->isLive()) {
+        if (! $gateway instanceof MandateGateway || ! $gateway->supportsMandateUpdate() || ! $subscription->isRunning()) {
             return $this->back(__('statamic-payments::portal.method_unavailable'));
         }
 

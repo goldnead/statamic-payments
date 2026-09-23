@@ -131,6 +131,45 @@ class Settings implements ProvidesSettings
                     static::field('max_quantity', 'integer', ['min' => 1]),
                     // 0 schaltet das Löschen ab und muss erreichbar bleiben.
                     static::field('prune_unpaid_after_days', 'integer', ['min' => 0]),
+                    static::field('thanks.expires_minutes', 'integer', ['min' => 0, 'nullable' => true]),
+                    static::field('thanks.expired_url', 'string', ['nullable' => true]),
+                ],
+            ],
+            [
+                'title' => __('statamic-payments::settings.groups.protection.title'),
+                'description' => __('statamic-payments::settings.groups.protection.description'),
+                'fields' => [
+                    static::field('protection.blocklist.emails', 'list'),
+                    static::field('protection.blocklist.domains', 'list'),
+                    static::field('protection.blocklist.ips', 'list'),
+                    static::field('protection.rate_limit.enabled', 'boolean'),
+                    static::field('protection.rate_limit.per_ip', 'integer', ['min' => 1]),
+                    static::field('protection.rate_limit.per_email', 'integer', ['min' => 1]),
+                    static::field('protection.captcha.provider', 'select', ['options' => [
+                        'off' => __('statamic-payments::settings.options.captcha_off'),
+                        'turnstile' => 'Cloudflare Turnstile',
+                        'hcaptcha' => 'hCaptcha',
+                    ]]),
+                    // Der Seitenschlüssel ist öffentlich, er steht im HTML jeder
+                    // Kasse. Das Geheimnis dazu bleibt in der .env.
+                    static::field('protection.captcha.site_key', 'string', ['nullable' => true]),
+                ],
+            ],
+            [
+                'title' => __('statamic-payments::settings.groups.subscriptions.title'),
+                'description' => __('statamic-payments::settings.groups.subscriptions.description'),
+                'fields' => [
+                    static::field('pause.access', 'select', ['options' => [
+                        'period_end' => __('statamic-payments::settings.options.pause_period_end'),
+                        'immediate' => __('statamic-payments::settings.options.pause_immediate'),
+                        'keep' => __('statamic-payments::settings.options.pause_keep'),
+                    ]]),
+                    static::field('switch.min_proration_cent', 'integer', ['min' => 1]),
+                    static::field('reminders.upcoming.enabled', 'boolean'),
+                    static::field('reminders.upcoming.days', 'integer', ['min' => 1]),
+                    static::field('reminders.card_expiring.enabled', 'boolean'),
+                    static::field('reminders.card_expiring.days', 'integer', ['min' => 1]),
+                    static::field('reminders.card_expired.enabled', 'boolean'),
                 ],
             ],
             [
@@ -164,6 +203,12 @@ class Settings implements ProvidesSettings
                     static::field('portal.from.address', 'string', ['nullable' => true]),
                     static::field('portal.from.name', 'string', ['nullable' => true]),
                     static::field('portal.ignored_query_parameters', 'list'),
+                    static::field('portal.logo_url', 'string', ['nullable' => true]),
+                    static::field('portal.logo_alt', 'string', ['nullable' => true]),
+                    static::field('portal.greeting', 'text', ['nullable' => true]),
+                    static::field('portal.self_cancel', 'boolean'),
+                    static::field('portal.allow_pause', 'boolean'),
+                    static::field('portal.allow_switch', 'boolean'),
                 ],
             ],
             [
@@ -179,6 +224,11 @@ class Settings implements ProvidesSettings
                 'description' => __('statamic-payments::settings.groups.abandoned.description'),
                 'fields' => [
                     static::field('abandoned.enabled', 'boolean'),
+                    static::field('abandoned.capture', 'select', ['options' => [
+                        'consent' => __('statamic-payments::settings.options.capture_consent'),
+                        'always' => __('statamic-payments::settings.options.capture_always'),
+                        'never' => __('statamic-payments::settings.options.capture_never'),
+                    ]]),
                     static::field('abandoned.after_minutes', 'integer', ['min' => 1]),
                     static::field('abandoned.mail.enabled', 'boolean'),
                     static::field('abandoned.mail.template', 'string', ['nullable' => true]),

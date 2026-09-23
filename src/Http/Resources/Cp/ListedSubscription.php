@@ -4,8 +4,10 @@ namespace Goldnead\StatamicPayments\Http\Resources\Cp;
 
 use Goldnead\StatamicPayments\Http\Resources\Cp\Concerns\DescribesProducts;
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Portal\Display;
 use Goldnead\StatamicPayments\Support\Dunning;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Carbon;
 
 /**
  * One agreement.
@@ -91,6 +93,16 @@ class ListedSubscription extends JsonResource
             'next_payment_at' => $this->next_payment_at?->toIso8601String(),
             'cancelled_at' => $this->cancelled_at?->toIso8601String(),
             'ended_at' => $this->ended_at?->toIso8601String(),
+            'paused_at' => $this->paused_at?->toIso8601String(),
+            // A day, not a moment: shown as a date in the reader's language
+            // rather than through `<date-time>`, which adds a clock time and
+            // shifts a UTC midnight into the day before or an odd 1:00.
+            'resumes_at' => $this->resumes_at?->copy()->locale(app()->getLocale())->isoFormat('LL'),
+            // Month and year, the way a card prints it.
+            'card_expires_at' => $this->card_expires_at?->format('m/Y'),
+
+            // What changed about this agreement, newest first, already in words.
+            'history' => $this->history(),
 
             'total' => $this->total(),
 
@@ -101,7 +113,7 @@ class ListedSubscription extends JsonResource
             // Whether stopping it is a thing that can still happen. The screen
             // offers the action off this, and the endpoint asks the provider
             // rather than this flag — a row can go stale between the two.
-            'can_cancel' => $this->isLive(),
+            'can_cancel' => $this->isRunning(),
 
             'payments' => ListedPayment::collection(
                 $this->whenLoaded('payments', fn () => $this->payments->take(self::MAX_PAYMENTS))
@@ -131,6 +143,71 @@ class ListedSubscription extends JsonResource
             (int) $matches[1],
             ['count' => (int) $matches[1]]
         );
+    }
+
+    /**
+     * Pauses and switches, as lines a person reads.
+     *
+     * From `meta`, where `SubscriptionPauses` and `SubscriptionSwitches` keep
+     * them. Newest first, and each one says when and from where.
+     *
+     * @return list<array{at: string|null, text: string}>
+     */
+    protected function history(): array
+    {
+        $meta = is_array($this->meta) ? $this->meta : [];
+        $lines = [];
+
+        foreach ((array) ($meta['switches'] ?? []) as $switch) {
+            if (! is_array($switch)) {
+                continue;
+            }
+
+            $immediate = (bool) ($switch['immediate'] ?? false);
+
+            $lines[] = [
+                'at' => $switch['at'] ?? null,
+                'text' => __($immediate
+                    ? 'statamic-payments::subscriptions.history_switch'
+                    : 'statamic-payments::subscriptions.history_switch_later', [
+                        'from' => $this->productName((string) ($switch['from'] ?? '')) ?? ($switch['from'] ?? ''),
+                        'to' => $this->productName((string) ($switch['to'] ?? '')) ?? ($switch['to'] ?? ''),
+                        'amount' => Display::money((int) ($switch['proration_cent'] ?? 0), $this->currency),
+                    ]),
+            ];
+        }
+
+        foreach ((array) ($meta['pauses'] ?? []) as $pause) {
+            if (! is_array($pause)) {
+                continue;
+            }
+
+            $lines[] = [
+                'at' => $pause['resumed_at'] ?? null,
+                'text' => __('statamic-payments::subscriptions.history_pause', [
+                    'from' => $this->day($pause['paused_at'] ?? null),
+                    'to' => $this->day($pause['resumed_at'] ?? null),
+                ]),
+            ];
+        }
+
+        usort($lines, fn ($a, $b) => strcmp((string) $b['at'], (string) $a['at']));
+
+        return $lines;
+    }
+
+    /** A stored moment as a short date in the reader's language. */
+    protected function day(mixed $iso): string
+    {
+        if (! is_string($iso) || $iso === '') {
+            return '';
+        }
+
+        try {
+            return Carbon::parse($iso)->locale(app()->getLocale())->isoFormat('L');
+        } catch (\Throwable) {
+            return substr($iso, 0, 10);
+        }
     }
 
     /** What the whole agreement comes to, when it has an end. */

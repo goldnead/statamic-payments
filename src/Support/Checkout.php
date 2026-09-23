@@ -55,6 +55,13 @@ class Checkout
             return null;
         }
 
+        // The door (P7): block list, rate limit, captcha. Before the row and
+        // before the provider, so a refused attempt costs nothing and leaves
+        // nothing behind. Null to the caller, the reason to the log.
+        if (app(CheckoutGuard::class)->check($buyer) !== null) {
+            return null;
+        }
+
         $primary = $lines[0];
         $gross = array_sum(array_map(fn (array $l) => $l['amount_cent'] * $l['quantity'], $lines));
 
@@ -389,7 +396,7 @@ class Checkout
         $fallback = $this->url('return_url', ['payment' => $payment->id]);
 
         if (! is_string($returnUrl) || trim($returnUrl) === '') {
-            return $fallback;
+            return $this->expiring($fallback, $payment);
         }
 
         if ($this->pointsAwayFromHere($returnUrl)) {
@@ -397,10 +404,22 @@ class Checkout
                 'payment_id' => $payment->getKey(),
             ]);
 
-            return $fallback;
+            return $this->expiring($fallback, $payment);
         }
 
-        return $returnUrl;
+        return $this->expiring($returnUrl, $payment);
+    }
+
+    /**
+     * The same address, behind a link that expires, where the site wants that.
+     * See {@see ThanksLink}. Checked for "this site" first, wrapped second: the
+     * signature protects the target, it does not vouch for it.
+     */
+    protected function expiring(string $target, Payment $payment): string
+    {
+        $thanks = app(ThanksLink::class);
+
+        return $thanks->enabled() ? $thanks->wrap($target, $payment) : $target;
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Http\Controllers\Portal;
 
+use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Portal\Orders;
 use Goldnead\StatamicPayments\Portal\PortalAccess;
 use Goldnead\StatamicPayments\Portal\PortalSession;
@@ -50,6 +51,26 @@ abstract class PortalController extends Controller
         return redirect()
             ->route('statamic-payments.portal.request')
             ->with('statamic-payments.portal.status', __('statamic-payments::portal.session_over'));
+    }
+
+    /**
+     * Whether this product may be cancelled from the portal (P9).
+     *
+     * The product decides where it says so (`portal_cancel` in its catalogue
+     * entry), otherwise `portal.self_cancel`, on by default.
+     *
+     * **This switches off a convenience, not the right.** § 312k BGB wants a
+     * cancellation that works without a login, and that is the public flow
+     * (`cancellation.*` routes), which stays untouched. Where the portal button
+     * is off, the page points there instead.
+     */
+    protected function mayCancelHere(Subscription $subscription): bool
+    {
+        $entry = app(Catalogue::class)->find($subscription->product) ?? [];
+
+        return is_bool($entry['portal_cancel'] ?? null)
+            ? $entry['portal_cancel']
+            : (bool) config('statamic-payments.portal.self_cancel', true);
     }
 
     /**

@@ -40,6 +40,16 @@ return [
             'description' => 'Somebody started a checkout and did not finish it. Whether a reminder may go out is a question of consent — the address was given to complete a purchase, not to receive advertising. Settle that before switching anything on here.',
         ],
 
+        'protection' => [
+            'title' => 'Checkout protection',
+            'description' => 'Block list, brake against card testing and captcha. Checked before a payment is written or the provider called. Whoever is refused is not told which rule caught them.',
+        ],
+
+        'subscriptions' => [
+            'title' => 'Subscriptions',
+            'description' => 'Pausing, switching and reminders. The reminders need the scheduler (payments:reminders), and so does a pause with a date (payments:resume-paused).',
+        ],
+
         'bridges' => [
             'title' => 'Connected addons',
             'description' => 'What this addon hands to its siblings. All off until somebody turns them on: two addons installed for unrelated reasons must not start exchanging customer data because they happen to sit in the same vendor directory.',
@@ -184,6 +194,117 @@ return [
             'description' => 'Gives the buyer the entitlement named under `grants` on the product. Off again for any product without `grants`.',
         ],
 
+        'thanks_expires_minutes' => [
+            'label' => 'Thank-you page valid for (minutes)',
+            'description' => 'Empty or 0: the thank-you page does not expire. With a number the buyer comes back through a signed link valid that long. The page asks {{ payments:thanks }} whether the visit is still valid.',
+        ],
+        'thanks_expired_url' => [
+            'label' => 'Page for expired links',
+            'description' => 'Where an expired link leads. Empty: a short page of this addon pointing to the customer account.',
+        ],
+
+        'protection_blocklist_emails' => [
+            'label' => 'Blocked email addresses',
+            'description' => 'One address per line. Case does not matter.',
+        ],
+        'protection_blocklist_domains' => [
+            'label' => 'Blocked domains',
+            'description' => 'One domain per line, for example throwaway.example. Includes its subdomains.',
+        ],
+        'protection_blocklist_ips' => [
+            'label' => 'Blocked IP addresses',
+            'description' => 'One address or range per line, for example 203.0.113.0/24.',
+        ],
+        'protection_rate_limit_enabled' => [
+            'label' => 'Brake against card testing',
+            'description' => 'Limits how many checkouts may start within ten minutes from one IP address and for one email address.',
+        ],
+        'protection_rate_limit_per_ip' => [
+            'label' => 'Checkouts per IP address',
+            'description' => 'Keep it generous: a choir buying tickets over one Wi-Fi is a single IP address.',
+        ],
+        'protection_rate_limit_per_email' => [
+            'label' => 'Checkouts per email address',
+            'description' => '',
+        ],
+        'protection_captcha_provider' => [
+            'label' => 'Captcha',
+            'description' => 'When on, every checkout form must contain {{ payments:captcha }}, or the checkout is refused. The secret key lives in .env (STATAMIC_PAYMENTS_CAPTCHA_SECRET).',
+        ],
+        'protection_captcha_site_key' => [
+            'label' => 'Captcha site key',
+            'description' => 'The public key from your Cloudflare or hCaptcha account.',
+        ],
+
+        'pause_access' => [
+            'label' => 'Access during a pause',
+            'description' => 'What happens to the access while a subscription is paused.',
+        ],
+        'switch_min_proration_cent' => [
+            'label' => 'Smallest pro-rata charge (cents)',
+            'description' => 'Below this, nothing is charged for the current period when switching to a more expensive subscription.',
+        ],
+        'reminders_upcoming_enabled' => [
+            'label' => 'Reminder before a charge',
+            'description' => 'A mail some days before every charge. Needs the scheduler: payments:reminders, daily.',
+        ],
+        'reminders_upcoming_days' => [
+            'label' => 'Days before the charge',
+            'description' => '',
+        ],
+        'reminders_card_expiring_enabled' => [
+            'label' => 'Reminder before the card expires',
+            'description' => 'A mail before the card on file expires, with the link to replace it. Cards only; a SEPA mandate does not expire.',
+        ],
+        'reminders_card_expiring_days' => [
+            'label' => 'Days before the card expires',
+            'description' => '',
+        ],
+        'reminders_card_expired_enabled' => [
+            'label' => 'Notice when the card has expired',
+            'description' => 'A mail as soon as the card on file has expired.',
+        ],
+
+        'portal_logo_url' => [
+            'label' => 'Logo',
+            'description' => 'The address of an image (https://…) or a path on this site. Shown above every customer account page.',
+        ],
+        'portal_logo_alt' => [
+            'label' => 'Logo alternative text',
+            'description' => 'Empty: the application name.',
+        ],
+        'portal_greeting' => [
+            'label' => 'Greeting',
+            'description' => 'A few words of your own above the list of orders. Plain text.',
+        ],
+        'portal_self_cancel' => [
+            'label' => 'Cancel in the customer account',
+            'description' => 'Off: the account shows the way to the cancellation page without login instead of the cancel button. The statutory cancellation always stays possible. A product can decide this itself with portal_cancel.',
+        ],
+        'portal_allow_pause' => [
+            'label' => 'Pause in the customer account',
+            'description' => 'Buyers may pause and resume their subscription themselves. A product can decide this itself with pausable.',
+        ],
+        'portal_allow_switch' => [
+            'label' => 'Switch in the customer account',
+            'description' => 'Buyers may switch to the products listed under switch_to on their product.',
+        ],
+
+        'abandoned_capture' => [
+            'label' => 'Use the address for abandoned-checkout mail',
+            'description' => 'Separate from the switches above. With consent means: only when the checkout passed meta.reminder_consent, i.e. a box of its own was ticked.',
+        ],
+
+    ],
+
+    'options' => [
+        'captcha_off' => 'Off',
+        'pause_period_end' => 'Until the end of the paid period, then it rests',
+        'pause_immediate' => 'Rests at once',
+        'pause_keep' => 'Stays during the pause',
+        'capture_consent' => 'Only with consent',
+        'capture_always' => 'Always',
+        'capture_never' => 'Never',
     ],
 
 ];

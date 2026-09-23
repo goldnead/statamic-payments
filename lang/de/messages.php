@@ -66,6 +66,7 @@ return [
     'subscription_status_pending' => 'Wartet',
     'subscription_status_active' => 'Läuft',
     'subscription_status_suspended' => 'Ausgesetzt',
+    'subscription_status_paused' => 'Pausiert',
     'subscription_status_cancelled' => 'Gekündigt',
     'subscription_status_completed' => 'Abgeschlossen',
     'subscription_rhythm_day' => 'täglich|alle :count Tage',

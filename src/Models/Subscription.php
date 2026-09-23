@@ -50,6 +50,10 @@ use Illuminate\Support\Facades\Log;
  * @property int $dunning_stage
  * @property Carbon|null $dunning_last_at
  * @property int|null $dunning_payment_id
+ * @property Carbon|null $paused_at
+ * @property Carbon|null $resumes_at
+ * @property Carbon|null $card_expires_at
+ * @property Carbon|null $card_checked_at
  * @property string|null $email
  * @property string|null $name
  * @property array<string, mixed>|null $meta
@@ -73,6 +77,15 @@ class Subscription extends Model
 
     /** The provider paused it, usually after failed charges. */
     public const STATUS_SUSPENDED = 'suspended';
+
+    /**
+     * Somebody paused it. Nothing is charged until it resumes.
+     *
+     * Not live — the provider charges nothing — and not over either: the
+     * agreement stands, can be resumed, and can still be cancelled. That middle
+     * is what {@see isRunning()} answers for.
+     */
+    public const STATUS_PAUSED = 'paused';
 
     protected $guarded = [];
 
@@ -109,6 +122,10 @@ class Subscription extends Model
             'ended_at' => 'datetime',
             'dunning_started_at' => 'datetime',
             'dunning_last_at' => 'datetime',
+            'paused_at' => 'datetime',
+            'resumes_at' => 'datetime',
+            'card_expires_at' => 'date',
+            'card_checked_at' => 'datetime',
             'meta' => 'array',
         ];
     }
@@ -127,6 +144,7 @@ class Subscription extends Model
             self::STATUS_PENDING,
             self::STATUS_ACTIVE,
             self::STATUS_SUSPENDED,
+            self::STATUS_PAUSED,
             self::STATUS_CANCELLED,
             self::STATUS_COMPLETED,
         ];
@@ -142,6 +160,23 @@ class Subscription extends Model
     public function isLive(): bool
     {
         return in_array($this->status, [self::STATUS_PENDING, self::STATUS_ACTIVE], true);
+    }
+
+    public function isPaused(): bool
+    {
+        return $this->status === self::STATUS_PAUSED;
+    }
+
+    /**
+     * Whether the agreement still stands: charged, or paused.
+     *
+     * The question a cancel button asks. A paused membership is one somebody may
+     * want to end for good, and hiding the button because nothing is being
+     * charged right now would leave them a contract they cannot leave.
+     */
+    public function isRunning(): bool
+    {
+        return $this->isLive() || $this->isPaused();
     }
 
     /** A plan stops; a subscription does not. */
@@ -247,6 +282,51 @@ class Subscription extends Model
      * für „bis wann ist bezahlt". Zwei Kopien wären zwei Wege, sich über die
      * Monatsenden zu uneinigen.
      */
+    /**
+     * The start of the period that ends on `$bis`: the mirror of {@see addInterval()}.
+     *
+     * Needed where a part of the current period is worth something — switching
+     * to another amount mid-period, crediting what is left of a replaced one.
+     */
+    public static function subInterval(Carbon $bis, string $interval): Carbon
+    {
+        if (preg_match('/^(\d+)\s*months?$/i', trim($interval), $m)) {
+            return $bis->copy()->subMonthsNoOverflow((int) $m[1]);
+        }
+
+        try {
+            return $bis->copy()->sub($interval);
+        } catch (\Throwable) {
+            return $bis->copy()->subMonth();
+        }
+    }
+
+    /**
+     * How much of the current period is still ahead, between 0 and 1.
+     *
+     * Zero when there is no next charge to measure against. The period is the
+     * one that ends on `next_payment_at`.
+     */
+    public function remainingFraction(?Carbon $now = null): float
+    {
+        $bis = $this->next_payment_at;
+        $interval = trim((string) $this->interval);
+
+        if ($bis === null || $interval === '') {
+            return 0.0;
+        }
+
+        $now ??= Carbon::now();
+        $von = self::subInterval($bis, $interval);
+        $laenge = $bis->getTimestamp() - $von->getTimestamp();
+
+        if ($laenge <= 0) {
+            return 0.0;
+        }
+
+        return max(0.0, min(1.0, ($bis->getTimestamp() - $now->getTimestamp()) / $laenge));
+    }
+
     public static function addInterval(Carbon $von, string $interval): Carbon
     {
         // Ein Monat, ohne hinten herauszufallen. `add('1 month')` landet am

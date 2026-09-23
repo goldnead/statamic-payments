@@ -39,7 +39,7 @@
         </table>
     </div>
 
-    @if ($subscription->isLive())
+    @if ($subscription->isRunning())
         <p class="notice">{{ __('statamic-payments::portal.cancel_effect') }}</p>
 
         <form method="POST" action="{{ route('statamic-payments.portal.cancel.run', ['paySubscription' => $subscription->getKey()]) }}">

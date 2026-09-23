@@ -82,6 +82,108 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Pausing a subscription
+    |--------------------------------------------------------------------------
+    |
+    | From the Control Panel (row action on the subscriptions screen) and, where
+    | allowed, from the customer portal (`portal.allow_pause`, or `pausable` on
+    | the product). Stripe pauses natively; Mollie has no pause, so the running
+    | agreement is ended and a new one is started on resume, on the old billing
+    | day. Either way nothing is charged during the pause or at the moment of
+    | resuming. Payment plans and agreements in dunning cannot be paused.
+    |
+    | `access` is what happens to the access during the pause:
+    |
+    | - `period_end`: the paid period stays, then the access rests (default)
+    | - `immediate`: the access ends at once and comes back on resume
+    | - `keep`: the access stays through the pause
+    |
+    | A pause with a date resumes by itself; schedule the pass that does it:
+    |
+    |     Schedule::command('payments:resume-paused')->daily();
+    |
+    */
+
+    'pause' => [
+        'access' => env('STATAMIC_PAYMENTS_PAUSE_ACCESS', 'period_end'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Switching a subscription (upgrade, downgrade)
+    |--------------------------------------------------------------------------
+    |
+    | Between recurring products with the same rhythm. An upgrade applies at
+    | once and the difference for the rest of the current period is charged as
+    | its own payment; a downgrade applies from the next charge. Neither
+    | provider prorates on its own side. Below `min_proration_cent` nothing is
+    | charged for the difference.
+    |
+    | In the portal only where `portal.allow_switch` is on, and only to what the
+    | current product lists under `switch_to`.
+    |
+    */
+
+    'switch' => [
+        'min_proration_cent' => 50,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Reminders before a charge and before a card expires
+    |--------------------------------------------------------------------------
+    |
+    | Three kinds, each off by default and each with its own switch:
+    |
+    | - `upcoming`: `days` before every charge
+    | - `card_expiring`: `days` before the card on file expires
+    | - `card_expired`: once the card has expired
+    |
+    | `mail` false keeps the event (for statamic-automations) and sends no mail.
+    | `template` is an email-templates slug, with the variables `buyer.*`,
+    | `plan.*`, `date`, `date_display`, `portal_url`. A product that should not
+    | remind says `reminders => false` in its catalogue entry.
+    |
+    | The card's expiry comes from Stripe (cards) and Mollie (credit card
+    | mandates) and is asked again every `card_check_days`. SEPA has no expiry.
+    |
+    | Each reminder goes out once per agreement and date, however often the
+    | pass runs:
+    |
+    |     Schedule::command('payments:reminders')->dailyAt('09:00');
+    |
+    | Note on SEPA direct debit: the scheme asks for a pre-notification before
+    | each debit. Whether the provider's own notice covers it or this mail
+    | should is a decision for the site; this addon does not claim either.
+    |
+    */
+
+    'reminders' => [
+        'upcoming' => [
+            'enabled' => env('STATAMIC_PAYMENTS_REMIND_UPCOMING', false),
+            'days' => 7,
+            'mail' => true,
+            'template' => null,
+            'subject' => null,
+        ],
+        'card_expiring' => [
+            'enabled' => env('STATAMIC_PAYMENTS_REMIND_CARD', false),
+            'days' => 30,
+            'mail' => true,
+            'template' => null,
+            'subject' => null,
+        ],
+        'card_expired' => [
+            'enabled' => env('STATAMIC_PAYMENTS_REMIND_CARD', false),
+            'mail' => true,
+            'template' => null,
+            'subject' => null,
+        ],
+        'card_check_days' => 7,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Products
     |--------------------------------------------------------------------------
     |
@@ -119,6 +221,67 @@ return [
     */
 
     'return_url' => '/danke',
+
+    /*
+    |--------------------------------------------------------------------------
+    | The thank-you page expires
+    |--------------------------------------------------------------------------
+    |
+    | With `expires_minutes` set, the provider sends the buyer to a signed link
+    | of this addon that is valid that long; it forwards to the page above and
+    | notes the visit in the session. The page asks
+    | `{{ payments:thanks }}{{ if valid }}…{{ /if }}{{ /payments:thanks }}`.
+    | A link opened too late lands on a short page of this addon, or on
+    | `expired_url`. Null or 0 switches it off (default).
+    |
+    */
+
+    'thanks' => [
+        'expires_minutes' => env('STATAMIC_PAYMENTS_THANKS_EXPIRES'),
+        'expired_url' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Checkout protection
+    |--------------------------------------------------------------------------
+    |
+    | Three doors in front of every new checkout, checked before a row is
+    | written or a provider called:
+    |
+    | - `blocklist`: addresses, domains (with their subdomains) and IP addresses
+    |   or ranges (`203.0.113.0/24`) that are refused. Editable in the Control
+    |   Panel on the shared settings screen.
+    | - `rate_limit`: checkouts per IP and per address within `decay_minutes`,
+    |   against card testing. On by default and generous, because a choir buying
+    |   tickets over one Wi-Fi is one IP address.
+    | - `captcha`: `turnstile` (Cloudflare) or `hcaptcha`, off by default. On
+    |   means every checkout form renders `{{ payments:captcha }}`; a form without
+    |   it is refused. The secret stays in `.env`.
+    |
+    | A refusal answers the caller with no checkout and says nothing about the
+    | rule; the reason goes to the log and to the `CheckoutBlocked` event.
+    |
+    */
+
+    'protection' => [
+        'blocklist' => [
+            'emails' => [],
+            'domains' => [],
+            'ips' => [],
+        ],
+        'rate_limit' => [
+            'enabled' => true,
+            'per_ip' => 30,
+            'per_email' => 10,
+            'decay_minutes' => 10,
+        ],
+        'captcha' => [
+            'provider' => env('STATAMIC_PAYMENTS_CAPTCHA', 'off'),
+            'site_key' => env('STATAMIC_PAYMENTS_CAPTCHA_SITE_KEY'),
+            'secret' => env('STATAMIC_PAYMENTS_CAPTCHA_SECRET'),
+        ],
+    ],
 
     /*
     |--------------------------------------------------------------------------
@@ -207,6 +370,15 @@ return [
     'abandoned' => [
         'enabled' => env('STATAMIC_PAYMENTS_ABANDONED', false),
         'after_minutes' => env('STATAMIC_PAYMENTS_ABANDONED_AFTER', 60),
+
+        /*
+        | Whose address may be used at all, separately from the switches around
+        | it. `consent` (default): only a checkout that carries
+        | `meta.reminder_consent = true`, i.e. the buyer ticked a box of its own
+        | for it. `always`: every address (the behaviour up to 1.24). `never`:
+        | none, whatever else is on.
+        */
+        'capture' => env('STATAMIC_PAYMENTS_ABANDONED_CAPTURE', 'consent'),
 
         /*
         | The reminder itself. Its own switch, because announcing an abandoned
@@ -456,6 +628,30 @@ return [
         | `portal.method_note` in the translations.
         */
         'mandate_verification_cent' => 1,
+
+        /*
+        | How the portal looks and what the buyer may do there.
+        |
+        | `logo_url`: a web address or a path on this site; shown above every
+        | portal page. `logo_alt` is its text, defaulting to the app name.
+        | `greeting`: a few words of your own above the list (plain text).
+        |
+        | `self_cancel`: whether the portal shows the cancel button. A product
+        | overrides it with `portal_cancel` in its catalogue entry. Off does not
+        | switch off the right: the cancellation without login (below) stays
+        | open, and the portal points there.
+        |
+        | `allow_pause`, `allow_switch`: whether the buyer may pause, or move to
+        | another product, from the portal. Off by default. A product overrides
+        | the first with `pausable`; the second only offers what the product
+        | lists under `switch_to`.
+        */
+        'logo_url' => env('STATAMIC_PAYMENTS_PORTAL_LOGO'),
+        'logo_alt' => null,
+        'greeting' => null,
+        'self_cancel' => true,
+        'allow_pause' => false,
+        'allow_switch' => false,
     ],
 
     /*

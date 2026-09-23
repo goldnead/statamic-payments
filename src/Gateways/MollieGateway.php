@@ -3,13 +3,16 @@
 namespace Goldnead\StatamicPayments\Gateways;
 
 use Goldnead\StatamicPayments\Contracts\MandateGateway;
+use Goldnead\StatamicPayments\Contracts\ReadsCardExpiry;
 use Goldnead\StatamicPayments\Contracts\SubscriptionGateway;
+use Goldnead\StatamicPayments\Contracts\UpdatesSubscriptions;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\CheckoutSession;
 use Goldnead\StatamicPayments\Support\Money;
 use Goldnead\StatamicPayments\Support\RemotePayment;
 use Goldnead\StatamicPayments\Support\RemoteSubscription;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Mollie\Api\Exceptions\ApiException;
 use Mollie\Api\MollieApiClient;
@@ -29,7 +32,7 @@ use Mollie\Api\Types\SequenceType;
  * uninstallable on half the versions its own composer.json promises. Found by
  * installing it, not by reading it.
  */
-class MollieGateway implements MandateGateway, SubscriptionGateway
+class MollieGateway implements MandateGateway, ReadsCardExpiry, SubscriptionGateway, UpdatesSubscriptions
 {
     public function supportsFollowUp(): bool
     {
@@ -122,6 +125,63 @@ class MollieGateway implements MandateGateway, SubscriptionGateway
     public function fetchSubscription(string $customerReference, string $subscriptionId): RemoteSubscription
     {
         return $this->asRemote($this->client->subscriptions->getForId($customerReference, $subscriptionId));
+    }
+
+    /**
+     * A new amount from the next charge on. Mollie prorates nothing itself,
+     * which is what `Contracts\UpdatesSubscriptions` asks for anyway.
+     */
+    public function updateSubscription(string $customerReference, string $subscriptionId, array $payload): RemoteSubscription
+    {
+        $subscription = $this->client->subscriptions->update($customerReference, $subscriptionId, array_filter([
+            'amount' => $payload['amount'] ?? null,
+            'description' => $payload['description'] ?? null,
+        ], fn ($v) => $v !== null));
+
+        if ($subscription === null) {
+            // The SDK answers null only when Mollie sent no body back. The
+            // agreement's state is then asked for rather than assumed.
+            return $this->fetchSubscription($customerReference, $subscriptionId);
+        }
+
+        return $this->asRemote($subscription);
+    }
+
+    /**
+     * The expiry of the newest valid credit card mandate.
+     *
+     * Mollie records it on the mandate (`details.cardExpiryDate`), for cards
+     * only. A customer charged by SEPA direct debit has no expiry and gets null.
+     */
+    public function cardExpiry(string $customerReference): ?Carbon
+    {
+        $newest = null;
+
+        foreach ($this->client->mandates->pageForId($customerReference) as $mandate) {
+            if (($mandate->status ?? null) !== 'valid' || ($mandate->method ?? null) !== 'creditcard') {
+                continue;
+            }
+
+            $expiry = $mandate->details->cardExpiryDate ?? null;
+
+            if (! is_string($expiry) || $expiry === '') {
+                continue;
+            }
+
+            try {
+                $date = Carbon::parse($expiry)->startOfDay();
+            } catch (\Throwable) {
+                continue;
+            }
+
+            $created = (string) ($mandate->createdAt ?? '');
+
+            if ($newest === null || strcmp($created, $newest[0]) > 0) {
+                $newest = [$created, $date];
+            }
+        }
+
+        return $newest[1] ?? null;
     }
 
     protected function asRemote(mixed $subscription): RemoteSubscription

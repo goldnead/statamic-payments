@@ -27,6 +27,9 @@ class AbandonedCheckoutTest extends TestCase
 
         config()->set('statamic-payments.abandoned.enabled', true);
         config()->set('statamic-payments.abandoned.after_minutes', 60);
+        // The mechanism under test, without the consent gate in front of it.
+        // The gate has its own tests at the end of this file.
+        config()->set('statamic-payments.abandoned.capture', 'always');
     }
 
     private function zahlung(array $werte = []): Payment
@@ -204,5 +207,44 @@ class AbandonedCheckoutTest extends TestCase
         $this->artisan('payments:sweep-abandoned')
             ->expectsOutputToContain('Ein abgebrochener Checkout gemeldet.')
             ->assertSuccessful();
+    }
+
+    // ------------------------------------------------ P8: the address itself
+
+    #[Test]
+    public function by_default_only_a_checkout_with_its_own_consent_is_announced(): void
+    {
+        config()->set('statamic-payments.abandoned.capture', null);
+        Event::fake([CheckoutAbandoned::class]);
+
+        $ohne = $this->zahlung();
+        $mit = $this->zahlung(['meta' => ['reminder_consent' => true]]);
+
+        $this->assertSame(1, app(Abandonment::class)->sweep());
+
+        Event::assertDispatched(CheckoutAbandoned::class, fn ($e) => $e->payment->is($mit));
+        $this->assertNull($ohne->fresh()->abandoned_notified_at);
+    }
+
+    #[Test]
+    public function never_announces_nothing_even_with_consent(): void
+    {
+        config()->set('statamic-payments.abandoned.capture', 'never');
+        Event::fake([CheckoutAbandoned::class]);
+
+        $this->zahlung(['meta' => ['reminder_consent' => true]]);
+
+        $this->assertSame(0, app(Abandonment::class)->sweep());
+        Event::assertNotDispatched(CheckoutAbandoned::class);
+    }
+
+    #[Test]
+    public function the_difference_of_a_switch_is_not_an_abandoned_checkout(): void
+    {
+        Event::fake([CheckoutAbandoned::class]);
+
+        $this->zahlung(['meta' => ['proration' => true, 'subscription_change' => ['subscription_id' => 1]]]);
+
+        $this->assertSame(0, app(Abandonment::class)->sweep());
     }
 }

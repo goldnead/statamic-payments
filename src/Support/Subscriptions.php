@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Contracts\SubscriptionGateway;
 use Goldnead\StatamicPayments\Events\SubscriptionCancelled;
 use Goldnead\StatamicPayments\Events\SubscriptionEnded;
+use Goldnead\StatamicPayments\Events\SubscriptionPlanCompleted;
 use Goldnead\StatamicPayments\Events\SubscriptionRenewed;
 use Goldnead\StatamicPayments\Events\SubscriptionStarted;
 use Goldnead\StatamicPayments\Events\SubscriptionStartFailed;
@@ -74,6 +75,48 @@ class Subscriptions
     protected function agreementGateway(Payment|Subscription $row): ?SubscriptionGateway
     {
         return $this->asAgreementGateway(app(Gateways::class)->for($row));
+    }
+
+    /**
+     * The provider behind one agreement, for the classes that change a running
+     * one — pausing, switching, replacing. Same rule as everywhere here: read
+     * off the row, never off the binding.
+     */
+    public function gatewayFor(Subscription $subscription): ?SubscriptionGateway
+    {
+        return $this->agreementGateway($subscription);
+    }
+
+    /**
+     * What a provider is handed to start this agreement (again), from a date.
+     *
+     * Used where an agreement is re-created rather than created: resuming a
+     * pause on Mollie, and switching the amount on a provider that cannot
+     * change one in place. The amount, rhythm and remaining count come from the
+     * row, the name from the catalogue, the webhook from configuration — the
+     * same four sources as a first start.
+     *
+     * @param  array<string, mixed>  $metadata
+     * @return array<string, mixed>
+     */
+    public function agreementPayload(Subscription $subscription, Carbon $startDate, array $metadata = []): array
+    {
+        $catalogue = $this->catalogue->find($subscription->product) ?? [];
+
+        return array_filter([
+            'amount' => [
+                'currency' => $subscription->currency,
+                'value' => $subscription->amount(),
+            ],
+            'interval' => $subscription->interval,
+            'times' => $subscription->remaining(),
+            'startDate' => $startDate->toDateString(),
+            'description' => (string) ($catalogue['name'] ?? $subscription->product),
+            'webhookUrl' => config('statamic-payments.webhook_url') === false
+                ? null
+                : (config('statamic-payments.webhook_url') ?: route('statamic-payments.webhook')),
+            'metadata' => $metadata + ['product' => $subscription->product],
+        ], fn ($v) => $v !== null);
     }
 
     /** The site's own provider, for an agreement that has no row to read it off yet. */
@@ -350,7 +393,7 @@ class Subscriptions
      * be created is a thing to fix rather than a reason to unwind a sale and
      * make the provider redeliver.
      */
-    public function startFromPayment(Payment $payment): ?Subscription
+    public function startFromPayment(Payment $payment, int $deferDays = 0): ?Subscription
     {
         $intent = $payment->meta['subscription_intent'] ?? null;
 
@@ -405,6 +448,12 @@ class Subscriptions
         $startsAt = $plan['trial_days'] > 0
             ? Carbon::now()->addDays($plan['trial_days'])
             : $this->afterOneInterval($plan['interval']);
+
+        // Credit from an agreement this purchase replaces, as later start.
+        // See {@see SubscriptionReplacements}.
+        if ($deferDays > 0) {
+            $startsAt = $startsAt->copy()->addDays($deferDays);
+        }
 
         // A plan of N instalments has already taken one. Asking the provider
         // for N more would charge N+1 in total, which is the kind of arithmetic
@@ -611,6 +660,7 @@ class Subscriptions
             ])->save();
 
             SubscriptionEnded::dispatch($subscription->fresh() ?? $subscription);
+            SubscriptionPlanCompleted::dispatch($subscription->fresh() ?? $subscription, $payment);
         }
 
         return $subscription;
@@ -627,6 +677,14 @@ class Subscriptions
     public function refresh(Subscription $subscription): ?Subscription
     {
         if (Payment::isPlaceholderProviderId($subscription->provider_id)) {
+            return null;
+        }
+
+        // A pause is this package's state before it is the provider's. On
+        // Mollie the agreement the row still names has been ended on purpose,
+        // and writing that answer down would turn a pause into a cancellation.
+        // Resuming is `SubscriptionPauses::resume()`'s job, not a refresh's.
+        if ($subscription->isPaused()) {
             return null;
         }
 
@@ -659,6 +717,13 @@ class Subscriptions
 
         if (! $remote->isLive() && ! $subscription->ended_at) {
             $update['ended_at'] = now();
+        }
+
+        // And the other way round: an agreement the provider runs again (a
+        // suspension lifted by a new card) has no end date. Left standing, a
+        // report that reads `ended_at` counts it as churned while it charges.
+        if ($remote->isLive() && $subscription->ended_at !== null) {
+            $update['ended_at'] = null;
         }
 
         $subscription->forceFill($update)->save();
@@ -722,6 +787,9 @@ class Subscriptions
             'cancelled_at' => $subscription->cancelled_at ?? now(),
             'ended_at' => $subscription->ended_at ?? now(),
             'next_payment_at' => null,
+            // A paused agreement can be ended for good; its date to resume
+            // must not outlive it.
+            'resumes_at' => null,
         ])->save();
 
         if (! $schonBeendet) {

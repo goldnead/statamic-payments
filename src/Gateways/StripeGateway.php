@@ -2,7 +2,10 @@
 
 namespace Goldnead\StatamicPayments\Gateways;
 
+use Goldnead\StatamicPayments\Contracts\PausesSubscriptions;
+use Goldnead\StatamicPayments\Contracts\ReadsCardExpiry;
 use Goldnead\StatamicPayments\Contracts\SubscriptionGateway;
+use Goldnead\StatamicPayments\Contracts\UpdatesSubscriptions;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\CheckoutSession;
@@ -45,7 +48,7 @@ use RuntimeException;
  * **Which payment methods appear is the Stripe account's business**, exactly as
  * it is Mollie's. No method picker, no wallet buttons, nothing set here.
  */
-class StripeGateway implements SubscriptionGateway
+class StripeGateway implements PausesSubscriptions, ReadsCardExpiry, SubscriptionGateway, UpdatesSubscriptions
 {
     /**
      * Pinned, so Stripe changing its default shape is a decision and not a Tuesday.
@@ -496,6 +499,95 @@ class StripeGateway implements SubscriptionGateway
         return $this->asRemoteSubscription($subscription);
     }
 
+    // ------------------------------------------------ pause, change, card
+
+    /**
+     * Pause the charges, keeping the agreement.
+     *
+     * `pause_collection[behavior]=void`: Stripe keeps the billing rhythm and
+     * voids every invoice of the pause, so nothing is owed for it afterwards and
+     * the next real charge falls on the old billing day. `resumes_at` lets
+     * Stripe end the pause by itself; this package also resumes on that date
+     * from its own schedule, and resuming twice is harmless.
+     */
+    public function pauseSubscription(string $customerReference, string $subscriptionId, ?Carbon $resumesAt = null): RemoteSubscription
+    {
+        $this->guardOwnership($customerReference, $subscriptionId);
+
+        $form = ['pause_collection' => ['behavior' => 'void']];
+
+        if ($resumesAt !== null) {
+            $form['pause_collection']['resumes_at'] = $resumesAt->getTimestamp();
+        }
+
+        return $this->asRemoteSubscription($this->post("/v1/subscriptions/{$subscriptionId}", $form));
+    }
+
+    /** An empty `pause_collection` is Stripe's way of removing it. */
+    public function resumeSubscription(string $customerReference, string $subscriptionId): RemoteSubscription
+    {
+        $this->guardOwnership($customerReference, $subscriptionId);
+
+        return $this->asRemoteSubscription($this->post("/v1/subscriptions/{$subscriptionId}", ['pause_collection' => '']));
+    }
+
+    /**
+     * A new price on the agreement's one item, from the next invoice on.
+     *
+     * `proration_behavior=none`, as at creation: the difference for the current
+     * period is this package's to charge (see `Contracts\UpdatesSubscriptions`),
+     * and Stripe inventing a second one would bill the buyer twice.
+     */
+    public function updateSubscription(string $customerReference, string $subscriptionId, array $payload): RemoteSubscription
+    {
+        $current = $this->get("/v1/subscriptions/{$subscriptionId}");
+        $this->assertBelongsTo($current, $customerReference, $subscriptionId);
+
+        $item = $current['items']['data'][0] ?? null;
+        $itemId = is_array($item) ? ($item['id'] ?? null) : null;
+        $recurring = is_array($item) ? ($item['price']['recurring'] ?? null) : null;
+
+        if (! is_string($itemId) || $itemId === '' || ! is_array($recurring)) {
+            throw new RuntimeException("statamic-payments: the Stripe agreement [{$subscriptionId}] has no item to put a new price on.");
+        }
+
+        $currency = $this->currency($payload);
+
+        return $this->asRemoteSubscription($this->post("/v1/subscriptions/{$subscriptionId}", [
+            'items' => [[
+                'id' => $itemId,
+                'price_data' => [
+                    'currency' => $currency,
+                    'unit_amount' => $this->minorUnits($payload['amount']['value'] ?? '0', $currency),
+                    'recurring' => [
+                        'interval' => (string) ($recurring['interval'] ?? 'month'),
+                        'interval_count' => (int) ($recurring['interval_count'] ?? 1),
+                    ],
+                    'product' => $this->productFor($this->description($payload)),
+                ],
+            ]],
+            'proration_behavior' => 'none',
+        ]));
+    }
+
+    /**
+     * The expiry of the newest card on file for this customer.
+     *
+     * The newest, because a buyer who replaced the card in the portal has two
+     * and the old one is the one about to expire. Stripe lists newest first.
+     */
+    public function cardExpiry(string $customerReference): ?Carbon
+    {
+        $list = $this->get("/v1/customers/{$customerReference}/payment_methods", ['type' => 'card', 'limit' => 1]);
+        $card = $list['data'][0]['card'] ?? null;
+
+        if (! is_array($card) || ! is_numeric($card['exp_month'] ?? null) || ! is_numeric($card['exp_year'] ?? null)) {
+            return null;
+        }
+
+        return Carbon::create((int) $card['exp_year'], (int) $card['exp_month'], 1)?->endOfMonth()->startOfDay();
+    }
+
     /**
      * That this agreement is this customer's.
      *
@@ -524,10 +616,17 @@ class StripeGateway implements SubscriptionGateway
     protected function asRemoteSubscription(array $subscription): RemoteSubscription
     {
         $next = $subscription['current_period_end'] ?? null;
+        $status = $this->normaliseSubscription((string) ($subscription['status'] ?? ''));
+
+        // A paused collection leaves Stripe's status on `active`. Read as
+        // running, a paused agreement would look charged on every screen.
+        if ($status === Subscription::STATUS_ACTIVE && ! empty($subscription['pause_collection'])) {
+            $status = Subscription::STATUS_PAUSED;
+        }
 
         return new RemoteSubscription(
             providerId: (string) ($subscription['id'] ?? ''),
-            status: $this->normaliseSubscription((string) ($subscription['status'] ?? '')),
+            status: $status,
             nextPaymentAt: is_int($next) || (is_string($next) && $next !== '')
                 ? Carbon::createFromTimestampUTC((int) $next)->toIso8601String()
                 : null,

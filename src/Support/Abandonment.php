@@ -83,7 +83,12 @@ class Abandonment
      */
     protected function ohneAboRaten($abfrage): void
     {
+        $this->nurMitErfassung($abfrage);
+
         $abfrage
+            // Die Differenz eines Abo-Wechsels ist keine Kasse, die jemand
+            // verlassen hat, sondern eine Abbuchung ohne Käufer davor.
+            ->whereNull('meta->subscription_change')
             ->whereNull('meta->cycle_of')
             ->whereNotIn('id', Subscription::query()
                 ->whereNotNull('dunning_payment_id')
@@ -155,6 +160,41 @@ class Abandonment
                 ->whereNull('recovered_at')
                 ->update(['recovered_at' => $jetzt, 'updated_at' => $jetzt]);
         }
+    }
+
+    /**
+     * Ob die Adresse eines unfertigen Kaufs überhaupt verwendet werden darf (P8).
+     *
+     * Getrennt davon, ob Abbrüche gemeldet werden: `abandoned.capture` sagt, ob
+     * eine vor dem Kauf eingegebene Adresse für Abbruch-Mails und Abbruch-
+     * Ereignisse in Frage kommt.
+     *
+     * - `consent` (Vorgabe): nur, wo der Käufer dem zugestimmt hat. Die Kasse
+     *   gibt das als `meta.reminder_consent = true` mit (ein eigener Haken,
+     *   nicht die Kaufzustimmung).
+     * - `always`: jede Adresse, wie bis 1.24.
+     * - `never`: keine.
+     *
+     * Die Vorgabe ist die zurückhaltende, weil eine Adresse, die für einen Kauf
+     * eingegeben wurde, nicht für Werbung eingegeben wurde. Keine Rechtsberatung.
+     *
+     * @param  Builder<Payment>  $abfrage
+     */
+    protected function nurMitErfassung($abfrage): void
+    {
+        match ($this->capture()) {
+            'always' => null,
+            'never' => $abfrage->whereRaw('1 = 0'),
+            default => $abfrage->where('meta->reminder_consent', true),
+        };
+    }
+
+    /** @return 'consent'|'always'|'never' */
+    public function capture(): string
+    {
+        $wert = (string) config('statamic-payments.abandoned.capture', 'consent');
+
+        return in_array($wert, ['consent', 'always', 'never'], true) ? $wert : 'consent';
     }
 
     public function enabled(): bool

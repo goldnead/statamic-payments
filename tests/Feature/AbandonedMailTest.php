@@ -38,6 +38,7 @@ class AbandonedMailTest extends TestCase
 
         config([
             'statamic-payments.abandoned.enabled' => true,
+            'statamic-payments.abandoned.capture' => 'always',
             'statamic-payments.abandoned.after_minutes' => 60,
             'statamic-payments.abandoned.mail.enabled' => true,
             'statamic-payments.products' => [

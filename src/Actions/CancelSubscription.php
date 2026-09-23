@@ -53,7 +53,9 @@ class CancelSubscription extends Action
         // Only what the provider will still charge. Offering it on a finished
         // payment plan means a call the provider answers with a shrug and a
         // failure nobody caused.
-        return $item instanceof Subscription && $item->isLive();
+        // Paused counts: a paused membership is one somebody may want to end
+        // for good.
+        return $item instanceof Subscription && $item->isRunning();
     }
 
     public function authorize($user, $item)

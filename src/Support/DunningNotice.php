@@ -8,6 +8,7 @@ use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\PaymentCommunication;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Portal\LinkTokenizer;
+use Illuminate\Mail\Mailable;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
@@ -222,7 +223,7 @@ class DunningNotice
      * passed on as one — that means a brand with no verified sender, which is
      * a configuration fault somebody has to fix rather than one to paper over.
      */
-    protected function deliver(Subscription $subscription, string $email, DunningMail $mailable): bool
+    public function deliver(Subscription $subscription, string $email, Mailable $mailable): bool
     {
         $class = self::BRAND_MAILER;
         $mailer = null;

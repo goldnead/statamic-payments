@@ -40,6 +40,16 @@ return [
             'description' => 'Jemand hat eine Kasse begonnen und nicht abgeschlossen. Ob eine Erinnerung rausgehen darf, ist eine Einwilligungsfrage — die Adresse wurde gegeben, um einen Kauf abzuschließen, nicht um Werbung zu bekommen. Klären Sie das, bevor Sie hier etwas einschalten.',
         ],
 
+        'protection' => [
+            'title' => 'Kassenschutz',
+            'description' => 'Sperrliste, Bremse gegen Kartentests und Captcha. Geprüft wird, bevor eine Zahlung angelegt oder der Anbieter gerufen wird. Wer abgelehnt wird, erfährt nicht, an welcher Regel.',
+        ],
+
+        'subscriptions' => [
+            'title' => 'Abos',
+            'description' => 'Pausieren, Wechseln und Erinnerungen. Die Erinnerungen brauchen den Planer (payments:reminders), eine Pause mit Datum ebenso (payments:resume-paused).',
+        ],
+
         'bridges' => [
             'title' => 'Angeschlossene Addons',
             'description' => 'Was dieses Addon an Geschwister weitergibt. Alles aus, solange es niemand einschaltet: zwei Addons, die aus unabhängigen Gründen installiert sind, dürfen nicht anfangen, Kundendaten auszutauschen, weil sie im selben vendor-Verzeichnis liegen.',
@@ -184,6 +194,122 @@ return [
             'description' => 'Gibt dem Käufer die Berechtigung, die am Produkt unter `grants` steht. Aus für jedes Produkt ohne `grants`.',
         ],
 
+        // Danke-Seite (P5)
+        'thanks_expires_minutes' => [
+            'label' => 'Danke-Seite gilt (Minuten)',
+            'description' => 'Leer oder 0: die Danke-Seite läuft nicht ab. Mit einer Zahl kommt der Käufer über einen signierten Link zurück, der so lange gilt. Die Seite fragt mit {{ payments:thanks }}, ob der Besuch noch gültig ist.',
+        ],
+        'thanks_expired_url' => [
+            'label' => 'Seite für abgelaufene Links',
+            'description' => 'Wohin ein abgelaufener Link führt. Leer: eine kurze Seite des Addons mit dem Weg ins Kundenkonto.',
+        ],
+
+        // Kassenschutz (P7)
+        'protection_blocklist_emails' => [
+            'label' => 'Gesperrte E-Mail-Adressen',
+            'description' => 'Eine Adresse je Zeile. Groß- und Kleinschreibung spielt keine Rolle.',
+        ],
+        'protection_blocklist_domains' => [
+            'label' => 'Gesperrte Domains',
+            'description' => 'Eine Domain je Zeile, zum Beispiel wegwerf.example. Gilt auch für ihre Subdomains.',
+        ],
+        'protection_blocklist_ips' => [
+            'label' => 'Gesperrte IP-Adressen',
+            'description' => 'Eine Adresse oder ein Bereich je Zeile, zum Beispiel 203.0.113.0/24.',
+        ],
+        'protection_rate_limit_enabled' => [
+            'label' => 'Bremse gegen Kartentests',
+            'description' => 'Begrenzt, wie viele Kassen in zehn Minuten von einer IP-Adresse und für eine E-Mail-Adresse beginnen dürfen.',
+        ],
+        'protection_rate_limit_per_ip' => [
+            'label' => 'Kassen je IP-Adresse',
+            'description' => 'Großzügig lassen: ein Chor, der in der Probe über ein WLAN Karten kauft, ist eine einzige IP-Adresse.',
+        ],
+        'protection_rate_limit_per_email' => [
+            'label' => 'Kassen je E-Mail-Adresse',
+            'description' => '',
+        ],
+        'protection_captcha_provider' => [
+            'label' => 'Captcha',
+            'description' => 'Eingeschaltet muss jedes Kassenformular {{ payments:captcha }} enthalten, sonst wird die Kasse abgelehnt. Der geheime Schlüssel steht in der .env (STATAMIC_PAYMENTS_CAPTCHA_SECRET).',
+        ],
+        'protection_captcha_site_key' => [
+            'label' => 'Seitenschlüssel des Captchas',
+            'description' => 'Der öffentliche Schlüssel aus dem Konto bei Cloudflare oder hCaptcha.',
+        ],
+
+        // Abos (P1, P2, P3)
+        'pause_access' => [
+            'label' => 'Zugang während einer Pause',
+            'description' => 'Was mit dem Zugang passiert, solange ein Abo pausiert ist.',
+        ],
+        'switch_min_proration_cent' => [
+            'label' => 'Kleinste anteilige Abbuchung (Cent)',
+            'description' => 'Darunter wird beim Wechsel zu einem teureren Abo für den laufenden Zeitraum nichts nachberechnet.',
+        ],
+        'reminders_upcoming_enabled' => [
+            'label' => 'Erinnerung vor der Abbuchung',
+            'description' => 'Eine Mail einige Tage vor jeder Abbuchung. Braucht den Planer: payments:reminders, täglich.',
+        ],
+        'reminders_upcoming_days' => [
+            'label' => 'Tage vor der Abbuchung',
+            'description' => '',
+        ],
+        'reminders_card_expiring_enabled' => [
+            'label' => 'Erinnerung vor Kartenablauf',
+            'description' => 'Eine Mail, bevor die hinterlegte Karte abläuft, mit dem Link zum Kartentausch. Nur bei Karten; eine SEPA-Lastschrift läuft nicht ab.',
+        ],
+        'reminders_card_expiring_days' => [
+            'label' => 'Tage vor Kartenablauf',
+            'description' => '',
+        ],
+        'reminders_card_expired_enabled' => [
+            'label' => 'Hinweis bei abgelaufener Karte',
+            'description' => 'Eine Mail, sobald die hinterlegte Karte abgelaufen ist.',
+        ],
+
+        // Kundenkonto (P1, P2, P9)
+        'portal_logo_url' => [
+            'label' => 'Logo',
+            'description' => 'Adresse eines Bildes (https://…) oder ein Pfad auf dieser Seite. Steht über jeder Seite des Kundenkontos.',
+        ],
+        'portal_logo_alt' => [
+            'label' => 'Alternativtext des Logos',
+            'description' => 'Leer: der Name der Anwendung.',
+        ],
+        'portal_greeting' => [
+            'label' => 'Begrüßung',
+            'description' => 'Ein paar eigene Worte über der Liste der Bestellungen. Reiner Text.',
+        ],
+        'portal_self_cancel' => [
+            'label' => 'Kündigen im Kundenkonto',
+            'description' => 'Aus: das Kundenkonto zeigt statt des Kündigungsknopfs den Weg zur Kündigungsseite ohne Anmeldung. Die gesetzliche Kündigung bleibt immer möglich. Ein Produkt kann das mit portal_cancel selbst bestimmen.',
+        ],
+        'portal_allow_pause' => [
+            'label' => 'Pausieren im Kundenkonto',
+            'description' => 'Käufer dürfen ihr Abo selbst pausieren und fortsetzen. Ein Produkt kann das mit pausable selbst bestimmen.',
+        ],
+        'portal_allow_switch' => [
+            'label' => 'Wechseln im Kundenkonto',
+            'description' => 'Käufer dürfen zu den Produkten wechseln, die am Produkt unter switch_to stehen.',
+        ],
+
+        // Abgebrochene Kassen (P8)
+        'abandoned_capture' => [
+            'label' => 'Adresse für Abbruch-Mails verwenden',
+            'description' => 'Getrennt von den Schaltern darüber. Mit Einwilligung heißt: nur wenn die Kasse meta.reminder_consent mitgegeben hat, also ein eigener Haken gesetzt wurde.',
+        ],
+
+    ],
+
+    'options' => [
+        'captcha_off' => 'Aus',
+        'pause_period_end' => 'Bis zum Ende des bezahlten Zeitraums, dann ruht er',
+        'pause_immediate' => 'Ruht sofort',
+        'pause_keep' => 'Bleibt während der Pause',
+        'capture_consent' => 'Nur mit Einwilligung',
+        'capture_always' => 'Immer',
+        'capture_never' => 'Nie',
     ],
 
 ];

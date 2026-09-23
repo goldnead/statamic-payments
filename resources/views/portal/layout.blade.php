@@ -48,6 +48,7 @@
         table.lines td { padding: 11px 0; border-bottom: 1px solid #e4e4e7; vertical-align: top; }
         table.lines tr.total td { font-weight: 600; border-bottom: 0; }
 
+        .block + .notice { margin-top: 16px; }
         .notice { background: #f4f4f5; border-radius: 8px; padding: 10px 12px; font-size: 14px; color: #3f3f46; margin: 0 0 16px; line-height: 1.5; }
         .warn { background: #fffbeb; border-radius: 8px; padding: 10px 12px; font-size: 14px; color: #854d0e; line-height: 1.5; margin: 16px 0 0; }
         .errors { margin: 0 0 16px; padding: 10px 12px; background: #fef2f2; border-radius: 8px; color: #b91c1c; font-size: 14px; line-height: 1.5; }
@@ -71,6 +72,9 @@
         .ticket { margin: 20px 0 0; padding: 16px; background: #f4f4f5; border-radius: 8px; text-align: center; }
         .ticket .id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 24px; letter-spacing: .08em; color: #18181b; }
         .ticket .when { font-size: 14px; color: #52525b; margin: 6px 0 0; }
+        .logo { margin: 0 0 24px; }
+        .logo img { display: block; max-height: 48px; max-width: 200px; width: auto; height: auto; }
+        .greeting { margin-top: 16px; }
         a { color: #18181b; }
         .foot { margin-top: 28px; font-size: 12px; color: #a1a1aa; line-height: 1.6; }
         .foot form { display: inline; }
@@ -79,6 +83,13 @@
 </head>
 <body>
     <div class="card">
+        @php($logo = trim((string) config('statamic-payments.portal.logo_url', '')))
+        @if ($logo !== '' && (str_starts_with($logo, 'https://') || str_starts_with($logo, 'http://') || (str_starts_with($logo, '/') && ! str_starts_with($logo, '//'))))
+            {{-- The shop's logo (portal.logo_url). Only a web address or a path
+                 on this site: a `javascript:` or `data:` value never reaches src. --}}
+            <div class="logo"><img src="{{ $logo }}" alt="{{ config('statamic-payments.portal.logo_alt') ?: config('app.name') }}"></div>
+        @endif
+
         @if (session('statamic-payments.portal.error'))
             <p class="errors" role="alert">{{ session('statamic-payments.portal.error') }}</p>
         @endif

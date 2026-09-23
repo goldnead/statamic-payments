@@ -55,6 +55,10 @@ class CancellationController extends PortalController
 
         abort_if($subscription === null, 404);
 
+        if (! $this->mayCancelHere($subscription)) {
+            return $this->elsewhere();
+        }
+
         return response()->view('statamic-payments::portal.cancel', [
             'subscription' => $subscription,
             'name' => $this->nameOf($subscription->product),
@@ -74,11 +78,15 @@ class CancellationController extends PortalController
 
         abort_if($subscription === null, 404);
 
+        if (! $this->mayCancelHere($subscription)) {
+            return $this->elsewhere();
+        }
+
         // Already over. Not an error and not a second cancellation: the buyer
         // pressed a button on a page they had open while a webhook or a second
         // tab did the same thing. They are shown the confirmation they were
         // going to be shown.
-        if (! $subscription->isLive()) {
+        if (! $subscription->isRunning()) {
             return $this->done($subscription, $access->email, $this->momentOf($subscription), false);
         }
 
@@ -94,6 +102,16 @@ class CancellationController extends PortalController
         $subscription = $subscription->fresh() ?? $subscription;
 
         return $this->done($subscription, $access->email, $this->momentOf($subscription), true);
+    }
+
+    /**
+     * The portal button is off for this product: the statutory way stays open.
+     */
+    protected function elsewhere()
+    {
+        return redirect()
+            ->route('statamic-payments.portal.show')
+            ->with('statamic-payments.portal.error', __('statamic-payments::subscriptions.portal_cancel_elsewhere'));
     }
 
     /**

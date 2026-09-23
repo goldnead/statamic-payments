@@ -1,5 +1,81 @@
 # Changelog
 
+## Unreleased
+
+Built from the ThriveCart walk-through of 23.09.2026 (features P1 to P9). Needs
+`php artisan migrate`: one migration, additive (`subscriptions.paused_at`, `resumes_at`,
+`card_expires_at`, `card_checked_at`, table `payment_subscription_notices`).
+
+### Added: pause and resume a subscription (P1)
+
+New status `paused`, next to `suspended` (which stays the provider's word for failed charges).
+From the Control Panel as row actions *Pausieren* (optional resume date) and *Fortsetzen*, and from
+the customer portal where `portal.allow_pause` or the product's `pausable` allows it. Stripe pauses
+natively (`pause_collection`, invoices voided); Mollie has no pause, so the running agreement is
+ended and a new one is started on resume, against the same mandate. On both nothing is charged
+during the pause or at the moment of resuming; the next charge falls on the old billing day.
+Payment plans, trials and agreements in dunning are not paused. `pause.access` decides the access
+during a pause: `period_end` (default), `immediate` or `keep`. A pause with a date is resumed by
+`payments:resume-paused` (schedule it daily). A paused agreement can still be cancelled; `refresh()`
+leaves it alone and now also clears a stale `ended_at` once the provider runs an agreement again.
+
+### Added: switch between products with pro-rata difference (P2)
+
+Row action *Wechseln* and, where `portal.allow_switch` is on, a portal page offering what the
+product lists under `switch_to`. Between recurring products with the same rhythm and currency.
+Upgrade: at once, the difference for the rest of the period charged as its own payment
+(`meta.proration = true`, `meta.subscription_change`), then the new amount from the next charge.
+Downgrade: from the next charge, nothing charged or refunded. Neither provider prorates on its own
+side (`proration_behavior=none` on Stripe). Below `switch.min_proration_cent` nothing is charged.
+
+### Added: reminders before a charge and before a card expires (P3)
+
+`payments:reminders` (schedule daily): a mail `reminders.upcoming.days` before each charge, one
+`reminders.card_expiring.days` before the card on file expires and one once it has expired. Each
+kind off by default, each claimed once per agreement and date in `payment_subscription_notices`.
+Card expiry from Stripe (newest card) and Mollie (valid credit card mandate), cached on the row. A
+product with `reminders: false` gets none. Mails through email-templates when a slug is set,
+otherwise built-in Blade, with the portal link to replace the card.
+
+### Added: a purchase can end another subscription (P4)
+
+`replaces: [handles]` on a product ends the buyer's running agreements of those products when it
+is paid (matched by address). What is left of the old period moves the new agreement's first charge
+back (`replaces_credit`, on by default). Event `SubscriptionReplaced`.
+
+### Added: the thank-you link can expire (P5)
+
+`thanks.expires_minutes`: the provider sends the buyer back through a signed link that forwards to
+the thank-you page and notes the visit; `{{ payments:thanks }}{{ if valid }}…` on the page. A late
+link gets a short page or `thanks.expired_url`. Off by default.
+
+### Added: events (P6)
+
+`SubscriptionPaused`, `SubscriptionResumed`, `SubscriptionPaymentUpcoming`,
+`SubscriptionCardExpiring`, `SubscriptionCardExpired`, `SubscriptionAttemptFailed` (with `attempt`,
+counted since the last paid cycle), `SubscriptionPlanCompleted`, `SubscriptionChanged`,
+`SubscriptionReplaced`, `CheckoutBlocked`.
+
+### Added: checkout protection (P7)
+
+Block list for addresses, domains and IP ranges, a rate limit per IP and per address (on by
+default, 30 and 10 per 10 minutes), and an optional captcha (Cloudflare Turnstile or hCaptcha,
+`{{ payments:captcha }}` in the form, secret in `.env`). Checked in `Checkout::start()` before
+anything is written. Editable on the settings screen.
+
+### Changed: abandoned-checkout addresses need their own consent by default (P8)
+
+`abandoned.capture` (`consent` by default, `always`, `never`). With `consent` only a checkout that
+carries `meta.reminder_consent = true` is announced as abandoned and reminded. **Behaviour change**
+for sites that had `abandoned.enabled` on: set `abandoned.capture` to `always` for the old
+behaviour, or pass the consent from the checkout form.
+
+### Added: portal logo, greeting and cancellation per product (P9)
+
+`portal.logo_url`, `portal.logo_alt`, `portal.greeting`, `portal.self_cancel` (and `portal_cancel`
+per product). With the portal button off the page points to the statutory cancellation without
+login, which stays untouched.
+
 ## 1.24.5 — 2026-09-22
 
 ### Fixed: static analysis had been red in CI for a week

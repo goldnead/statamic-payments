@@ -192,7 +192,7 @@ class ListedSubscription extends JsonResource
                     ]).(isset($switch['proration_failed_payment_id'])
                         // The difference was charged and did not arrive: the
                         // new product runs unpaid for the rest of the period.
-                        ? ' '.__('statamic-payments::subscriptions.history_proration_failed')
+                        ? '. '.__('statamic-payments::subscriptions.history_proration_failed')
                         : ''),
                 'failed' => isset($switch['proration_failed_payment_id']),
             ];

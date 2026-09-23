@@ -26,7 +26,7 @@ namespace Goldnead\StatamicPayments\Support;
 final class DiscountSplit
 {
     /**
-     * @param  list<array{amount_cent: int, quantity: int}>  $lines
+     * @param  list<array{amount_cent: int, quantity: int, setup_fee?: bool}>  $lines
      * @return list<int> the discount per line, in the order given, summing exactly to $discountCent
      */
     public static function across(array $lines, int $discountCent): array
@@ -37,8 +37,13 @@ final class DiscountSplit
             return array_fill(0, $anzahl, 0);
         }
 
+        // Eine Einrichtungsgebühr (`setup_fee` am Katalogeintrag, statamic-offers
+        // O2) trägt keinen Anteil: ein Gutschein gilt dem Angebot, nicht der
+        // Gebühr, die es einrichtet.
         $werte = array_map(
-            fn (array $l) => max(0, (int) $l['amount_cent']) * max(0, (int) $l['quantity']),
+            fn (array $l) => ($l['setup_fee'] ?? false) === true
+                ? 0
+                : max(0, (int) $l['amount_cent']) * max(0, (int) $l['quantity']),
             $lines,
         );
 

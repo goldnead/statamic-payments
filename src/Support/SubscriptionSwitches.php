@@ -228,6 +228,15 @@ class SubscriptionSwitches
         }
 
         $meta = $snapshot->meta ?? [];
+
+        // A coupon applied to the product that was left (statamic-offers O6).
+        // The provider now charges the full new price; the row says the same,
+        // so `chargedCent()` and `recordCycle()` do not keep taking it off.
+        if (is_array($meta['coupon'] ?? null) && ! isset($meta['coupon']['ended'])) {
+            $meta['coupon']['current_discount_cent'] = 0;
+            $meta['coupon']['ended'] = 'switch';
+        }
+
         $meta['switches'] = array_values(array_merge((array) ($meta['switches'] ?? []), [[
             'from' => $preview['from'],
             'to' => $to,

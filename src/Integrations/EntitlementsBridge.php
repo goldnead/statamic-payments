@@ -82,7 +82,11 @@ class EntitlementsBridge
         // and paid for is as bought as the thing they came for; granting only
         // the first would take money for the second and hand over nothing.
         foreach ($payment->items as $item) {
-            $this->grantLine($payment, $item->product, $subject);
+            $frozen = is_array($item->meta) && array_key_exists('grants', $item->meta)
+                ? (array) $item->meta['grants']
+                : null;
+
+            $this->grantLine($payment, $item->product, $subject, $frozen);
         }
 
         // A payment written before line items existed, or by something that
@@ -609,7 +613,7 @@ class EntitlementsBridge
         return [$startsAt, $expiresAt];
     }
 
-    protected function grantLine(Payment $payment, ?string $handle, string $subject): void
+    protected function grantLine(Payment $payment, ?string $handle, string $subject, ?array $frozen = null): void
     {
         if (! is_string($handle) || $handle === '') {
             return;
@@ -619,6 +623,16 @@ class EntitlementsBridge
         // product, and an offer's handle only resolves there.
         $product = app(Catalogue::class)->find($handle);
         $slugs = self::slugList(is_array($product) ? ($product['grants'] ?? null) : null);
+
+        // **What the checkout froze, when the catalogue has nothing to say
+        // any more.** An offer with a quantity limit stops resolving the
+        // moment its last piece is paid — and the webhook for exactly that
+        // payment arrives afterwards. The buyer of the last seat paid and got
+        // nothing (report-offers.md, 23.09.2026). The line knew all along what
+        // it grants; it is written onto it at the till.
+        if ($slugs === [] && $frozen !== null) {
+            $slugs = self::slugList($frozen);
+        }
 
         // Je Slug ein eigener Versuch. Scheitert der zweite von drei, sind die
         // anderen beiden trotzdem vergeben — und die Zeile im Log nennt genau
@@ -630,15 +644,7 @@ class EntitlementsBridge
 
         foreach ($slugs as $slug) {
             try {
-                $facade = self::FACADE;
-                $facade::grant(
-                    $this->subjectFor($subject),
-                    $slug,
-                    'statamic-payments',
-                    (string) $payment->provider_id,
-                    startsAt: $startsAt,
-                    expiresAt: $expiresAt,
-                );
+                $this->grantSlug($payment, $slug, $subject, $startsAt, $expiresAt);
             } catch (Throwable $e) {
                 Log::error('statamic-payments: the entitlements bridge failed; the payment stands, the grant does not.', [
                     'payment_id' => $payment->getKey(),
@@ -648,5 +654,19 @@ class EntitlementsBridge
                 ]);
             }
         }
+    }
+
+    /** One grant, through the sibling. */
+    protected function grantSlug(Payment $payment, string $slug, string $subject, ?Carbon $startsAt, ?Carbon $expiresAt): void
+    {
+        $facade = self::FACADE;
+        $facade::grant(
+            $this->subjectFor($subject),
+            $slug,
+            'statamic-payments',
+            (string) $payment->provider_id,
+            startsAt: $startsAt,
+            expiresAt: $expiresAt,
+        );
     }
 }

@@ -55,6 +55,13 @@ class Checkout
             return null;
         }
 
+        // Die Länderregel eines Angebots, ein zweites Mal (statamic-offers O3).
+        // Die Kasse des Angebots prüft sie schon; hier steht sie noch einmal,
+        // weil nicht jede Kasse die des Angebots ist.
+        if (! self::soldIn(array_map(fn (array $l) => (string) $l['handle'], $lines), $buyer['country'] ?? null)) {
+            return null;
+        }
+
         // The door (P7): block list, rate limit, captcha. Before the row and
         // before the provider, so a refused attempt costs nothing and leaves
         // nothing behind. Null to the caller, the reason to the log.
@@ -69,7 +76,16 @@ class Checkout
         // built by server-side code. A discount bigger than the basket would
         // otherwise become a negative amount, which providers reject with an
         // error the buyer sees and nobody can explain.
-        $off = $discount?->against($gross) ?? 0;
+        //
+        // Gemessen an dem, was ein Gutschein mindern darf: eine
+        // Einrichtungsgebühr (`setup_fee`) gehört nicht dazu, siehe
+        // {@see DiscountSplit}. Sonst stünde auf der Zahlung ein Rabatt, den
+        // keine Zeile trägt.
+        $discountable = array_sum(array_map(
+            fn (array $l) => ($l['setup_fee'] ?? false) === true ? 0 : $l['amount_cent'] * $l['quantity'],
+            $lines,
+        ));
+        $off = $discount?->against($discountable) ?? 0;
         $total = $gross - $off;
 
         $currency = $primary['currency'];
@@ -136,6 +152,13 @@ class Checkout
                     'quantity' => $line['quantity'],
                     'discount_cent' => $anteile[$index] ?? 0,
                     'kind' => $index === 0 ? PaymentItem::KIND_PRIMARY : PaymentItem::KIND_BUMP,
+                    // Was diese Zeile freischaltet, eingefroren wie Name und
+                    // Preis. Ein Angebot mit Stückzahl löst nach dem letzten
+                    // bezahlten Stück im Katalog nicht mehr auf; der Webhook
+                    // dieser Zahlung kommt danach. Siehe EntitlementsBridge.
+                    'meta' => array_key_exists('grants', $line) && $line['grants'] !== null
+                        ? ['grants' => $line['grants']]
+                        : null,
                 ]);
             }
 
@@ -219,6 +242,43 @@ class Checkout
         ])->save();
 
         return new CheckoutResult($payment->fresh() ?? $payment, $session->checkoutUrl);
+    }
+
+    /** Die Klasse, die statamic-offers für seine Regeln anbietet. Nur als Name. */
+    public const OFFERS = '\Goldnead\StatamicOffers\Offers';
+
+    /**
+     * Ob jedes dieser Produkte in diesem Land verkauft werden darf.
+     *
+     * Fragt statamic-offers, wo es installiert ist (`Offers::availableIn()`),
+     * und sagt sonst ja: ohne das Geschwister gibt es keine Länderregel. Ein
+     * Nein wird geloggt, mit Produkt und Land, und nicht erklärt; die Seite
+     * des Angebots sagt es dem Käufer selbst.
+     *
+     * @param  list<string>  $handles
+     */
+    public static function soldIn(array $handles, mixed $country): bool
+    {
+        $offers = self::OFFERS;
+
+        if (! class_exists($offers) || ! is_callable([$offers, 'availableIn'])) {
+            return true;
+        }
+
+        $land = is_string($country) && trim($country) !== '' ? strtoupper(trim($country)) : null;
+
+        foreach ($handles as $handle) {
+            if (! $offers::availableIn($handle, $land)) {
+                Log::info('statamic-payments: an offer was refused at the checkout because it is not sold in this country.', [
+                    'product' => $handle,
+                    'country' => $land,
+                ]);
+
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

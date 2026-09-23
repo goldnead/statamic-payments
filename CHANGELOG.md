@@ -70,6 +70,26 @@ carries `meta.reminder_consent = true` is announced as abandoned and reminded. *
 for sites that had `abandoned.enabled` on: set `abandoned.capture` to `always` for the old
 behaviour, or pass the consent from the checkout form.
 
+### Added: what statamic-offers hands over (O6, O3, O2)
+
+- **Coupon on later charges (O6).** `meta.coupon` of the first payment (as statamic-offers
+  freezes it) is kept on the agreement. The provider is asked to charge the lowered amount for as
+  long as `Offers::recurringDiscountCent()` says the coupon covers a charge, and the full price
+  from the charge after that (`UpdatesSubscriptions` on Stripe and Mollie, otherwise ended and
+  started again on the same day). Each cycle carries `discount_code` and `discount_cent`;
+  `amount_cent` on the agreement stays the price. A pause keeps the coupon, a switch ends it.
+- **Country rule, second check (O3).** `Checkout::start()` and `Subscriptions::start()` ask
+  `Offers::availableIn()` for every line and refuse the checkout where it says no.
+- **Setup fee (O2).** A line whose catalogue entry says `setup_fee: true` takes no share of a
+  coupon, and the coupon is measured against the lines it may reduce.
+
+### Fixed: the buyer of the last piece of a limited offer got no access
+
+An offer with a quantity limit stops resolving in the catalogue once its last piece is paid, and
+the webhook for that very payment arrives afterwards. The entitlements bridge found no `grants`
+and granted nothing. The checkout now freezes `grants` onto the payment line (`meta.grants`), and
+the bridge falls back to it when the catalogue has nothing to say.
+
 ### Added: portal logo, greeting and cancellation per product (P9)
 
 `portal.logo_url`, `portal.logo_alt`, `portal.greeting`, `portal.self_cancel` (and `portal_cancel`

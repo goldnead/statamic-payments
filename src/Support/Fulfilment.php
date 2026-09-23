@@ -434,6 +434,8 @@ class Fulfilment
             return null;
         }
 
+        $abzug = (int) $subscription->amount_cent - $subscription->chargedCent();
+
         $payment = Payment::create([
             'provider' => $this->gateway->provider(),
             'provider_id' => $providerId,
@@ -443,7 +445,12 @@ class Fulfilment
             // sichtbar. Sie gehört der Marke, die das Abo verkauft hat.
             'brand_id' => $subscription->brand_id,
             'product' => $subscription->product,
-            'amount_cent' => $subscription->amount_cent,
+            // What the provider charged this cycle: the price minus a running
+            // coupon (statamic-offers O6). The coupon is named on the row the
+            // same way a checkout names one.
+            'amount_cent' => $subscription->chargedCent(),
+            'discount_code' => $abzug > 0 ? (string) data_get($subscription->meta, 'coupon.code') : null,
+            'discount_cent' => $abzug > 0 ? $abzug : null,
             'currency' => $subscription->currency,
             'status' => Payment::STATUS_OPEN,
             'email' => $remote->email ?: $subscription->email,
@@ -493,6 +500,7 @@ class Fulfilment
             ),
             'amount_cent' => $subscription->amount_cent,
             'quantity' => 1,
+            'discount_cent' => $abzug,
             'kind' => PaymentItem::KIND_PRIMARY,
         ]);
 

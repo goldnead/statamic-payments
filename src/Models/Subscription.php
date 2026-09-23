@@ -208,6 +208,27 @@ class Subscription extends Model
         return Money::format($this->amount_cent, $this->currency);
     }
 
+    /**
+     * What the provider charges per cycle right now: the price minus a running
+     * coupon (statamic-offers O6, `meta.coupon.current_discount_cent`).
+     *
+     * `amount_cent` stays the price of the agreement, so a report of what it is
+     * worth does not shrink for the months a coupon covers; this is what each
+     * of those months actually costs.
+     */
+    public function chargedCent(): int
+    {
+        $off = is_array($this->meta) ? (int) data_get($this->meta, 'coupon.current_discount_cent', 0) : 0;
+
+        return max(0, (int) $this->amount_cent - max(0, $off));
+    }
+
+    /** {@see chargedCent()} as the provider's decimal string. */
+    public function chargedAmount(): string
+    {
+        return Money::format($this->chargedCent(), $this->currency);
+    }
+
     /** What the whole agreement comes to, when it has an end. */
     public function totalCent(): ?int
     {

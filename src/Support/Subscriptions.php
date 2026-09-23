@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Support;
 
 use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Contracts\SubscriptionGateway;
+use Goldnead\StatamicPayments\Contracts\UpdatesSubscriptions;
 use Goldnead\StatamicPayments\Events\SubscriptionCancelled;
 use Goldnead\StatamicPayments\Events\SubscriptionEnded;
 use Goldnead\StatamicPayments\Events\SubscriptionPlanCompleted;
@@ -104,9 +105,11 @@ class Subscriptions
         $catalogue = $this->catalogue->find($subscription->product) ?? [];
 
         return array_filter([
+            // What is charged now, a running coupon included: a pause on Mollie
+            // must not quietly end a discount the buyer was promised.
             'amount' => [
                 'currency' => $subscription->currency,
-                'value' => $subscription->amount(),
+                'value' => $subscription->chargedAmount(),
             ],
             'interval' => $subscription->interval,
             'times' => $subscription->remaining(),
@@ -309,6 +312,12 @@ class Subscriptions
             return null;
         }
 
+        // Die Länderregel (statamic-offers O3), vor allem anderen. Die Kasse
+        // fragt sie auch, hier ist sie billiger: noch ist nichts vorbereitet.
+        if (! Checkout::soldIn(array_map('strval', (array) $products), $buyer['country'] ?? null)) {
+            return null;
+        }
+
         // **Eine Regel, nicht zwei.** Was `canStart()` sagt, gilt hier auch:
         // stünde die Prüfung zweimal getippt da, hätte die eine Stelle die
         // Zahlarten irgendwann gelernt und die andere nicht — und die
@@ -505,13 +514,17 @@ class Subscriptions
             'starts_at' => $startsAt,
             'email' => $payment->email,
             'name' => $payment->name,
+            'meta' => $this->couponFor($payment, (int) ($catalogue['amount_cent'] ?? $payment->amount_cent), (string) ($catalogue['currency'] ?? $payment->currency)),
         ]);
 
         try {
             $remote = $gateway->createSubscription($payment->customer_reference, array_filter([
+                // A running coupon (statamic-offers O6) lowers what the
+                // provider charges from the start; `recordCycle()` puts the
+                // full price back once it runs out.
                 'amount' => [
                     'currency' => $subscription->currency,
-                    'value' => $subscription->amount(),
+                    'value' => $subscription->chargedAmount(),
                 ],
                 'interval' => $subscription->interval,
                 'times' => $remaining,
@@ -556,6 +569,146 @@ class Subscriptions
         }
 
         return $subscription;
+    }
+
+    /**
+     * The coupon of the first payment, as the agreement keeps it (O6).
+     *
+     * `meta.coupon` on the first payment is what statamic-offers froze at the
+     * till (`Basket::paymentMeta()`): code, percent or amount_cent, currency,
+     * duration (`once`, `repeating`, `forever`) and cycles. The agreement keeps
+     * those terms plus what it takes off the next charge right now. The first
+     * charge the provider makes is payment number 2.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function couponFor(Payment $payment, int $amountCent, string $currency): ?array
+    {
+        $terms = is_array($payment->meta) ? ($payment->meta['coupon'] ?? null) : null;
+
+        if (! is_array($terms) || ! is_string($terms['code'] ?? null)) {
+            return null;
+        }
+
+        return ['coupon' => $terms + [
+            'current_discount_cent' => self::recurringDiscount($terms, 2, $amountCent, $currency),
+        ]];
+    }
+
+    /**
+     * What a coupon takes off payment number `$n` of an agreement.
+     *
+     * Asked of statamic-offers where it is installed, which owns the rule;
+     * nothing without it. `class_exists` on the name and `method_exists` on the
+     * class, the family's rule for an optional sibling.
+     *
+     * @param  array<string, mixed>  $terms
+     */
+    public static function recurringDiscount(array $terms, int $n, int $amountCent, ?string $currency): int
+    {
+        $offers = Checkout::OFFERS;
+
+        if (! class_exists($offers) || ! is_callable([$offers, 'recurringDiscountCent'])) {
+            return 0;
+        }
+
+        try {
+            return max(0, (int) $offers::recurringDiscountCent($terms, $n, $amountCent, $currency));
+        } catch (Throwable $e) {
+            Log::warning('statamic-payments: statamic-offers would not say what a coupon takes off a later charge; the full price applies.', [
+                'code' => $terms['code'] ?? null,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return 0;
+        }
+    }
+
+    /**
+     * After a cycle: does the next charge cost something else than this one?
+     *
+     * A repeating coupon runs out; then the provider has to be told the full
+     * price. Through `UpdatesSubscriptions` where it can (Stripe, Mollie), and
+     * otherwise by ending the agreement and starting it again on the same day.
+     * A refusal is logged and tried again after the next cycle; it never
+     * undoes the cycle that was just paid.
+     */
+    protected function followCoupon(Subscription $subscription): void
+    {
+        $coupon = is_array($subscription->meta) ? ($subscription->meta['coupon'] ?? null) : null;
+
+        if (! is_array($coupon) || isset($coupon['ended']) || ! $subscription->isLive()) {
+            return;
+        }
+
+        $next = ((int) $subscription->times_charged) + 2;
+        $off = self::recurringDiscount($coupon, $next, (int) $subscription->amount_cent, $subscription->currency);
+
+        if ($off === (int) ($coupon['current_discount_cent'] ?? 0)) {
+            return;
+        }
+
+        $target = max(0, (int) $subscription->amount_cent - $off);
+
+        if (! $this->reprice($subscription, $target)) {
+            Log::error('statamic-payments: a coupon ran out and the provider would not take the new amount; it is tried again after the next charge.', [
+                'subscription_id' => $subscription->getKey(),
+                'amount_cent' => $target,
+            ]);
+
+            return;
+        }
+
+        $meta = ($subscription->fresh() ?? $subscription)->meta ?? [];
+        $meta['coupon']['current_discount_cent'] = $off;
+        $subscription->forceFill(['meta' => $meta])->save();
+    }
+
+    /**
+     * Charge this agreement a different amount from its next cycle on.
+     */
+    public function reprice(Subscription $subscription, int $cent): bool
+    {
+        $gateway = $this->agreementGateway($subscription);
+
+        if ($gateway === null) {
+            return false;
+        }
+
+        $catalogue = $this->catalogue->find($subscription->product) ?? [];
+        $amount = ['currency' => $subscription->currency, 'value' => Money::format($cent, $subscription->currency)];
+
+        try {
+            if ($gateway instanceof UpdatesSubscriptions) {
+                $gateway->updateSubscription($subscription->customer_reference, $subscription->provider_id, [
+                    'amount' => $amount,
+                    'description' => (string) ($catalogue['name'] ?? $subscription->product),
+                ]);
+
+                return true;
+            }
+
+            $old = $gateway->cancelSubscription($subscription->customer_reference, $subscription->provider_id);
+
+            if ($old->isLive()) {
+                return false;
+            }
+
+            $payload = $this->agreementPayload($subscription, $subscription->next_payment_at ?? Carbon::tomorrow());
+            $payload['amount'] = $amount;
+            $remote = $gateway->createSubscription($subscription->customer_reference, $payload);
+
+            $subscription->forceFill(['provider_id' => $remote->providerId])->save();
+
+            return true;
+        } catch (Throwable $e) {
+            Log::warning('statamic-payments: the provider would not change the amount of an agreement.', [
+                'subscription_id' => $subscription->getKey(),
+                'exception' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
     }
 
     /**
@@ -648,6 +801,11 @@ class Subscriptions
         $subscription = $subscription->fresh() ?? $subscription;
 
         SubscriptionRenewed::dispatch($subscription, $payment);
+
+        // The next charge may cost something else: a coupon that covered this
+        // one may not cover the next (statamic-offers O6).
+        $this->followCoupon($subscription);
+        $subscription = $subscription->fresh() ?? $subscription;
 
         // A plan that has paid its last instalment is over. The provider stops
         // by itself; this is about the row saying so, so a report does not show

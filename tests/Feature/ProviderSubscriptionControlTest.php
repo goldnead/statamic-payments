@@ -144,13 +144,20 @@ class ProviderSubscriptionControlTest extends TestCase
 
     // ------------------------------------------------------------------ Mollie
 
-    protected function mollie(array $responses): array
+    /**
+     * The SDK's mock client exists from v3 on; composer also allows v2, which
+     * CI's prefer-lowest job installs. Asked first in each test, before the
+     * `MockResponse` arguments are built.
+     */
+    protected function needsMollieMocks(): void
     {
-        // The SDK's mock client exists from v3 on; composer also allows v2,
-        // which CI's prefer-lowest job installs.
         if (! class_exists(MockMollieClient::class)) {
             $this->markTestSkipped('mollie/mollie-api-php v2 has no mock client');
         }
+    }
+
+    protected function mollie(array $responses): array
+    {
 
         $client = new MockMollieClient($responses);
 
@@ -170,6 +177,8 @@ class ProviderSubscriptionControlTest extends TestCase
     #[Test]
     public function mollie_updates_the_amount_in_place(): void
     {
+        $this->needsMollieMocks();
+
         [$gateway, $client] = $this->mollie([
             UpdateSubscriptionRequest::class => MockResponse::ok($this->mollieSubscription('29.00')),
         ]);
@@ -190,6 +199,8 @@ class ProviderSubscriptionControlTest extends TestCase
     #[Test]
     public function mollie_reads_the_expiry_of_the_newest_valid_card_mandate(): void
     {
+        $this->needsMollieMocks();
+
         [$gateway] = $this->mollie([
             GetPaginatedMandateRequest::class => MockResponse::ok([
                 'count' => 3,

@@ -2,8 +2,8 @@
 
 namespace Goldnead\StatamicPayments\Integrations\WebhookManager;
 
-use Goldnead\StatamicPayments\Support\Brands;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -95,8 +95,28 @@ class WebhookManagerBridge
      */
     protected function dispatch(string $moment, object $event): void
     {
+        $handle = WebhookPayload::PREFIX.$moment;
+
+        // After the commit, never inside it. Several moments fire inside a
+        // transaction (the dunning run ends a subscription in one). Handed over
+        // there, a queued delivery can run before the rows exist, a sync one
+        // holds the write lock for an HTTP round trip, and a rollback leaves
+        // the receiver told about something that never happened. Outside a
+        // transaction this runs at once; on a rollback it never runs.
         try {
-            $trigger = app('webhook-manager')->triggers()->get(WebhookPayload::PREFIX.$moment);
+            DB::afterCommit(fn () => $this->handOver($handle, $event));
+        } catch (Throwable $e) {
+            Log::warning('statamic-payments: a payment moment could not be handed to the webhook manager.', [
+                'trigger' => $handle,
+                'exception' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    protected function handOver(string $handle, object $event): void
+    {
+        try {
+            $trigger = app('webhook-manager')->triggers()->get($handle);
 
             if ($trigger === null) {
                 return;
@@ -104,13 +124,14 @@ class WebhookManagerBridge
 
             $detected = self::DETECTED;
 
-            Brands::runFor(
+            WebhookPayload::runForBrand(
                 WebhookPayload::brandIdOf($event),
                 fn () => event(new $detected($trigger->build($event))),
+                $handle,
             );
         } catch (Throwable $e) {
             Log::warning('statamic-payments: a payment moment could not be handed to the webhook manager.', [
-                'trigger' => WebhookPayload::PREFIX.$moment,
+                'trigger' => $handle,
                 'exception' => $e->getMessage(),
             ]);
         }

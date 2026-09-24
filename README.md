@@ -846,13 +846,25 @@ addon's mail log).
 **Brand.** Each moment is delivered in the brand of the row it is about, not the brand that happens
 to be current: a provider webhook and the reminder command have none. A multi-brand install
 therefore sends a brand's renewals through that brand's hooks only. `CheckoutBlocked` has no row
-and uses the visitor's brand.
+and uses the visitor's brand. A row naming a brand that cannot be set (deleted, a bad backfill) is
+**not delivered** and logged as a warning, rather than sent through the current brand's hooks.
+
+**After the commit.** A moment that fires inside a database transaction is handed to the manager
+once that transaction commits, and never if it rolls back.
+
+**Duplicates and order.** `event_id` is the same every time the same moment is told again (a
+redelivered provider webhook, a repeated command), so a receiver can drop the second one.
+`occurred_at` is when the moment happened according to the rows (`paid_at`, `refunded_at`,
+`ended_at` …), not when it was sent. **Order is not guaranteed:** `affiliates.commission_reversed`
+can reach a receiver before `payments.refunded`, and a delivery that is retried arrives late. Sort
+by `occurred_at`, deduplicate by `event_id`.
 
 ### What every body carries
 
 ```json
 {
   "event": "payments.subscription_paused",
+  "event_id": "5f1c0e4a9d2b7c3e8a1f6b0d4c9e2a7f3b8d1c6e",
   "occurred_at": "2026-09-24T10:12:03+02:00",
   "brand": { "id": 2, "handle": "nordlicht" },
   "subject_type": "subscription",

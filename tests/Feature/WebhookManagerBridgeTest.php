@@ -158,10 +158,12 @@ class WebhookManagerBridgeTest extends TestCase
 
         $this->assertSame('payments', $detected->trigger->sourceType);
         $this->assertSame((string) $payment->id, $detected->trigger->sourceReference);
-        $this->assertSame(['event', 'occurred_at', 'brand', 'subject_type', 'subject_id', 'payment'], array_keys($body));
+        $this->assertSame(['event', 'event_id', 'occurred_at', 'brand', 'subject_type', 'subject_id', 'payment'], array_keys($body));
         $this->assertSame(['payment', $payment->id], [$body['subject_type'], $body['subject_id']]);
         $this->assertSame('payments.paid', $body['event']);
-        $this->assertSame('2026-09-24T10:00:00+00:00', $body['occurred_at']);
+        // The moment's time is when it was paid, not when the listener ran.
+        $this->assertSame('2026-09-24T09:58:00+00:00', $body['occurred_at']);
+        $this->assertSame('2026-09-24T09:58:00+00:00', $detected->trigger->eventAt?->format(\DATE_ATOM));
         $this->assertSame(['id' => 1, 'handle' => 'default'], $body['brand']);
 
         $this->assertSame([
@@ -325,13 +327,91 @@ class WebhookManagerBridgeTest extends TestCase
             $body = WebhookPayload::build($moment, $event);
 
             $this->assertSame(
-                array_merge(['event', 'occurred_at', 'brand', 'subject_type', 'subject_id'], $keys),
+                array_merge(['event', 'event_id', 'occurred_at', 'brand', 'subject_type', 'subject_id'], $keys),
                 array_keys($body),
                 "Body of [{$moment}]",
             );
             $this->assertStringNotContainsString('danke-token-geheim', json_encode($body), "Body of [{$moment}]");
             $this->assertStringNotContainsString('cst_kunde', json_encode($body), "Body of [{$moment}]");
         }
+    }
+
+    #[Test]
+    public function a_row_naming_a_brand_that_cannot_be_set_is_not_delivered_through_the_current_one(): void
+    {
+        config(['brand-context.multi_brand' => true]);
+        Queue::fake();
+
+        $default = (int) DB::table('brands')->where('is_default', true)->value('id');
+        app('brand-context')->runFor($default, fn () => $this->hook('payments.paid', 'current-hook'));
+
+        $heard = [];
+        Event::listen(TriggerDetected::class, function (TriggerDetected $d) use (&$heard) {
+            $heard[] = $d->trigger->triggerHandle;
+        });
+
+        // The request runs as the default brand; the row names brand 99,
+        // which does not exist.
+        app('brand-context')->runFor($default, fn () => PaymentPaid::dispatch($this->payment(['brand_id' => 99])));
+
+        $this->assertSame([], $heard);
+        $this->assertSame(0, DB::table('webhook_deliveries')->count());
+        Queue::assertNotPushed(ProcessOutboundDeliveryJob::class);
+    }
+
+    #[Test]
+    public function a_moment_inside_a_transaction_goes_out_after_the_commit_and_never_after_a_rollback(): void
+    {
+        $heard = [];
+        Event::listen(TriggerDetected::class, function (TriggerDetected $d) use (&$heard) {
+            $heard[] = $d->trigger->triggerHandle;
+        });
+
+        try {
+            DB::transaction(function () {
+                PaymentPaid::dispatch($this->payment());
+
+                throw new \RuntimeException('rolled back');
+            });
+        } catch (\RuntimeException) {
+        }
+
+        $this->assertSame([], $heard, 'A rolled back moment reached the manager.');
+
+        DB::transaction(function () use (&$heard) {
+            PaymentPaid::dispatch($this->payment(['provider_id' => 'tr_zwei']));
+
+            $this->assertSame([], $heard, 'Handed over while the transaction was still open.');
+        });
+
+        $this->assertSame(['payments.paid'], $heard);
+    }
+
+    #[Test]
+    public function the_same_moment_told_twice_carries_the_same_event_id(): void
+    {
+        Event::fake([TriggerDetected::class]);
+
+        $payment = $this->payment();
+        PaymentPaid::dispatch($payment);
+        Carbon::setTestNow('2026-09-24 10:05:00');
+        PaymentPaid::dispatch($payment->fresh());
+        PaymentRefunded::dispatch($payment->fresh(), 500, false);
+        $payment->forceFill(['refunded_cent' => 500, 'refunded_at' => now()])->save();
+        PaymentRefunded::dispatch($payment->fresh(), 500, false);
+        $payment->forceFill(['refunded_cent' => 1000, 'refunded_at' => now()->addMinute()])->save();
+        PaymentRefunded::dispatch($payment->fresh(), 500, false);
+
+        $ids = collect(Event::dispatched(TriggerDetected::class))
+            ->map(fn ($call) => [$call[0]->trigger->triggerHandle, $call[0]->trigger->payload['event_id']]);
+        $paid = $ids->where(0, 'payments.paid')->pluck(1)->all();
+        $refunds = $ids->where(0, 'payments.refunded')->pluck(1)->all();
+
+        $this->assertCount(2, $paid);
+        $this->assertSame($paid[0], $paid[1]);
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{40}$/', $paid[0]);
+        $this->assertCount(3, array_unique($refunds), 'Two partial refunds and the moment before must stay apart.');
+        $this->assertNotContains($paid[0], $refunds);
     }
 
     #[Test]

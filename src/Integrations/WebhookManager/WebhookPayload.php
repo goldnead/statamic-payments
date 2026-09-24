@@ -25,6 +25,8 @@ use Goldnead\StatamicPayments\Events\SubscriptionStartFailed;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\PaymentItem;
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\Brands;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -107,7 +109,8 @@ final class WebhookPayload
 
         return array_merge([
             'event' => self::PREFIX.$moment,
-            'occurred_at' => self::date($at ?? now()),
+            'event_id' => self::eventId($moment, $event),
+            'occurred_at' => self::date($at ?? self::occurredAt($event)),
             'brand' => self::brand(self::brandIdOf($event)),
             // Named outright, because the manager's own guess reads every
             // `payments.*` reference as a payment id, and a paused
@@ -116,6 +119,128 @@ final class WebhookPayload
             'subject_type' => $type,
             'subject_id' => $id,
         ], self::body($event));
+    }
+
+    /**
+     * The same id for the same moment, however often it is dispatched.
+     *
+     * A provider redelivers its webhook, a command runs twice, a listener
+     * retries: the event fires again and the receiver hears it again. This id
+     * lets it throw the second one away. It is built from what makes the moment
+     * this moment and not another one (the object, and the time or reference
+     * that separates it from the next moment of the same kind on that object),
+     * never from the clock at dispatch.
+     *
+     * `sha1(handle|part|part…)`, 40 hex characters, the same recipe in every
+     * addon of the suite.
+     */
+    public static function eventId(string $moment, object $event): string
+    {
+        return sha1(implode('|', array_map(
+            fn ($part) => $part instanceof \DateTimeInterface ? $part->format(\DATE_ATOM) : (string) $part,
+            [self::PREFIX.$moment, ...self::momentParts($event)],
+        )));
+    }
+
+    /**
+     * When the moment happened, as the rows record it. Null only where no row
+     * records it; the caller then falls back to the clock.
+     */
+    public static function occurredAt(object $event): \DateTimeInterface
+    {
+        foreach (self::momentParts($event) as $part) {
+            if ($part instanceof \DateTimeInterface) {
+                return $part;
+            }
+        }
+
+        return now();
+    }
+
+    /**
+     * What separates this moment from every other moment of the same kind.
+     *
+     * The first date in the list is also the moment's time. A blocked checkout
+     * has no row and no date of its own: reason, address and network within
+     * the same minute count as one moment.
+     *
+     * @return list<mixed>
+     */
+    private static function momentParts(object $event): array
+    {
+        $sub = fn (Subscription $s): string => 'subscription:'.$s->getKey();
+        $pay = fn (Payment $p): string => 'payment:'.$p->getKey();
+
+        return match (true) {
+            $event instanceof PaymentPaid => [$pay($event->payment), $event->payment->paid_at ?? 'paid'],
+            $event instanceof PaymentFailed => [$pay($event->payment), $event->payment->updated_at ?? $event->payment->status],
+            // Cumulative after this refund: two partial refunds of the same
+            // size are two moments, the same refund told twice is one.
+            $event instanceof PaymentRefunded => [$pay($event->payment), $event->payment->refunded_at ?? '', 'refunded:'.(int) $event->payment->refunded_cent, 'amount:'.$event->amountCent],
+            $event instanceof PaymentChargedBack => [$pay($event->payment), $event->payment->charged_back_at ?? '', 'chargeback:'.$event->reference],
+            $event instanceof CheckoutAbandoned => [$pay($event->payment), $event->payment->abandoned_notified_at ?? $event->payment->created_at ?? ''],
+            $event instanceof CheckoutBlocked => [now()->startOfMinute(), $event->reason, (string) $event->email, (string) self::ipPrefix($event->ip)],
+            $event instanceof SubscriptionStartFailed => [$pay($event->payment), $event->payment->updated_at ?? '', 'reason:'.$event->reason],
+            $event instanceof SubscriptionStarted,
+            $event instanceof SubscriptionRenewed,
+            $event instanceof SubscriptionPlanCompleted => [$sub($event->subscription), $event->payment->paid_at ?? '', $pay($event->payment)],
+            $event instanceof SubscriptionAttemptFailed => [$sub($event->subscription), $event->payment->updated_at ?? '', $pay($event->payment), 'attempt:'.$event->attempt],
+            $event instanceof SubscriptionPaymentUpcoming => [$sub($event->subscription), $event->dueAt, 'days:'.$event->daysBefore],
+            $event instanceof SubscriptionCardExpiring => [$sub($event->subscription), $event->expiresAt],
+            $event instanceof SubscriptionCardExpired => [$sub($event->subscription), $event->expiredAt],
+            $event instanceof SubscriptionPaused => [$sub($event->subscription), $event->subscription->paused_at ?? $event->subscription->updated_at ?? ''],
+            $event instanceof SubscriptionResumed => [$sub($event->subscription), $event->subscription->updated_at ?? '', 'by:'.$event->by],
+            $event instanceof SubscriptionChanged => [$sub($event->subscription), $event->subscription->updated_at ?? '', $event->fromProduct.'>'.$event->toProduct],
+            $event instanceof SubscriptionReplaced => [$sub($event->replaced), $event->replaced->ended_at ?? $event->purchase->paid_at ?? '', $pay($event->purchase)],
+            $event instanceof SubscriptionCancelled => [$sub($event->subscription), $event->subscription->cancelled_at ?? $event->subscription->updated_at ?? ''],
+            $event instanceof SubscriptionEnded => [$sub($event->subscription), $event->subscription->ended_at ?? $event->subscription->updated_at ?? ''],
+            default => [$event::class],
+        };
+    }
+
+    /**
+     * Run the hand-over as the brand the row names, or not at all.
+     *
+     * Stricter than {@see Brands::runFor()} on purpose. That one lets money
+     * work run on when the brand cannot be set; a webhook must not, because
+     * the only brand left is whatever is current, and its hooks belong to
+     * another tenant. A row naming a brand that cannot be set (deleted, a
+     * typo in a backfill) is logged and not delivered.
+     *
+     * No brand named, or no brand-context installed: runs as it is.
+     *
+     * @param  \Closure(): void  $callback
+     */
+    public static function runForBrand(?int $brand, \Closure $callback, string $handle): bool
+    {
+        if (! $brand || ! Brands::available()) {
+            $callback();
+
+            return true;
+        }
+
+        $ran = false;
+
+        try {
+            app('brand-context')->runFor($brand, function () use ($callback, &$ran): void {
+                $ran = true;
+                $callback();
+            });
+
+            return true;
+        } catch (Throwable $e) {
+            if ($ran) {
+                throw $e;
+            }
+
+            Log::warning('statamic-payments: the row names a brand that cannot be set; the webhook was not delivered rather than sent through another brand\'s hooks.', [
+                'trigger' => $handle,
+                'brand_id' => $brand,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
     }
 
     /**

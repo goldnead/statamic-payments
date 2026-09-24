@@ -13,6 +13,16 @@
   trigger is in the README. Delivered in the brand of the row, so a provider webhook or the
   reminder command reaches the right brand's hooks. `SubscriptionCycleFailed` and
   `PaymentCommunicationLogged` are not offered, as in automations.
+- Every body carries `event_id` (`sha1` of handle and what makes the moment unique: the object,
+  its own time or reference), the same when the same moment is told twice, so receivers can drop
+  duplicates. `occurred_at` and the manager's event time are the moment's own time (`paid_at`,
+  `refunded_at`, `ended_at` …), not the time of sending.
+- Handed over after the surrounding database transaction commits, never after a rollback (the
+  dunning run ends a subscription inside one).
+- A row naming a brand that cannot be set is not delivered at all (logged), instead of going out
+  through the current brand's hooks.
+- The README says it plainly: order between triggers is not guaranteed; sort by `occurred_at`,
+  deduplicate by `event_id`.
 - Config `webhook_manager.enabled` (`STATAMIC_PAYMENTS_WEBHOOK_MANAGER`, default on).
 - The coupling is optional: composer `suggest`, the manager's classes are checked by name before
   anything that implements its interface is loaded, and registration retries at the end of the

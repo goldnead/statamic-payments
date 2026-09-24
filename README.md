@@ -830,6 +830,84 @@ is why only the **first** cycle logs at `info`: it is the trial invoice, it arri
 signup, and an alarm that always rings gets ignored. Every later zero-or-less cycle logs at
 `warning` and says outright that no access was extended.
 
+## Webhooks through the Webhook Manager
+
+With `goldnead/statamic-webhook-manager` installed, every payment moment below appears there as a
+trigger ("Payments: subscription paused" / "Zahlungen: Abo pausiert"). Pick one on an outbound
+webhook and a Zapier zap, an n8n flow or a CRM hears about it. Nothing to switch on: offering a
+trigger sends nothing, data leaves only through a webhook somebody creates.
+`STATAMIC_PAYMENTS_WEBHOOK_MANAGER=false` (`statamic-payments.webhook_manager.enabled`) hides them.
+
+The handles are the ones the automations addon uses for the same moments. Two public events are
+not offered, as in automations: `SubscriptionCycleFailed` (the raw provider status behind
+`subscription_attempt_failed` and `failed`) and `PaymentCommunicationLogged` (a line in this
+addon's mail log).
+
+**Brand.** Each moment is delivered in the brand of the row it is about, not the brand that happens
+to be current: a provider webhook and the reminder command have none. A multi-brand install
+therefore sends a brand's renewals through that brand's hooks only. `CheckoutBlocked` has no row
+and uses the visitor's brand.
+
+### What every body carries
+
+```json
+{
+  "event": "payments.subscription_paused",
+  "occurred_at": "2026-09-24T10:12:03+02:00",
+  "brand": { "id": 2, "handle": "nordlicht" },
+  "subject_type": "subscription",
+  "subject_id": 41,
+  "subscription": { "...": "see below" },
+  "resumes_at": "2026-10-24T00:00:00+02:00",
+  "by": "portal"
+}
+```
+
+Money is always `*_cent` (integer, minor units) next to `currency`. Times are ISO 8601 or `null`.
+`brand` is `null` without `statamic-brand-context`. `subject_type` / `subject_id` name the object
+the moment is about, so the manager's "deliveries for this object" log files it correctly.
+
+**`payment`**: `id`, `provider`, `provider_id` (null until the provider knows the payment),
+`status`, `product`, `amount_cent`, `currency`, `discount_code`, `discount_cent`, `refunded_cent`,
+`email`, `name`, `country`, `subscription_id`, `parent_payment_id`, `items[]` (`product`, `offer`,
+`name`, `kind`, `quantity`, `amount_cent`, `discount_cent`), `attribution` (`utm_source`,
+`utm_medium`, `utm_campaign`, `utm_term`, `utm_content`), `created_at`, `paid_at`, `refunded_at`,
+`charged_back_at`.
+
+**`subscription`**: `id`, `provider`, `provider_id`, `status`, `product`, `amount_cent`, `currency`,
+`interval`, `times`, `times_charged`, `email`, `name`, `starts_at`, `next_payment_at`, `paused_at`,
+`resumes_at`, `cancelled_at`, `ended_at`, `created_at`.
+
+**Never in a body:** card digits and label, card expiry on the agreement, the mandate, the
+provider's customer reference, provider responses, `meta` (holds the thank-you token), the portal
+link, consent text, referrer and landing page (a URL can carry a token), the full IP address.
+
+| Trigger | Besides the common keys |
+|---|---|
+| `payments.paid` | `payment` |
+| `payments.failed` | `payment` |
+| `payments.refunded` | `payment`, `refund` (`amount_cent`, `currency`, `full`) |
+| `payments.charged_back` | `payment`, `chargeback` (`reference`, `amount_cent`, `currency`, `reason`) |
+| `payments.checkout_abandoned` | `payment` |
+| `payments.checkout_blocked` | `blocked` (`reason`, `email` as typed, `ip_prefix` /24 or /48) |
+| `payments.subscription_started` | `subscription`, `payment` |
+| `payments.subscription_start_failed` | `payment`, `reason` |
+| `payments.subscription_renewed` | `subscription`, `payment` |
+| `payments.subscription_attempt_failed` | `subscription`, `payment`, `attempt` |
+| `payments.subscription_payment_upcoming` | `subscription`, `due_at`, `days_before` |
+| `payments.subscription_card_expiring` | `subscription`, `expires_at` |
+| `payments.subscription_card_expired` | `subscription`, `expired_at` |
+| `payments.subscription_paused` | `subscription`, `resumes_at`, `by` (`cp`, `portal`) |
+| `payments.subscription_resumed` | `subscription`, `by` (`cp`, `portal`, `schedule`) |
+| `payments.subscription_changed` | `subscription`, `change` (`from_product`, `to_product`, `from_amount_cent`, `to_amount_cent`, `currency`, `direction` up/down/same, `proration_cent`, `immediate`, `by`), `proration_payment` |
+| `payments.subscription_replaced` | `subscription` (the ended one), `purchase` (payment), `replacement` (subscription or null), `credit` (`amount_cent`, `currency`, `days`) |
+| `payments.subscription_plan_completed` | `subscription`, `payment` |
+| `payments.subscription_cancelled` | `subscription` |
+| `payments.subscription_ended` | `subscription` |
+
+`subscription_plan_completed` and `subscription_ended` fire at the same moment for a paid-off
+instalment plan; hook one of them, not both.
+
 ## A subscription and the access it pays for
 
 With `statamic-entitlements` installed and `entitlements.enabled` on, a subscription keeps its grant

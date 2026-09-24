@@ -24,6 +24,7 @@ use Goldnead\StatamicPayments\Integrations\Insights\RefundRate;
 use Goldnead\StatamicPayments\Integrations\Insights\RevenueGross;
 use Goldnead\StatamicPayments\Integrations\Insights\RevenueNet;
 use Goldnead\StatamicPayments\Integrations\InvoiceBridge;
+use Goldnead\StatamicPayments\Integrations\WebhookManager\WebhookManagerBridge;
 use Goldnead\StatamicPayments\Support\Gateways;
 use Goldnead\StatamicPayments\Support\Invoices;
 use Goldnead\StatamicPayments\Support\Settings;
@@ -118,6 +119,47 @@ class ServiceProvider extends AddonServiceProvider
             }
 
             return $client;
+        });
+
+        // A singleton, so the bridge's "already registered" guard holds across
+        // the first attempt and the retry below.
+        $this->app->singleton(WebhookManagerBridge::class);
+    }
+
+    public function boot()
+    {
+        parent::boot();
+
+        // From boot(), not bootAddon(): Statamic runs bootAddon() inside an
+        // app->booted() callback, where a nested booted() fires at once, still
+        // before a sibling's bootAddon(). Queued here, while the app is still
+        // booting, the callback runs after every provider has had its turn.
+        $this->registerWebhookManagerBridge();
+    }
+
+    /**
+     * Offer the payment moments to the webhook manager, if it is there.
+     *
+     * Twice, the second time at the very end of the booted queue: depending on
+     * package order the first attempt can run before the manager has bound its
+     * service. The bridge bails without marking itself booted in that case and
+     * ignores every attempt after the one that worked.
+     */
+    protected function registerWebhookManagerBridge(): void
+    {
+        $boot = function (): void {
+            try {
+                $this->app->make(WebhookManagerBridge::class)->boot($this->app->make('events'));
+            } catch (Throwable $e) {
+                Log::warning('statamic-payments: the webhook manager triggers could not be registered.', [
+                    'exception' => $e->getMessage(),
+                ]);
+            }
+        };
+
+        $this->app->booted(function () use ($boot): void {
+            $boot();
+            $this->app->booted($boot);
         });
     }
 

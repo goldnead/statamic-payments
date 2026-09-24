@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased (1.26.0)
+
+### Added
+
+- **Webhook Manager triggers.** With `goldnead/statamic-webhook-manager` installed, the twenty
+  payment and subscription moments appear there as triggers under the automations handles
+  (`payments.paid` … `payments.subscription_ended`), labelled in German and English. Each body is a
+  chosen list of fields, never a model: no card data, no mandate, no provider responses, no
+  thank-you or portal token, the IP only as its /24 or /48 network. Every body carries `event`,
+  `occurred_at`, `brand` (`id`, `handle`), `subject_type` and `subject_id`; the full list per
+  trigger is in the README. Delivered in the brand of the row, so a provider webhook or the
+  reminder command reaches the right brand's hooks. `SubscriptionCycleFailed` and
+  `PaymentCommunicationLogged` are not offered, as in automations.
+- Config `webhook_manager.enabled` (`STATAMIC_PAYMENTS_WEBHOOK_MANAGER`, default on).
+- The coupling is optional: composer `suggest`, the manager's classes are checked by name before
+  anything that implements its interface is loaded, and registration retries at the end of the
+  booted queue. A new test boots the addon in its own process with the manager and brand-context
+  hidden from the autoloader.
+
 ## 1.25.0 — 2026-09-23
 
 ### Upgrading: read this first

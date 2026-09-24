@@ -525,6 +525,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Webhook Manager
+    |--------------------------------------------------------------------------
+    |
+    | Where goldnead/statamic-webhook-manager is installed, every payment and
+    | subscription moment shows up there as a trigger (`payments.paid`,
+    | `payments.subscription_paused`, ...). On by default, unlike the leadhub
+    | bridge: offering a trigger sends nothing. Data leaves only once somebody
+    | creates an outbound webhook on one of them, and that is the decision.
+    | What each body carries is listed in the README.
+    |
+    */
+
+    'webhook_manager' => [
+        'enabled' => env('STATAMIC_PAYMENTS_WEBHOOK_MANAGER', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Kundenselbstbedienung
     |--------------------------------------------------------------------------
     |

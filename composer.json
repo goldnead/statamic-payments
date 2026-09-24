@@ -55,6 +55,7 @@
     "require-dev": {
         "goldnead/statamic-brand-context": "^1.13",
         "goldnead/statamic-entitlements": "^1.1",
+        "goldnead/statamic-webhook-manager": "^2.9",
         "larastan/larastan": "^3.0",
         "laravel/pint": "^1.18",
         "orchestra/testbench": "^10.0|^11.0",
@@ -64,7 +65,8 @@
         "goldnead/statamic-brand-context": "Edit the reporting addresses, withdrawal texts and customer account defaults in the Control Panel instead of the config file. Needs >= 1.13; older versions do not apply this addon's settings at all on a single-brand install",
         "goldnead/statamic-insights": "Show revenue, refunds, orders and buyers on the Insights dashboard, split by campaign, source, product and country",
         "goldnead/statamic-invoices": "Give buyers a downloadable invoice in the customer portal; picked up automatically where it is installed",
-        "goldnead/statamic-leadhub": "Write paid purchases onto the buyer's CRM timeline and into their lifetime revenue (set statamic-payments.leadhub.enabled)"
+        "goldnead/statamic-leadhub": "Write paid purchases onto the buyer's CRM timeline and into their lifetime revenue (set statamic-payments.leadhub.enabled)",
+        "goldnead/statamic-webhook-manager": "Offer every payment and subscription moment as a trigger for outbound webhooks (Zapier, n8n, a CRM); picked up automatically where it is installed"
     },
     "config": {
         "optimize-autoloader": true,

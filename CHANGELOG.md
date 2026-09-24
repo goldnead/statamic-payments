@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased (1.26.0)
+## 1.26.0 — 2026-09-24
+
+### Upgrading
+
+- No migration, no new permission.
+- **With statamic-webhook-manager 2.10 the payment and subscription moments appear there as
+  triggers.** Nothing to do if you want that. To switch it off, set
+  `statamic-payments.webhook_manager.enabled` to `false` (env `STATAMIC_PAYMENTS_WEBHOOK_MANAGER`).
+  Without the webhook manager nothing changes.
 
 ### Added
 

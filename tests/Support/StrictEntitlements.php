@@ -96,6 +96,11 @@ class StrictEntitlements
                 return $this;
             }
 
+            public function whereIn(...$a): static
+            {
+                return $this;
+            }
+
             public function orderByDesc(...$a): static
             {
                 return $this;

@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Http\Controllers\Cp;
 
 use Goldnead\StatamicPayments\Http\Resources\Cp\SubscriptionsCollection;
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\PurchaseSubject;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
@@ -142,9 +143,18 @@ class SubscriptionsController extends CpController
         // column names come from the list below and the value stays bound.
         $escaped = addcslashes($term, '%_\\');
 
-        $query->where(function (Builder $q) use ($escaped) {
+        $subjects = PurchaseSubject::matching($term);
+
+        $query->where(function (Builder $q) use ($escaped, $subjects) {
             foreach (['email', 'name', 'product', 'provider_id'] as $column) {
                 $q->orWhereRaw($column." LIKE ? ESCAPE '\\'", ['%'.$escaped.'%']);
+            }
+
+            // Für wen das Abo läuft: ein Team findet sich über seinen Namen.
+            foreach ($subjects as $type => $ids) {
+                $q->orWhere(fn (Builder $s) => $s
+                    ->where('meta->entitlement_subject->type', $type)
+                    ->whereIn('meta->entitlement_subject->id', $ids));
             }
         });
     }

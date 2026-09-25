@@ -398,7 +398,7 @@ class Checkout
             $buyer,
             $returnUrl,
             $discount,
-            PaymentDetails::from($details)->plus(['resumed_from' => (int) $original->getKey()]),
+            PaymentDetails::from($details)->withSubjectOf($original)->plus(['resumed_from' => (int) $original->getKey()]),
         );
 
         if ($result === null) {

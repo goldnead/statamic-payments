@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Http\Resources\Cp;
 
+use Goldnead\StatamicPayments\Support\BuyerSubject;
 use Illuminate\Http\Resources\Json\ResourceCollection;
 use Statamic\CP\Column;
 use Statamic\CP\Columns;
@@ -58,6 +59,9 @@ class PaymentsCollection extends ResourceCollection
     public function toArray($request)
     {
         $this->setColumns();
+
+        // Die Namen der Teams dieser Seite, eine Abfrage je Typ statt je Zeile.
+        BuyerSubject::preload($this->collection->map(fn ($row) => $row->resource->meta ?? null));
 
         return $this->collection;
     }

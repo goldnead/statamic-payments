@@ -589,21 +589,49 @@ class Subscriptions
     }
 
     /**
-     * Schlüssel, die ein Abo in `meta` selbst führt, oder die nur der einen
-     * Zahlung gehören. Sie wandern nicht von der ersten Zahlung aufs Abo: ein
-     * `pause` aus einer fremden Notiz hielte das Abo für pausiert, ein
-     * `access` gehört dem Zugangsfenster eines einzelnen Kaufs.
+     * Was ein Abo von seiner ersten Zahlung in `meta` übernimmt. Eine
+     * Erlaubnisliste, keine Sperrliste: das Abo führt eigenen Zustand in
+     * `meta` (`pause`, `switches`, `coupon`, …), und ein gleichnamiger
+     * Schlüssel aus einer fremden Notiz hielte es sonst für pausiert.
+     *
+     * Erweitern mit {@see self::inheritMeta()}.
      */
-    public const NOT_INHERITED_META = [
-        'coupon', 'pause', 'pauses', 'switches', 'switching', 'previous_provider_ids',
-        'cancel_requested', 'cancelling_from', 'reminder_consent', 'access',
-        'subscription_change', 'switched_subscription_id', 'resumed_subscription_id',
-        'withdrawal', 'line_item_sum_cent',
+    public const INHERITED_META = [
+        'entitlement_subject', 'team_id', 'team_uuid', 'paid_by',
+        'company', 'address', 'address_fields', 'vat_id',
     ];
 
+    /** Zustand, den das Abo selbst in `meta` führt. Nie geerbt. */
+    protected const OWN_STATE_META = [
+        'coupon', 'pause', 'pauses', 'switches', 'switching', 'previous_provider_ids',
+        'cancel_requested', 'cancelling_from',
+    ];
+
+    /** @var list<string> Was Hosts und Geschwister dazugemeldet haben. */
+    protected static array $inheritedExtra = [];
+
     /**
-     * Was das Abo von seiner ersten Zahlung übernimmt: die Angaben des
-     * Aufrufers, ohne das, was das Paket selbst führt.
+     * Weitere Schlüssel, die ein Abo von seiner ersten Zahlung übernimmt.
+     * Aus dem `boot()` eines Service Providers:
+     *
+     *     Subscriptions::inheritMeta('thanks_ref', 'crm_deal_id');
+     *
+     * Schlüssel, die das Paket selbst führt, bleiben außen vor, auch wenn sie
+     * hier genannt werden.
+     */
+    public static function inheritMeta(string ...$keys): void
+    {
+        static::$inheritedExtra = array_values(array_unique([...static::$inheritedExtra, ...$keys]));
+    }
+
+    /** Für Tests, und für einen Host, der seinen Container neu baut. */
+    public static function forgetInheritedMeta(): void
+    {
+        static::$inheritedExtra = [];
+    }
+
+    /**
+     * Was das Abo von seiner ersten Zahlung übernimmt.
      *
      * Allen voran `entitlement_subject` (für wen der Zugang ist, etwa ein
      * Team) und die Rechnungsangaben. Ohne sie träfe die Verlängerung, die
@@ -616,7 +644,14 @@ class Subscriptions
     {
         $meta = is_array($payment->meta) ? $payment->meta : [];
 
-        return array_diff_key($meta, array_flip([...PaymentDetails::RESERVED_META, ...self::NOT_INHERITED_META]));
+        $keys = array_diff(
+            [...self::INHERITED_META, ...static::$inheritedExtra],
+            // Gesperrt bleibt gesperrt, bis auf das Subjekt: das setzt das Paket
+            // selbst, geprüft, und genau dafür wird es hier weitergegeben.
+            [...array_diff(PaymentDetails::RESERVED_META, [PurchaseSubject::META_KEY]), ...self::OWN_STATE_META],
+        );
+
+        return array_intersect_key($meta, array_flip($keys));
     }
 
     /**

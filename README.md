@@ -204,6 +204,41 @@ Off unless all three are true: the sibling installed, the flag on, and the produ
 `grants`. A failure in the sibling is logged and swallowed — the money was taken and the row says
 so; an entitlements outage must not send the whole webhook round again.
 
+#### Buying for someone else (a team)
+
+By default the access belongs to the buyer's address. To buy for a team, a company or another
+user, name it in `$details['for']`:
+
+```php
+app(Checkout::class)->start('chorlizenz', $buyer, $returnUrl, null, [
+    'for' => $team,              // a saved Eloquent model, a Statamic user, or a SubjectReference
+    'meta' => [
+        // Billing data for statamic-invoices. An address in fields is turned into text.
+        'address' => ['company' => 'Kammerchor Nord e. V.', 'line1' => 'Chorweg 1',
+                      'postal_code' => '20095', 'city' => 'Hamburg', 'country' => 'DE'],
+        'vat_id' => 'DE123456789',
+    ],
+]);
+// Subscriptions::start($product, $buyer, $returnUrl, $details) takes the same `for`.
+```
+
+- `for` is checked at the till: the type must be one entitlements can find a record behind (a
+  morph-map alias or an Eloquent class, or `user`), and the record must exist. Otherwise the
+  purchase goes ahead for the address and a warning is logged. Any other PHP type (an array, a
+  string) throws `InvalidArgumentException`.
+- It is stored as `meta.entitlement_subject = {type, id}`. That key is reserved: passing it inside
+  `meta` throws.
+- Grant, renewal, pause, cancellation, end, refund and chargeback then act on that subject, and
+  only on grants this package wrote for **that** purchase (`source = statamic-payments`,
+  `source_ref` = the payment's or the subscription's provider id). A second purchase and a grant
+  made by hand stay untouched.
+- A subscription, its cycles, a follow-up offer and a resumed checkout keep the subject of the
+  first payment unless the caller names another.
+
+A subscription takes these keys of its first payment's `meta`: `entitlement_subject`, `team_id`,
+`team_uuid`, `paid_by`, `company`, `address`, `address_fields`, `vat_id`. More with
+`Subscriptions::inheritMeta('thanks_ref', …)` from a service provider's `boot()`.
+
 ## In the Control Panel
 
 Utilities → **Payments**. When, what, how much, paid or not, **fulfilled or not**, and who bought it.

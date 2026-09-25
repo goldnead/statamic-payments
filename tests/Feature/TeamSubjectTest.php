@@ -7,17 +7,22 @@ use Goldnead\Entitlements\Facades\Entitlements;
 use Goldnead\Entitlements\Models\Entitlement;
 use Goldnead\Entitlements\Support\SubjectReference;
 use Goldnead\IdentityContracts\ServiceProvider;
+use Goldnead\StatamicPayments\Http\Controllers\Cp\PaymentsController;
 use Goldnead\StatamicPayments\Http\Resources\Cp\ListedPayment;
 use Goldnead\StatamicPayments\Http\Resources\Cp\ListedSubscription;
+use Goldnead\StatamicPayments\Http\Resources\Cp\PaymentDetail;
 use Goldnead\StatamicPayments\Integrations\EntitlementsBridge;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\BuyerSubject;
+use Goldnead\StatamicPayments\Support\Chargebacks;
 use Goldnead\StatamicPayments\Support\Checkout;
+use Goldnead\StatamicPayments\Support\FollowUp;
 use Goldnead\StatamicPayments\Support\Refunds;
 use Goldnead\StatamicPayments\Support\Subscriptions;
 use Goldnead\StatamicPayments\Tests\Support\TeamStandIn;
 use Goldnead\StatamicPayments\Tests\TestCase;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
@@ -100,10 +105,13 @@ class TeamSubjectTest extends TestCase
         parent::tearDown();
     }
 
-    /** What `TeamBuyer::details()` in statamic-teams hands the checkout. */
-    private function teamDetails(array $subject = ['type' => 'team', 'id' => '7']): array
+    /**
+     * What `TeamBuyer::details()` in statamic-teams hands the checkout: the
+     * team as `for`, its billing data in `meta`.
+     */
+    private function teamDetails(mixed $for = 'the team'): array
     {
-        return ['meta' => [
+        return ['for' => $for === 'the team' ? TeamStandIn::find(7) : $for, 'meta' => [
             'team_id' => 7,
             'team_uuid' => '0b7c7a8e-team-7',
             'paid_by' => 3,
@@ -115,7 +123,6 @@ class TeamSubjectTest extends TestCase
                 'country' => 'DE',
             ],
             'vat_id' => 'DE123456789',
-            'entitlement_subject' => $subject,
         ], 'country' => 'DE', 'country_source' => 'billing_address'];
     }
 
@@ -176,18 +183,146 @@ class TeamSubjectTest extends TestCase
     }
 
     #[Test]
-    public function a_type_entitlements_cannot_resolve_falls_back_to_the_address_and_says_so(): void
+    public function a_subject_whose_record_does_not_exist_falls_back_to_the_address_and_says_so(): void
     {
         Log::spy();
 
         $result = app(Checkout::class)->start('chor-lizenz', ['email' => 'leitung@example.com'], null, null,
-            $this->teamDetails(['type' => 'gibtsnicht', 'id' => '7']));
+            $this->teamDetails(new SubjectReference('team', '99')));
+
+        $this->assertArrayNotHasKey('entitlement_subject', $result->payment->fresh()->meta ?? []);
 
         $this->payOnMollie($result->payment);
 
-        $this->assertSame(0, Entitlement::query()->where('subject_type', 'gibtsnicht')->count());
+        $this->assertSame(0, Entitlement::query()->where('subject_type', 'team')->count());
         $this->assertTrue(Entitlements::forSubject($this->email())->where('product_slug', 'chor')->exists());
-        Log::shouldHaveReceived('warning')->withArgs(fn ($message) => str_contains((string) $message, 'entitlement_subject'))->atLeast()->once();
+        Log::shouldHaveReceived('warning')->withArgs(fn ($message) => str_contains((string) $message, 'for'))->atLeast()->once();
+    }
+
+    #[Test]
+    public function a_type_entitlements_cannot_resolve_falls_back_to_the_address(): void
+    {
+        Log::spy();
+
+        $result = app(Checkout::class)->start('chor-lizenz', ['email' => 'leitung@example.com'], null, null,
+            $this->teamDetails(new SubjectReference('gibtsnicht', '7')));
+
+        $this->assertArrayNotHasKey('entitlement_subject', $result->payment->fresh()->meta ?? []);
+        Log::shouldHaveReceived('warning')->atLeast()->once();
+    }
+
+    #[Test]
+    public function the_subject_cannot_be_smuggled_in_through_free_meta(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        app(Checkout::class)->start('chor-lizenz', ['email' => 'leitung@example.com'], null, null,
+            ['meta' => ['entitlement_subject' => ['type' => 'team', 'id' => '7']]]);
+    }
+
+    #[Test]
+    public function for_is_a_model_a_user_or_a_reference_and_nothing_else(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        app(Checkout::class)->start('chor-lizenz', ['email' => 'leitung@example.com'], null, null,
+            ['for' => ['type' => 'team', 'id' => '7']]);
+    }
+
+    #[Test]
+    public function a_reference_to_an_existing_record_is_taken(): void
+    {
+        $result = app(Checkout::class)->start('chor-lizenz', ['email' => 'leitung@example.com'], null, null,
+            ['for' => new SubjectReference('team', '7')]);
+
+        $this->assertSame(['type' => 'team', 'id' => '7'], $result->payment->fresh()->meta['entitlement_subject'] ?? null);
+    }
+
+    // ------------------------------------------- only this purchase's access
+
+    /** Two purchases of the same thing by one team, plus a grant somebody made by hand. */
+    private function twoPurchasesAndAManualGrant(): array
+    {
+        $first = app(Checkout::class)->start('chor-lizenz', ['email' => 'leitung@example.com'], null, null, $this->teamDetails());
+        $first = $this->payOnMollie($first->payment);
+        $second = app(Checkout::class)->start('chor-lizenz', ['email' => 'leitung@example.com'], null, null, $this->teamDetails());
+        $second = $this->payOnMollie($second->payment);
+
+        Entitlements::grant($this->team(), 'chor', 'manual', 'cp-1');
+
+        $this->assertSame(3, Entitlements::forSubject($this->team())->count());
+
+        return [$first, $second];
+    }
+
+    private function grantOf(string $source, string $ref): Entitlement
+    {
+        return Entitlements::forSubject($this->team())->where('source', $source)->where('source_ref', $ref)->firstOrFail();
+    }
+
+    #[Test]
+    public function a_refund_takes_only_the_access_that_payment_bought(): void
+    {
+        [$first, $second] = $this->twoPurchasesAndAManualGrant();
+
+        app(Refunds::class)->record($first, 49000, 're_first');
+
+        $this->assertSame(EntitlementState::Revoked, $this->grantOf('statamic-payments', $first->provider_id)->state());
+        $this->assertSame(EntitlementState::Active, $this->grantOf('statamic-payments', $second->provider_id)->state(), 'the other purchase lost its access');
+        $this->assertSame(EntitlementState::Active, $this->grantOf('manual', 'cp-1')->state(), 'the grant made by hand was revoked');
+    }
+
+    #[Test]
+    public function a_chargeback_takes_only_the_access_that_payment_bought(): void
+    {
+        [$first, $second] = $this->twoPurchasesAndAManualGrant();
+
+        app(Chargebacks::class)->record($first, 'chb_first', 49000);
+
+        $this->assertSame(EntitlementState::Revoked, $this->grantOf('statamic-payments', $first->provider_id)->state());
+        $this->assertSame(EntitlementState::Active, $this->grantOf('statamic-payments', $second->provider_id)->state());
+        $this->assertSame(EntitlementState::Active, $this->grantOf('manual', 'cp-1')->state());
+    }
+
+    #[Test]
+    public function an_ending_agreement_closes_only_its_own_access(): void
+    {
+        $subscription = $this->startTeamSubscription();
+        $first = Payment::query()->where('subscription_id', $subscription->getKey())->first();
+
+        $other = app(Checkout::class)->start('chor-lizenz', ['email' => 'leitung@example.com'], null, null, $this->teamDetails());
+        $other = $this->payOnMollie($other->payment);
+        Entitlements::grant($this->team(), 'chor', 'manual', 'cp-1');
+
+        $this->assertTrue(app(Subscriptions::class)->cancel($subscription->fresh()));
+
+        $this->assertNotNull($this->grantOf('statamic-payments', $first->provider_id)->expires_at, 'the agreement\'s own access stays open');
+        $this->assertNull($this->grantOf('statamic-payments', $other->provider_id)->expires_at, 'the one-off purchase was closed with the agreement');
+        $this->assertNull($this->grantOf('manual', 'cp-1')->expires_at, 'the grant made by hand was closed with the agreement');
+    }
+
+    // ------------------------------------------------------------ follow-up
+
+    #[Test]
+    public function a_follow_up_keeps_the_team_when_the_caller_names_nobody(): void
+    {
+        config([
+            'statamic-payments.follow_up.enabled' => true,
+            'statamic-payments.products.noten' => ['name' => 'Noten', 'amount_cent' => 1200, 'grants' => 'noten'],
+        ]);
+
+        $original = app(Checkout::class)->start('chor-lizenz', ['email' => 'leitung@example.com'], null, null, $this->teamDetails())->payment;
+        $original->forceFill(['status' => Payment::STATUS_PAID, 'paid_at' => now(), 'fulfilled_at' => now(), 'customer_reference' => 'cst_team'])->save();
+        $this->gateway->mandates[] = 'cst_team';
+        $mandat = trim((string) ($original->fresh()->mandate_id ?? ''));
+        if ($mandat !== '') {
+            $this->gateway->knownMandates[] = $mandat;
+        }
+
+        $follow = app(FollowUp::class)->accept($original->fresh(), 'noten');
+
+        $this->assertNotNull($follow);
+        $this->assertSame(['type' => 'team', 'id' => '7'], $follow->fresh()->meta['entitlement_subject'] ?? null);
     }
 
     #[Test]
@@ -215,6 +350,7 @@ class TeamSubjectTest extends TestCase
         $this->assertSame('DE123456789', $subscription->meta['vat_id'] ?? null);
         // Nothing the package keeps for itself travels along.
         $this->assertArrayNotHasKey('subscription_intent', $subscription->meta);
+        $this->assertSame("Chorweg 1\n20095 Hamburg", $subscription->meta['address'] ?? null);
         $this->assertTrue(Entitlements::forSubject($this->team())->where('product_slug', 'chor')->exists());
     }
 
@@ -343,6 +479,42 @@ class TeamSubjectTest extends TestCase
     }
 
     #[Test]
+    public function an_address_in_fields_without_a_street_still_becomes_text(): void
+    {
+        $result = app(Checkout::class)->start('chor-lizenz', ['email' => 'leitung@example.com'], null, null, ['meta' => [
+            'address' => ['company' => 'Kammerchor Nord e. V.', 'postal_code' => '20095', 'city' => 'Hamburg', 'country' => 'DE'],
+        ]]);
+
+        $meta = $result->payment->fresh()->meta;
+
+        $this->assertSame('20095 Hamburg', $meta['address']);
+        $this->assertSame('Kammerchor Nord e. V.', $meta['company']);
+        $this->assertSame('Hamburg', $meta['address_fields']['city']);
+    }
+
+    // -------------------------------------------- what an agreement inherits
+
+    #[Test]
+    public function an_agreement_inherits_only_what_is_on_the_list(): void
+    {
+        $payment = new Payment(['meta' => [
+            'entitlement_subject' => ['type' => 'team', 'id' => '7'],
+            'vat_id' => 'DE1', 'thanks_ref' => 'dnk_1', 'pause' => ['mode' => 'keep'],
+        ]]);
+
+        $this->assertSame(['entitlement_subject' => ['type' => 'team', 'id' => '7'], 'vat_id' => 'DE1'], Subscriptions::inheritedMeta($payment));
+
+        Subscriptions::inheritMeta('thanks_ref');
+
+        try {
+            $this->assertSame('dnk_1', Subscriptions::inheritedMeta($payment)['thanks_ref'] ?? null);
+            $this->assertArrayNotHasKey('pause', Subscriptions::inheritedMeta($payment));
+        } finally {
+            Subscriptions::forgetInheritedMeta();
+        }
+    }
+
+    #[Test]
     public function an_address_as_text_stays_as_it_is(): void
     {
         $result = app(Checkout::class)->start('chor-lizenz', ['email' => 'k@example.com'], null, null,
@@ -375,5 +547,58 @@ class TeamSubjectTest extends TestCase
         $this->assertNull(BuyerSubject::describe(['entitlement_subject' => ['type' => 'gibtsnicht', 'id' => '1']]));
         // A team that was deleted keeps its key rather than a guessed name.
         $this->assertSame('Team #99', BuyerSubject::describe(['entitlement_subject' => ['type' => 'team', 'id' => '99']])['display']);
+    }
+
+    #[Test]
+    public function a_listing_page_loads_the_names_once_and_not_per_row(): void
+    {
+        TeamStandIn::create(['id' => 8, 'name' => 'Gospelchor Süd']);
+        $metas = [
+            ['entitlement_subject' => ['type' => 'team', 'id' => '7']],
+            ['entitlement_subject' => ['type' => 'team', 'id' => '8']],
+            ['entitlement_subject' => ['type' => 'team', 'id' => '7']],
+        ];
+
+        BuyerSubject::forget();
+        \DB::enableQueryLog();
+        BuyerSubject::preload($metas);
+        $names = array_map(fn ($meta) => BuyerSubject::describe($meta)['display'], $metas);
+        $queries = count(\DB::getQueryLog());
+        \DB::disableQueryLog();
+
+        $this->assertSame(['Team Kammerchor Nord', 'Team Gospelchor Süd', 'Team Kammerchor Nord'], $names);
+        $this->assertSame(1, $queries);
+    }
+
+    #[Test]
+    public function the_search_finds_the_team_by_its_name(): void
+    {
+        $this->withoutMiddleware();
+        TeamStandIn::create(['id' => 8, 'name' => 'Gospelchor Süd']);
+
+        $result = app(Checkout::class)->start('chor-lizenz', ['email' => 'kasse@example.com', 'name' => 'Förderverein'], null, null,
+            $this->teamDetails(TeamStandIn::find(8)));
+        app(Checkout::class)->start('chor-lizenz', ['email' => 'andere@example.com', 'name' => 'Jemand']);
+
+        $query = Payment::query();
+        (new class(request()) extends PaymentsController
+        {
+            public function run(Builder $query, string $term): void
+            {
+                $this->applySearch($query, $term);
+            }
+        })->run($query, 'Gospel');
+
+        $this->assertSame([$result->payment->getKey()], $query->pluck('id')->all());
+    }
+
+    #[Test]
+    public function the_company_is_not_shown_twice_when_it_is_the_name(): void
+    {
+        $result = app(Checkout::class)->start('chor-lizenz', ['email' => 'leitung@example.com', 'name' => 'Kammerchor Nord e. V.'], null, null, $this->teamDetails());
+
+        $detail = (new PaymentDetail($result->payment->fresh()))->toArray(Request::create('/'));
+
+        $this->assertNull($detail['buyer']['company']);
     }
 }

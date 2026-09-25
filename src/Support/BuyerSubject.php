@@ -2,7 +2,6 @@
 
 namespace Goldnead\StatamicPayments\Support;
 
-use Goldnead\StatamicPayments\Integrations\EntitlementsBridge;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Str;
@@ -12,36 +11,45 @@ use Throwable;
 /**
  * Für wen gekauft wurde, wenn es nicht die Person ist, die bezahlt hat.
  *
- * `meta.entitlement_subject = {type, id}` (so setzt es `Teams::checkout()`)
- * wird im Control Panel zu „Team Kammerchor Nord" statt nur zu einer Adresse.
- * Der Name kommt aus dem Datensatz hinter dem Morph-Alias; findet sich keiner
- * mehr, bleibt die Kennung stehen. Kein Name ist besser als ein geratener.
+ * `meta.entitlement_subject` (gesetzt aus `$details['for']`, siehe
+ * {@see PurchaseSubject}) wird im Control Panel zu „Team Kammerchor Nord"
+ * statt nur zu einer Adresse. Der Name kommt aus dem Datensatz hinter dem
+ * Morph-Alias; findet sich keiner mehr, bleibt die Kennung stehen. Kein Name
+ * ist besser als ein geratener.
+ *
+ * Eine Liste ruft {@see self::preload()} einmal für die ganze Seite: eine
+ * Abfrage je Typ statt einer je Zeile. Ohne das lädt {@see self::describe()}
+ * den einen Namen nach und merkt ihn sich für die Anfrage.
  */
 final class BuyerSubject
 {
+    /** @var array<string, string|null> "type:id" → Name */
+    private static array $names = [];
+
     /**
      * @return array{type: string, id: string, type_label: string, name: string, display: string}|null
      */
     public static function describe(mixed $meta): ?array
     {
-        $raw = data_get($meta, 'entitlement_subject');
+        $pair = PurchaseSubject::fromMeta($meta);
 
-        if (! is_array($raw)) {
+        if ($pair === null) {
             return null;
         }
 
-        $type = is_string($raw['type'] ?? null) ? trim($raw['type']) : '';
-        $id = is_string($raw['id'] ?? null) || is_int($raw['id'] ?? null) ? trim((string) $raw['id']) : '';
-
-        if ($type === '' || $id === '' || ! EntitlementsBridge::resolvableType($type)) {
-            return null;
-        }
+        ['type' => $type, 'id' => $id] = $pair;
 
         $key = 'statamic-payments::messages.subject_type_'.$type;
         $typeLabel = __($key);
         $typeLabel = $typeLabel === $key ? Str::headline($type) : $typeLabel;
 
-        $name = self::name($type, $id) ?? '#'.$id;
+        $cacheKey = $type.':'.$id;
+
+        if (! array_key_exists($cacheKey, self::$names)) {
+            self::load($type, [$id]);
+        }
+
+        $name = self::$names[$cacheKey] ?? '#'.$id;
 
         return [
             'type' => $type,
@@ -52,40 +60,73 @@ final class BuyerSubject
         ];
     }
 
-    private static function name(string $type, string $id): ?string
+    /**
+     * Die Namen aller Subjekte einer Seite, eine Abfrage je Typ.
+     *
+     * @param  iterable<mixed>  $metas
+     */
+    public static function preload(iterable $metas): void
     {
+        // Frisch je Seite: in einem langlebigen Prozess (Octane) hielte der
+        // Speicher sonst den Namen von vor einer Umbenennung.
+        self::forget();
+
+        $byType = [];
+
+        foreach ($metas as $meta) {
+            if (($pair = PurchaseSubject::fromMeta($meta)) !== null && ! array_key_exists($pair['type'].':'.$pair['id'], self::$names)) {
+                $byType[$pair['type']][$pair['id']] = $pair['id'];
+            }
+        }
+
+        foreach ($byType as $type => $ids) {
+            self::load($type, array_values($ids));
+        }
+    }
+
+    /** Für Tests, und für einen langlebigen Prozess zwischen zwei Anfragen. */
+    public static function forget(): void
+    {
+        self::$names = [];
+    }
+
+    /** @param  list<string>  $ids */
+    private static function load(string $type, array $ids): void
+    {
+        foreach ($ids as $id) {
+            self::$names[$type.':'.$id] = null;
+        }
+
         try {
             if ($type === 'user' && Relation::getMorphedModel('user') === null) {
-                $user = User::find($id);
+                foreach ($ids as $id) {
+                    $user = User::find($id);
+                    $name = is_object($user) && method_exists($user, 'name') ? $user->name() : null;
+                    self::$names['user:'.$id] = self::text($name) ?? self::text($user?->email());
+                }
 
-                $name = is_object($user) && method_exists($user, 'name') ? $user->name() : null;
-
-                return self::text($name) ?? self::text($user?->email());
+                return;
             }
 
             $class = Relation::getMorphedModel($type) ?? $type;
 
             if (! is_subclass_of($class, Model::class)) {
-                return null;
+                return;
             }
 
-            $record = $class::query()->find($id);
+            foreach ($class::query()->whereKey($ids)->get() as $record) {
+                foreach (['name', 'title', 'label', 'email'] as $attribute) {
+                    if (($value = self::text($record->getAttribute($attribute))) !== null) {
+                        self::$names[$type.':'.$record->getKey()] = $value;
 
-            if (! $record instanceof Model) {
-                return null;
-            }
-
-            foreach (['name', 'title', 'label', 'email'] as $attribute) {
-                if (($value = self::text($record->getAttribute($attribute))) !== null) {
-                    return $value;
+                        break;
+                    }
                 }
             }
         } catch (Throwable) {
             // Eine Anzeige. Eine fehlende Tabelle oder ein umbenanntes Modell
             // kostet den Namen, nie die Seite.
         }
-
-        return null;
     }
 
     private static function text(mixed $value): ?string

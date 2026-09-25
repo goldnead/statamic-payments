@@ -536,6 +536,12 @@ class Fulfilment
             array_flip(PaymentDetails::RESERVED_META),
         );
 
+        // Gesperrt für Aufrufer, aber vom Paket selbst gesetzt und geprüft: für
+        // wen gekauft wurde, gilt für jeden Zyklus wie für die erste Zahlung.
+        if ($first !== null && ($subject = PurchaseSubject::fromMeta($first->meta)) !== null) {
+            $inherited[PurchaseSubject::META_KEY] = $subject;
+        }
+
         return $inherited + [
             'cycle_of' => array_filter([
                 'subscription_id' => $subscription->getKey(),

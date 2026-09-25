@@ -159,7 +159,9 @@ class FollowUp
         // Zuerst, und vor jeder Prüfung, die vom Zustand abhängt: ein Aufrufer,
         // der etwas Unerlaubtes mitgibt, soll das immer erfahren und nicht nur
         // dann, wenn dieses Angebot gerade zulässig ist.
-        $details = PaymentDetails::from($details);
+        // Nennt der Aufrufer niemanden, kauft der Nachkauf für dasselbe Team
+        // wie die Bestellung, an der er hängt.
+        $details = PaymentDetails::from($details)->withSubjectOf($original);
 
         if (! $this->eligible($original, $buyerEmail)) {
             return null;

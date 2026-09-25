@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Support;
 
 use DateTimeInterface;
+use Goldnead\StatamicPayments\Models\Payment;
 use Illuminate\Support\Carbon;
 use InvalidArgumentException;
 use Throwable;
@@ -38,6 +39,11 @@ use Throwable;
  *   und „der Kartenherausgeber sagt es" wiegt schwerer als „jemand hat es
  *   getippt". Diese Spalte ist die Stelle, an der das steht.
  *
+ * Dazu **`for`**: für wen gekauft wird, wenn nicht für die Person an der Kasse
+ * (ein Team). Ein gespeichertes Eloquent-Modell, ein Statamic-Benutzer oder eine
+ * `SubjectReference`; landet geprüft als `meta.entitlement_subject`, siehe
+ * {@see PurchaseSubject}. In `meta` selbst ist der Schlüssel gesperrt.
+ *
  * Dazu die **Zustimmung nach § 356 Abs. 5 BGB**, als Paar:
  *
  * - `consent_at` — wann der Käufer zugestimmt hat, dass die Lieferung sofort
@@ -68,6 +74,7 @@ final class PaymentDetails
         'referrer', 'landing_page',
         'consent_at', 'consent_text',
         'offer_handles',
+        'for',
     ];
 
     /**
@@ -100,6 +107,12 @@ final class PaymentDetails
         'landing_page' => 1024,
     ];
 
+    /** Die Felder einer Anschrift, wie statamic-teams sie schreibt. */
+    private const ADDRESS_FIELDS = ['company', 'name', 'line1', 'line2', 'postal_code', 'city', 'country'];
+
+    /** Einer davon genügt, damit aus den Feldern Text wird. */
+    private const ADDRESS_TRIGGERS = ['line1', 'postal_code', 'city', 'company', 'country'];
+
     /** Die Herkunft eines Landes, das keine bessere nennt. */
     public const SOURCE = 'caller';
 
@@ -119,6 +132,9 @@ final class PaymentDetails
         'cycle_of',
         'resumed_from',
         'resume_checkout_url',
+        // Für wen gekauft wurde. Nur über `$details['for']`, geprüft; siehe
+        // {@see PurchaseSubject}.
+        'entitlement_subject',
     ];
 
     /**
@@ -186,8 +202,16 @@ final class PaymentDetails
 
         [$consentAt, $consentText] = self::consent($details['consent_at'] ?? null, $details['consent_text'] ?? null);
 
+        $meta = self::meta($details['meta'] ?? []);
+
+        // Für wen gekauft wird, geprüft und in der Form, die das Paket führt.
+        // Siehe {@see PurchaseSubject}.
+        if (($subject = PurchaseSubject::fromCaller($details['for'] ?? null)) !== null) {
+            $meta[PurchaseSubject::META_KEY] = $subject;
+        }
+
         return new self(
-            self::meta($details['meta'] ?? []),
+            $meta,
             $country,
             $source,
             self::attribution($details),
@@ -224,6 +248,22 @@ final class PaymentDetails
         }
 
         return $handles;
+    }
+
+    /**
+     * Das Subjekt einer früheren Zahlung, wenn der Aufrufer selbst keines
+     * nennt. Ein Nachkauf oder eine wieder aufgenommene Kasse kauft für
+     * dasselbe Team wie die Zahlung, an der sie hängt.
+     */
+    public function withSubjectOf(Payment $original): self
+    {
+        if (isset($this->meta[PurchaseSubject::META_KEY])) {
+            return $this;
+        }
+
+        $subject = PurchaseSubject::fromMeta($original->meta);
+
+        return $subject === null ? $this : $this->plus([PurchaseSubject::META_KEY => $subject]);
     }
 
     /**
@@ -433,17 +473,20 @@ final class PaymentDetails
     {
         $fields = $meta['address'] ?? null;
 
-        // Nur die Form mit `line1`, die statamic-teams schreibt. Ein Aufrufer mit
-        // eigener Form (`street`, …) bekommt sein Array unverändert zurück, wie
-        // bisher: raten, welche Felder eine Zeile sind, hieße Teile verlieren.
-        if (! is_array($fields) || ! array_key_exists('line1', $fields) || ! is_string($fields['line1'])) {
+        // Nur die Form, die statamic-teams schreibt: mindestens einer ihrer
+        // Schlüssel, und keiner, den sie nicht kennt. Ein Aufrufer mit eigener
+        // Form (`street`, …) bekommt sein Array unverändert zurück, wie bisher:
+        // raten, welche Felder eine Zeile sind, hieße Teile verlieren.
+        if (! is_array($fields)
+            || array_intersect_key($fields, array_flip(self::ADDRESS_TRIGGERS)) === []
+            || array_diff_key($fields, array_flip(self::ADDRESS_FIELDS)) !== []) {
             return $meta;
         }
 
         $text = static fn (mixed $value): ?string => is_string($value) && trim($value) !== '' ? trim($value) : null;
 
         $lines = array_values(array_filter([
-            $text($fields['line1']),
+            $text($fields['line1'] ?? null),
             $text($fields['line2'] ?? null),
             $text(trim(($text($fields['postal_code'] ?? null) ?? '').' '.($text($fields['city'] ?? null) ?? ''))),
         ]));

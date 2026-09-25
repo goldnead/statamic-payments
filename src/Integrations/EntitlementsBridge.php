@@ -5,8 +5,7 @@ namespace Goldnead\StatamicPayments\Integrations;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\Catalogue;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\Relation;
+use Goldnead\StatamicPayments\Support\PurchaseSubject;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -30,6 +29,9 @@ use Throwable;
 class EntitlementsBridge
 {
     protected const FACADE = '\Goldnead\Entitlements\Facades\Entitlements';
+
+    /** Die `source` jedes Zugangs, den diese Brücke schreibt. */
+    public const SOURCE = 'statamic-payments';
 
     public function available(): bool
     {
@@ -215,7 +217,7 @@ class EntitlementsBridge
                     continue;
                 }
 
-                $query = $facade::forSubject($subject)
+                $query = $this->ownedBy($facade::forSubject($subject), $this->refsForSubscription($subscription))
                     ->where('product_slug', $slug)
                     ->whereNull('revoked_at');
 
@@ -276,7 +278,7 @@ class EntitlementsBridge
                     $facade::grant(
                         $subject,
                         $slug,
-                        'statamic-payments',
+                        self::SOURCE,
                         (string) $subscription->provider_id,
                         expiresAt: $bis,
                     );
@@ -337,10 +339,12 @@ class EntitlementsBridge
             ?? $subscription->ended_at
             ?? Carbon::now();
 
+        $refs = $this->refsForSubscription($subscription);
+
         foreach ($this->slugsFor($subscription->product) as $slug) {
             try {
                 $facade = self::FACADE;
-                $grant = $facade::forSubject($subject)
+                $grant = $this->ownedBy($facade::forSubject($subject), $refs)
                     ->where('product_slug', $slug)
                     ->whereNull('expires_at')
                     ->orderByDesc('id')
@@ -483,6 +487,9 @@ class EntitlementsBridge
             ? $payment->items->pluck('product')->all()
             : [$payment->product];
 
+        // Nur was diese Zahlung (oder ihr Abo) vergeben hat. Siehe ownedBy().
+        $refs = $this->refsForPayment($payment);
+
         foreach ($handles as $handle) {
             // Ein Buendel gibt mehrere Zugaenge her, und eine Erstattung nimmt
             // alle zurueck. Einen davon stehen zu lassen waere die Haelfte
@@ -491,7 +498,7 @@ class EntitlementsBridge
                 try {
                     $facade = self::FACADE;
 
-                    $grants = $facade::forSubject($subject)
+                    $grants = $this->ownedBy($facade::forSubject($subject), $refs)
                         ->where('product_slug', $slug)
                         ->get();
 
@@ -654,12 +661,11 @@ class EntitlementsBridge
     /**
      * `meta.entitlement_subject`, geprüft, als `SubjectReference`.
      *
-     * Nur Typen, unter denen entitlements einen Datensatz findet: ein Alias
-     * der Morph-Map oder ein Eloquent-Modell als Klassenname, dazu `user` für
-     * Statamic-Nutzer aus dem Dateispeicher (so schreibt `MorphSubjectResolver`
-     * sie). Alles andere wäre ein Zugang, der niemandem gehört und erst
-     * auffällt, wenn sich jemand beschwert. Dann gilt die Adresse, und das
-     * Log sagt, warum.
+     * Gesetzt hat es das Paket selbst, aus `$details['for']` (siehe
+     * {@see PurchaseSubject}). Geprüft wird hier trotzdem noch einmal der Typ:
+     * eine Zeile kann von Hand oder von einer älteren Version geschrieben
+     * sein. Ein Typ, unter dem entitlements nichts findet, wäre ein Zugang,
+     * der niemandem gehört. Dann gilt die Adresse, und das Log sagt, warum.
      *
      * @param  array<string, mixed>  $context
      */
@@ -672,11 +678,10 @@ class EntitlementsBridge
         }
 
         $klasse = '\\Goldnead\\Entitlements\\Support\\SubjectReference';
-        $type = is_array($raw) && is_string($raw['type'] ?? null) ? trim($raw['type']) : '';
-        $id = is_array($raw) && (is_string($raw['id'] ?? null) || is_int($raw['id'] ?? null)) ? trim((string) $raw['id']) : '';
+        $pair = PurchaseSubject::fromMeta($meta);
 
-        if ($type !== '' && $id !== '' && self::resolvableType($type) && class_exists($klasse)) {
-            return new $klasse($type, $id);
+        if ($pair !== null && class_exists($klasse)) {
+            return new $klasse($pair['type'], $pair['id']);
         }
 
         Log::warning('statamic-payments: meta.entitlement_subject names nothing entitlements can resolve; the access goes to the buyer\'s address instead.', $context + [
@@ -686,16 +691,62 @@ class EntitlementsBridge
         return null;
     }
 
-    /** Whether entitlements can find a record behind this subject type. */
-    public static function resolvableType(string $type): bool
+    /**
+     * Die `source_ref`, unter denen diese Brücke Zugänge für eine Zahlung
+     * geschrieben hat.
+     *
+     * Vergeben wird mit der Anbieter-Kennung der Zahlung ({@see grantSlug()}).
+     * Gehört sie zu einem Abo, zählen dessen Kennungen mit: der Zugang eines
+     * Abos steht unter der Kennung seiner ersten Zahlung oder, wenn er erst
+     * mit einem Zyklus entstand, unter der des Abos.
+     *
+     * @return list<string>
+     */
+    protected function refsForPayment(Payment $payment): array
     {
-        if ($type === 'user') {
-            return true;
+        $refs = [(string) $payment->provider_id];
+
+        $subscriptionId = $payment->subscription_id ?? data_get($payment->meta, 'cycle_of.subscription_id');
+        $subscription = is_numeric($subscriptionId) ? Subscription::query()->find((int) $subscriptionId) : null;
+
+        if ($subscription instanceof Subscription) {
+            $refs = [...$refs, ...$this->refsForSubscription($subscription)];
         }
 
-        $class = Relation::getMorphedModel($type) ?? $type;
+        return array_values(array_unique(array_filter($refs, fn ($ref) => $ref !== '')));
+    }
 
-        return class_exists($class) && is_subclass_of($class, Model::class);
+    /**
+     * Die `source_ref` der Zugänge eines Abos: seine Anbieter-Kennung, frühere
+     * Kennungen (ein wieder aufgenommenes Mollie-Abo bekommt eine neue) und
+     * die Kennungen seiner eigenen Zahlungen (die erste Zahlung vergibt).
+     *
+     * @return list<string>
+     */
+    protected function refsForSubscription(Subscription $subscription): array
+    {
+        $refs = [
+            (string) $subscription->provider_id,
+            ...array_filter((array) data_get($subscription->meta, 'previous_provider_ids', []), 'is_string'),
+            ...Payment::query()->where('subscription_id', $subscription->getKey())->pluck('provider_id')->map(fn ($id) => (string) $id)->all(),
+        ];
+
+        return array_values(array_unique(array_filter($refs, fn ($ref) => $ref !== '')));
+    }
+
+    /**
+     * Nur was diese Brücke für genau diesen Kauf vergeben hat.
+     *
+     * Ohne diese Einschränkung nahm eine Erstattung dem Team **jeden** Zugang
+     * auf das Produkt: den zweiten Kauf, den von Hand im Control Panel
+     * vergebenen, den aus einem anderen Addon. Bei einer Person fiel das kaum
+     * auf, sie kauft selten zweimal; ein Team kauft Plätze nach.
+     *
+     * @param  list<string>  $refs
+     */
+    protected function ownedBy(mixed $query, array $refs): mixed
+    {
+        return $query->where('source', self::SOURCE)->whereIn('source_ref', $refs);
     }
 
     /**
@@ -794,7 +845,7 @@ class EntitlementsBridge
         $facade::grant(
             $subject,
             $slug,
-            'statamic-payments',
+            self::SOURCE,
             (string) $payment->provider_id,
             startsAt: $startsAt,
             expiresAt: $expiresAt,

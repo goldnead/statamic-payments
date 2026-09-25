@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Http\Resources\Cp\PaymentDetail;
 use Goldnead\StatamicPayments\Http\Resources\Cp\PaymentsCollection;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Support\Brands;
+use Goldnead\StatamicPayments\Support\PurchaseSubject;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
@@ -172,9 +173,19 @@ class PaymentsController extends CpController
         // value stays bound.
         $escaped = addcslashes($term, '%_\\');
 
-        $query->where(function (Builder $q) use ($escaped) {
+        $subjects = PurchaseSubject::matching($term);
+
+        $query->where(function (Builder $q) use ($escaped, $subjects) {
             foreach (['email', 'name', 'product', 'provider_id'] as $column) {
                 $q->orWhereRaw($column." LIKE ? ESCAPE '\\'", ['%'.$escaped.'%']);
+            }
+
+            // Für wen gekauft wurde: ein Team findet sich über seinen Namen,
+            // auch wenn die Rechnung auf einen anderen lautet.
+            foreach ($subjects as $type => $ids) {
+                $q->orWhere(fn (Builder $s) => $s
+                    ->where('meta->entitlement_subject->type', $type)
+                    ->whereIn('meta->entitlement_subject->id', $ids));
             }
         });
     }

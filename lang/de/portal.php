@@ -96,7 +96,9 @@ return [
     'cancel_price' => 'Preis',
     'cancel_started' => 'Beginn',
     'cancel_next' => 'Nächste Abbuchung',
-    'cancel_effect' => 'Die Kündigung wirkt sofort. Es folgt keine weitere Abbuchung.',
+    'cancel_paid_until' => 'Bezahlt bis',
+    'cancel_effect' => 'Mit der Kündigung endet der Vertrag. Es folgt keine weitere Abbuchung.',
+    'cancel_effect_until' => 'Es folgt keine weitere Abbuchung. Der Vertrag endet mit Ablauf des bezahlten Zeitraums am :date.',
     'cancel_abort' => 'Doch nicht kündigen',
     'cancel_not_live' => 'Dieser Vertrag läuft nicht mehr. Es gibt nichts zu kündigen.',
 
@@ -104,6 +106,7 @@ return [
 
     'cancelled_title' => 'Gekündigt',
     'cancelled_confirmation' => 'Ihr Vertrag „:name“ wurde am :date um :time Uhr gekündigt.',
+    'cancelled_until' => 'Der bezahlte Zeitraum läuft bis zum :date. Eine weitere Abbuchung folgt nicht.',
     'cancelled_mailed' => 'Eine Bestätigung ist an :email unterwegs.',
     'cancelled_not_mailed' => 'Die Kündigung ist wirksam. Die Bestätigungs-E-Mail an :email konnte gerade nicht zugestellt werden — bitte bewahren Sie diese Seite auf oder wenden Sie sich an uns.',
     'cancelled_back' => 'Zurück zur Übersicht',
@@ -143,7 +146,8 @@ return [
 
     'mail_cancelled_subject' => 'Bestätigung Ihrer Kündigung',
     'mail_cancelled_greeting' => 'Guten Tag,',
-    'mail_cancelled_body' => 'hiermit bestätigen wir die Kündigung Ihres Vertrags „:product“. Die Kündigung ist am :date um :time Uhr bei uns eingegangen und sofort wirksam.',
+    'mail_cancelled_body' => 'hiermit bestätigen wir die Kündigung Ihres Vertrags „:product“. Die Kündigung ist am :date um :time Uhr bei uns eingegangen.',
     'mail_cancelled_no_further' => 'Es erfolgt keine weitere Abbuchung.',
+    'mail_cancelled_until' => 'Es erfolgt keine weitere Abbuchung. Der Vertrag endet mit Ablauf des bezahlten Zeitraums am :date.',
     'mail_cancelled_keep' => 'Bitte bewahren Sie diese Nachricht als Nachweis auf.',
 ];

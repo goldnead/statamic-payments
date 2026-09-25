@@ -34,15 +34,15 @@
                                     @if ($subscription['paused'])
                                         {{-- One phrase for a pause: "Pausiert bis …" already says the status. --}}
                                         {{ $subscription['resumes_at']
-                                            ? __('statamic-payments::subscriptions.portal_paused_until', ['date' => $subscription['resumes_at']->translatedFormat(__('statamic-payments::portal.date_format'))])
+                                            ? __('statamic-payments::subscriptions.portal_paused_until', ['date' => \Goldnead\StatamicPayments\Support\LocalTime::portalDate($subscription['resumes_at'])])
                                             : __('statamic-payments::subscriptions.portal_paused_open') }}
                                     @else
                                         {{ __('statamic-payments::portal.status_'.$subscription['status']) }}
                                     @endif
                                     @if ($subscription['live'] && $subscription['next_payment_at'])
-                                        · {{ __('statamic-payments::portal.subscription_next', ['date' => $subscription['next_payment_at']->translatedFormat(__('statamic-payments::portal.date_format'))]) }}
+                                        · {{ __('statamic-payments::portal.subscription_next', ['date' => \Goldnead\StatamicPayments\Support\LocalTime::portalDate($subscription['next_payment_at'])]) }}
                                     @elseif (! $subscription['live'] && ! $subscription['paused'] && $subscription['cancelled_at'])
-                                        · {{ __('statamic-payments::portal.subscription_ended', ['date' => $subscription['cancelled_at']->translatedFormat(__('statamic-payments::portal.date_format'))]) }}
+                                        · {{ __('statamic-payments::portal.subscription_ended', ['date' => \Goldnead\StatamicPayments\Support\LocalTime::portalDate($subscription['cancelled_at'])]) }}
                                     @endif
                                     @if ($subscription['remaining'] !== null)
                                         · {{ __('statamic-payments::portal.subscription_remaining', ['count' => $subscription['remaining']]) }}
@@ -137,7 +137,7 @@
                                 <span class="name">{{ $order['name'] }}</span>
                                 <span class="desc">
                                     @if ($order['paid_at'])
-                                        {{ $order['paid_at']->translatedFormat(__('statamic-payments::portal.date_format')) }}
+                                        {{ \Goldnead\StatamicPayments\Support\LocalTime::portalDate($order['paid_at']) }}
                                     @endif
                                     @if ($order['refunded'])
                                         · {{ __('statamic-payments::portal.order_refunded') }}

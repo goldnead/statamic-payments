@@ -15,11 +15,46 @@ use Illuminate\Support\Carbon;
  */
 final class LocalTime
 {
+    /**
+     * In dieser Reihenfolge, der erste gültige Wert gewinnt:
+     *
+     * 1. `statamic-payments.display_timezone` (im CP je Marke einstellbar,
+     *    Einstellungs-Schicht von brand-context),
+     * 2. `statamic-payments.legal.timezone` (der ältere Schlüssel für Belege),
+     * 3. `statamic.system.display_timezone`,
+     * 4. `app.timezone`.
+     *
+     * **`app.timezone` wird nie gedreht.** Die Zeitspalten halten UTC ohne
+     * Kennung; eine andere Anwendungszone schriebe die Bedeutung jedes
+     * gespeicherten Zeitstempels um. Angezeigt wird lokal, gespeichert UTC.
+     * Ein unbekannter Name (Tippfehler im CP) fällt auf den nächsten zurück,
+     * statt jede Seite mit einer Ausnahme zu beenden.
+     */
     public static function zone(): string
     {
-        $zone = config('statamic.system.display_timezone') ?: config('app.timezone', 'UTC');
+        foreach ([
+            config('statamic-payments.display_timezone'),
+            config('statamic-payments.legal.timezone'),
+            config('statamic.system.display_timezone'),
+            config('app.timezone'),
+        ] as $candidate) {
+            if (is_string($candidate) && ($candidate = trim($candidate)) !== '' && self::valid($candidate)) {
+                return $candidate;
+            }
+        }
 
-        return is_string($zone) && $zone !== '' ? $zone : 'UTC';
+        return 'UTC';
+    }
+
+    private static function valid(string $zone): bool
+    {
+        try {
+            new \DateTimeZone($zone);
+
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     public static function now(): Carbon
@@ -48,6 +83,27 @@ final class LocalTime
     public static function moment(?CarbonInterface $moment): ?string
     {
         return self::of($moment)?->locale(app()->getLocale())->isoFormat('L LT');
+    }
+
+    /**
+     * A stored moment in the shop's zone, in a `translatedFormat()` pattern
+     * (the portal's `date_format` / `time_format`). Empty for no moment.
+     */
+    public static function format(?CarbonInterface $moment, string $pattern): string
+    {
+        return self::of($moment)?->locale(app()->getLocale())->translatedFormat($pattern) ?? '';
+    }
+
+    /** The portal's date (`portal.date_format`) in the shop's zone. */
+    public static function portalDate(?CarbonInterface $moment): string
+    {
+        return self::format($moment, (string) __('statamic-payments::portal.date_format'));
+    }
+
+    /** The portal's time (`portal.time_format`) in the shop's zone. */
+    public static function portalTime(?CarbonInterface $moment): string
+    {
+        return self::format($moment, (string) __('statamic-payments::portal.time_format'));
     }
 
     /** "05.10.2026" (`L`). */

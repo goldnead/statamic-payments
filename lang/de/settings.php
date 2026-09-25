@@ -139,9 +139,13 @@ return [
             'description' => 'Eine je Zeile. Parameter, die ein Mailanbieter unterwegs an den Link hängt und die die Signaturprüfung sonst stolpern lassen — `_se` kommt zum Beispiel von Brevos Klickzähler. `expires` und `signature` können hier nie stehen, was auch immer eingetragen wird.',
         ],
 
+        'display_timezone' => [
+            'label' => 'Anzeige-Zeitzone',
+            'description' => 'In welcher Zone Käufer Datum und Uhrzeit lesen: Kundenportal, Kündigungsbestätigung, Erinnerungen. Ein Name wie Europe/Berlin. Leer nimmt die Zeitzone der Belege, dann die Anzeige-Zeitzone von Statamic, dann die der Anwendung. Gespeichert wird immer in UTC; die Zeitzone der Anwendung bitte nicht ändern, sonst verschieben sich alle gespeicherten Zeiten.',
+        ],
         'legal_timezone' => [
             'label' => 'Zeitzone der Belege',
-            'description' => 'In welcher Zone Datum und Uhrzeit einer Empfangsbestätigung angegeben werden. Leer nimmt die Zone der Anwendung. Setzen Sie sie, wenn die Anwendung in UTC läuft und der Laden nicht: die Uhrzeit auf einem Beleg sollte die des Händlers sein.',
+            'description' => 'In welcher Zone Datum und Uhrzeit einer Empfangsbestätigung angegeben werden. Leer nimmt die Anzeige-Zeitzone. Setzen Sie sie, wenn die Anwendung in UTC läuft und der Laden nicht: die Uhrzeit auf einem Beleg sollte die des Händlers sein.',
         ],
         'consent_accepted_texts' => [
             'label' => 'Anerkannte Einwilligungssätze',

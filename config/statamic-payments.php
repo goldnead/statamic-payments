@@ -717,6 +717,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Anzeige-Zeitzone
+    |--------------------------------------------------------------------------
+    |
+    | The zone every date and time a person reads is shown in: portal pages,
+    | confirmation mails, reminders. Null falls back to `legal.timezone`, then
+    | `statamic.system.display_timezone`, then `app.timezone`. The database
+    | keeps UTC either way. Never change `app.timezone` to fix a display: the
+    | stored timestamps carry no zone, and every one of them would shift.
+    |
+    */
+
+    'display_timezone' => env('STATAMIC_PAYMENTS_DISPLAY_TIMEZONE'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Widerrufsbutton — § 356a BGB
     |--------------------------------------------------------------------------
     |

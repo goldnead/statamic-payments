@@ -5,6 +5,7 @@ namespace Goldnead\StatamicPayments\Http\Controllers\Portal;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Portal\Display;
 use Goldnead\StatamicPayments\Portal\PortalAccess;
+use Goldnead\StatamicPayments\Support\LocalTime;
 use Goldnead\StatamicPayments\Support\SubscriptionPauses;
 use Goldnead\StatamicPayments\Support\SubscriptionSwitches;
 use Illuminate\Http\RedirectResponse;
@@ -111,7 +112,7 @@ class SubscriptionControlController extends PortalController
         return redirect()
             ->route('statamic-payments.portal.show')
             ->with('statamic-payments.portal.status', __('statamic-payments::subscriptions.portal_resumed', [
-                'date' => $subscription->next_payment_at?->translatedFormat(__('statamic-payments::portal.date_format')) ?? '',
+                'date' => LocalTime::portalDate($subscription->next_payment_at),
             ]));
     }
 
@@ -151,7 +152,7 @@ class SubscriptionControlController extends PortalController
                         ? __('statamic-payments::subscriptions.portal_switch_now_charge', ['amount' => Display::money($preview['proration_cent'], $subscription->currency)])
                         : __('statamic-payments::subscriptions.portal_switch_now_free'))
                     : __('statamic-payments::subscriptions.portal_switch_later', [
-                        'date' => $preview['effective_at']?->translatedFormat(__('statamic-payments::portal.date_format')) ?? '',
+                        'date' => LocalTime::portalDate($preview['effective_at'] ?? null),
                     ]),
             ];
         }

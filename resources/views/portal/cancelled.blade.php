@@ -13,9 +13,13 @@
     --}}
     <p class="lede">{{ __('statamic-payments::portal.cancelled_confirmation', [
         'name' => $name,
-        'date' => $moment->translatedFormat(__('statamic-payments::portal.date_format')),
-        'time' => $moment->translatedFormat(__('statamic-payments::portal.time_format')),
+        'date' => \Goldnead\StatamicPayments\Support\LocalTime::portalDate($moment),
+        'time' => \Goldnead\StatamicPayments\Support\LocalTime::portalTime($moment),
     ]) }}</p>
+
+    @if ($until ?? null)
+        <p class="lede">{{ __('statamic-payments::portal.cancelled_until', ['date' => \Goldnead\StatamicPayments\Support\LocalTime::portalDate($until)]) }}</p>
+    @endif
 
     @if ($delivered)
         <p class="notice">{{ __('statamic-payments::portal.cancelled_mailed', ['email' => $email]) }}</p>

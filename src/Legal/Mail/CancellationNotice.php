@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Legal\Cancellations;
 use Goldnead\StatamicPayments\Legal\Moment;
 use Goldnead\StatamicPayments\Models\Cancellation;
 use Goldnead\StatamicPayments\Portal\Mail\SendsAsTheConfiguredSender;
+use Goldnead\StatamicPayments\Support\LocalTime;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
@@ -45,7 +46,7 @@ class CancellationNotice extends Mailable
                 // gekündigt, und der Händler soll wissen, warum.
                 'byNumber' => $subscription !== null && ! Cancellations::matchedByProviderId($this->cancellation, $subscription),
                 'kind' => __('statamic-payments::cancellation.kind_'.$this->cancellation->kind),
-                'effective' => $this->cancellation->effective_at?->translatedFormat((string) __('statamic-payments::portal.date_format')),
+                'effective' => $this->cancellation->effective_at ? LocalTime::portalDate($this->cancellation->effective_at) : null,
                 'date' => $moment['date'],
                 'time' => $moment['time'],
                 'zone' => $moment['zone'],

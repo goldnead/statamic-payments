@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Portal\Mail;
 
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\LocalTime;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
@@ -37,6 +38,9 @@ class CancellationConfirmed extends Mailable
         public Subscription $subscription,
         public Carbon $moment,
         public string $productName,
+        // Nicht `$until`: öffentliche Eigenschaften landen in der Vorlage und
+        // überschrieben dort den formatierten Wert gleichen Namens.
+        public ?Carbon $paidUntil = null,
     ) {}
 
     public function envelope(): Envelope
@@ -58,8 +62,12 @@ class CancellationConfirmed extends Mailable
                 // Formatted here, where the locale is, and not in the template:
                 // the date and the time are the two facts the statute names, and
                 // a template that formats them is a template that can drop one.
-                'date' => $this->moment->translatedFormat((string) __('statamic-payments::portal.date_format')),
-                'time' => $this->moment->translatedFormat((string) __('statamic-payments::portal.time_format')),
+                // In der Anzeige-Zone des Ladens, nicht in `app.timezone`: eine
+                // Anwendung in UTC schrieb sonst „19:07 Uhr" für 21:07 in Berlin.
+                'date' => LocalTime::portalDate($this->moment),
+                'time' => LocalTime::portalTime($this->moment),
+                // Bis wann bezahlt ist; der Vertrag endet mit diesem Zeitraum.
+                'until' => $this->paidUntil ? LocalTime::portalDate($this->paidUntil) : null,
             ],
         );
     }

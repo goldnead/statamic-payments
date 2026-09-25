@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Legal\Cancellations;
 use Goldnead\StatamicPayments\Legal\Moment;
 use Goldnead\StatamicPayments\Models\Cancellation;
 use Goldnead\StatamicPayments\Portal\EmailAddress;
+use Goldnead\StatamicPayments\Support\LocalTime;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Validation\Rule;
@@ -110,7 +111,7 @@ class CancellationController extends Controller
             'date' => $moment['date'],
             'time' => $moment['time'],
             'zone' => $moment['zone'],
-            'effective' => $cancellation->effective_at?->translatedFormat((string) __('statamic-payments::portal.date_format')),
+            'effective' => $cancellation->effective_at ? LocalTime::portalDate($cancellation->effective_at) : null,
             'delivered' => $cancellation->receipt_sent_at !== null,
         ]);
     }

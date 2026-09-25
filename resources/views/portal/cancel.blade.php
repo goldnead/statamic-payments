@@ -23,16 +23,16 @@
                     <td>{{ __('statamic-payments::portal.cancel_price') }}</td>
                     <td class="num">{{ \Goldnead\StatamicPayments\Portal\Display::money((int) $subscription->amount_cent, $subscription->currency) }} · {{ \Goldnead\StatamicPayments\Portal\Display::rhythm($subscription->interval) }}</td>
                 </tr>
-                @if ($subscription->starts_at)
+                @if ($began)
                     <tr>
                         <td>{{ __('statamic-payments::portal.cancel_started') }}</td>
-                        <td class="num">{{ $subscription->starts_at->translatedFormat(__('statamic-payments::portal.date_format')) }}</td>
+                        <td class="num">{{ \Goldnead\StatamicPayments\Support\LocalTime::portalDate($began) }}</td>
                     </tr>
                 @endif
-                @if ($subscription->next_payment_at)
+                @if ($until)
                     <tr>
-                        <td>{{ __('statamic-payments::portal.cancel_next') }}</td>
-                        <td class="num">{{ $subscription->next_payment_at->translatedFormat(__('statamic-payments::portal.date_format')) }}</td>
+                        <td>{{ __('statamic-payments::portal.cancel_paid_until') }}</td>
+                        <td class="num">{{ \Goldnead\StatamicPayments\Support\LocalTime::portalDate($until) }}</td>
                     </tr>
                 @endif
             </tbody>
@@ -40,7 +40,14 @@
     </div>
 
     @if ($subscription->isRunning() || $subscription->isClaimed())
-        <p class="notice">{{ __('statamic-payments::portal.cancel_effect') }}</p>
+        {{--
+            Was die Kündigung bewirkt: ab jetzt keine Abbuchung mehr, der
+            bezahlte Zeitraum bleibt bis zu seinem Ende. Dasselbe, was die
+            Kasse verspricht (Kündigung zum Laufzeitende).
+        --}}
+        <p class="notice">{{ $until
+            ? __('statamic-payments::portal.cancel_effect_until', ['date' => \Goldnead\StatamicPayments\Support\LocalTime::portalDate($until)])
+            : __('statamic-payments::portal.cancel_effect') }}</p>
 
         <form method="POST" action="{{ route('statamic-payments.portal.cancel.run', ['paySubscription' => $subscription->getKey()]) }}">
             @csrf

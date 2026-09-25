@@ -87,7 +87,9 @@ return [
     'cancel_price' => 'Price',
     'cancel_started' => 'Started',
     'cancel_next' => 'Next charge',
-    'cancel_effect' => 'The cancellation takes effect immediately. There will be no further charge.',
+    'cancel_paid_until' => 'Paid until',
+    'cancel_effect' => 'Cancelling ends the contract. There will be no further charge.',
+    'cancel_effect_until' => 'There will be no further charge. The contract ends when the paid period runs out on :date.',
     'cancel_abort' => 'Do not cancel after all',
     'cancel_not_live' => 'This contract is no longer running. There is nothing to cancel.',
 
@@ -95,6 +97,7 @@ return [
 
     'cancelled_title' => 'Cancelled',
     'cancelled_confirmation' => 'Your contract ":name" was cancelled on :date at :time.',
+    'cancelled_until' => 'The paid period runs until :date. There will be no further charge.',
     'cancelled_mailed' => 'A confirmation is on its way to :email.',
     'cancelled_not_mailed' => 'The cancellation is effective. The confirmation email to :email could not be delivered just now — please keep this page or get in touch with us.',
     'cancelled_back' => 'Back to the overview',
@@ -125,7 +128,8 @@ return [
 
     'mail_cancelled_subject' => 'Confirmation of your cancellation',
     'mail_cancelled_greeting' => 'Hello,',
-    'mail_cancelled_body' => 'we confirm the cancellation of your contract ":product". The cancellation reached us on :date at :time and takes effect immediately.',
+    'mail_cancelled_body' => 'we confirm the cancellation of your contract ":product". The cancellation reached us on :date at :time.',
     'mail_cancelled_no_further' => 'There will be no further charge.',
+    'mail_cancelled_until' => 'There will be no further charge. The contract ends when the paid period runs out on :date.',
     'mail_cancelled_keep' => 'Please keep this message as your record.',
 ];

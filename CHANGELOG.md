@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.28.0 — 2026-09-25
+
+Findings from the ChoirLive end-to-end check.
+
+### Upgrading
+
+- New config key `display_timezone` (`STATAMIC_PAYMENTS_DISPLAY_TIMEZONE`), also on the settings
+  screen per brand. Null keeps today's behaviour for most sites: it falls back to `legal.timezone`,
+  then `statamic.system.display_timezone`, then `app.timezone`. No migration. **Do not change
+  `app.timezone` to fix a displayed time**: stored timestamps carry no zone and would all shift.
+- Portal texts: new keys `cancel_paid_until`, `cancel_effect_until`, `cancelled_until`,
+  `mail_cancelled_until`; `cancel_effect` and `mail_cancelled_body` no longer say "immediately".
+  Sites with overridden translations should review them.
+
+### Fixed
+
+- **Control Panel, buyer column:** a purchase `for` an Eloquent user without a morph alias
+  (`App\Models\User`) read "App\ Models\ User Lara Muster". It now reads "User Lara Muster", and a
+  purchase for the buyer themselves shows no second name at all (list, subscription list, detail).
+- **Cancellation page:** "Beginn" showed `starts_at`, the day the provider's rhythm starts (for an
+  annual plan one year after the purchase). It now shows when the contract began. "Nächste
+  Abbuchung" is replaced by "Bezahlt bis".
+- **Cancellation wording:** "Die Kündigung wirkt sofort" contradicted the checkout (end of the paid
+  term). Page, confirmation screen and confirmation mail now say: no further charge, the contract
+  ends when the paid period runs out on <date>. Matches what `closeFor()` does with the access.
+- **Times in the shop's zone:** the cancellation screen and mail, order pages, pause and switch
+  notes and the § 312k/§ 356a receipts formatted in `app.timezone`, so a UTC server wrote
+  "19:07 Uhr" for 21:07 in Berlin. All go through `LocalTime` now; storage stays UTC.
+
+### Documented
+
+- The portal needs no confirmed user account: the link goes to the address on the order and
+  following it proves the address. A buyer who never confirmed the site's account mail can still
+  see orders and cancel (test `PortalWithoutConfirmedAccountTest`).
+
 ## 1.27.0 — 2026-09-25
 
 ### Upgrading

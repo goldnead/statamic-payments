@@ -23,7 +23,7 @@
                 @endif
                 <tr>
                     <td>{{ __('statamic-payments::cancellation.field_effective') }}</td>
-                    <td class="num">{{ $cancellation->effective_at?->translatedFormat(__('statamic-payments::portal.date_format')) ?? __('statamic-payments::cancellation.effective_earliest') }}</td>
+                    <td class="num">{{ $cancellation->effective_at ? \Goldnead\StatamicPayments\Support\LocalTime::portalDate($cancellation->effective_at) : __('statamic-payments::cancellation.effective_earliest') }}</td>
                 </tr>
             </tbody>
         </table>

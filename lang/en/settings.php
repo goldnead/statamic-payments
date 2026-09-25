@@ -139,9 +139,13 @@ return [
             'description' => 'One per line. Parameters a mail service appends to the link in transit, which the signature check would otherwise trip over — `_se` comes from Brevo\'s click counter, for instance. `expires` and `signature` can never be listed here, whatever is entered.',
         ],
 
+        'display_timezone' => [
+            'label' => 'Display timezone',
+            'description' => 'The zone buyers read dates and times in: customer portal, cancellation confirmation, reminders. A name such as Europe/Berlin. Empty uses the timezone on receipts, then Statamic\'s display timezone, then the application\'s. Storage is always UTC; please do not change the application timezone, or every stored time shifts.',
+        ],
         'legal_timezone' => [
             'label' => 'Timezone on receipts',
-            'description' => 'The zone the date and time on an acknowledgement are stated in. Empty uses the application\'s. Set it where the application runs in UTC and the shop does not: the time on a receipt should be the merchant\'s.',
+            'description' => 'The zone the date and time on an acknowledgement are stated in. Empty uses the display timezone. Set it where the application runs in UTC and the shop does not: the time on a receipt should be the merchant\'s.',
         ],
         'consent_accepted_texts' => [
             'label' => 'Accepted consent sentences',

@@ -1,10 +1,10 @@
 @extends('statamic-payments::portal.layout')
 
-@section('title', __('statamic-payments::portal.order_title', ['date' => optional($payment->paid_at)->translatedFormat(__('statamic-payments::portal.date_format'))]))
+@section('title', __('statamic-payments::portal.order_title', ['date' => \Goldnead\StatamicPayments\Support\LocalTime::portalDate($payment->paid_at)]))
 
 @section('content')
     <h1>{{ $name }}</h1>
-    <p class="muted">{{ __('statamic-payments::portal.order_title', ['date' => optional($payment->paid_at)->translatedFormat(__('statamic-payments::portal.date_format'))]) }}</p>
+    <p class="muted">{{ __('statamic-payments::portal.order_title', ['date' => \Goldnead\StatamicPayments\Support\LocalTime::portalDate($payment->paid_at)]) }}</p>
 
     <div class="block">
         <h2>{{ __('statamic-payments::portal.order_lines') }}</h2>

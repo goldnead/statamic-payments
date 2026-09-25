@@ -20,7 +20,7 @@
                 @if ($subscription->next_payment_at)
                     <tr>
                         <td>{{ __('statamic-payments::subscriptions.portal_paid_until') }}</td>
-                        <td class="num">{{ $subscription->next_payment_at->translatedFormat(__('statamic-payments::portal.date_format')) }}</td>
+                        <td class="num">{{ \Goldnead\StatamicPayments\Support\LocalTime::portalDate($subscription->next_payment_at) }}</td>
                     </tr>
                 @endif
             </tbody>

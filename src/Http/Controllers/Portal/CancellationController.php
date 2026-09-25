@@ -62,6 +62,12 @@ class CancellationController extends PortalController
         return response()->view('statamic-payments::portal.cancel', [
             'subscription' => $subscription,
             'name' => $this->nameOf($subscription->product),
+            // Wann der Vertrag begann: die Anlage der Zeile, also der Kauf.
+            // Nicht `starts_at` — das ist der Tag, an dem der Anbieter seinen
+            // Rhythmus beginnt, ein Intervall nach der ersten, schon bezahlten
+            // Abbuchung. Beim Jahresabo stand dort das Datum in einem Jahr.
+            'began' => $subscription->created_at,
+            'until' => $this->paidUntil($subscription),
         ]);
     }
 
@@ -90,8 +96,12 @@ class CancellationController extends PortalController
         // cancellation is tried, and where it has to wait the buyer is told,
         // instead of being shown "cancelled" for a contract that runs on.
         if (! $subscription->isRunning() && ! $subscription->isClaimed()) {
-            return $this->done($subscription, $access->email, $this->momentOf($subscription), false);
+            return $this->done($subscription, $access->email, $this->momentOf($subscription), false, $this->paidUntil($subscription));
         }
+
+        // Vor der Kündigung gelesen: `cancel()` setzt `next_payment_at` auf
+        // null, und danach wüsste die Bestätigung nicht mehr, bis wann bezahlt ist.
+        $until = $this->paidUntil($subscription);
 
         if (! app(Subscriptions::class)->cancel($subscription)) {
             if (($subscription->fresh() ?? $subscription)->isClaimed()) {
@@ -110,7 +120,20 @@ class CancellationController extends PortalController
 
         $subscription = $subscription->fresh() ?? $subscription;
 
-        return $this->done($subscription, $access->email, $this->momentOf($subscription), true);
+        return $this->done($subscription, $access->email, $this->momentOf($subscription), true, $until);
+    }
+
+    /**
+     * Bis wann bezahlt ist: die nächste Abbuchung, sonst das Ende des Zeitraums
+     * der letzten bezahlten Zahlung. Bis dahin läuft der Vertrag nach einer
+     * Kündigung aus (siehe `EntitlementsBridge::closeFor()`, gleiche Kette);
+     * danach folgt keine Abbuchung mehr. Null, wenn es keinen Zeitraum gibt.
+     */
+    protected function paidUntil(Subscription $subscription): ?Carbon
+    {
+        $until = $subscription->next_payment_at ?? $subscription->paidThroughAt();
+
+        return $until !== null && $until->isFuture() ? Carbon::instance($until) : null;
     }
 
     /**
@@ -145,26 +168,28 @@ class CancellationController extends PortalController
      * cancellation and must not pretend it did, so the failure is shown on the
      * screen, with the date and time on it, rather than swallowed into a log.
      */
-    protected function done(Subscription $subscription, string $email, Carbon $moment, bool $justNow)
+    protected function done(Subscription $subscription, string $email, Carbon $moment, bool $justNow, ?Carbon $until = null)
     {
-        $delivered = $justNow ? $this->confirmByMail($subscription, $email, $moment) : true;
+        $delivered = $justNow ? $this->confirmByMail($subscription, $email, $moment, $until) : true;
 
         return response()->view('statamic-payments::portal.cancelled', [
             'subscription' => $subscription,
             'name' => $this->nameOf($subscription->product),
             'moment' => $moment,
+            'until' => $until,
             'delivered' => $delivered,
             'email' => $email,
         ]);
     }
 
-    protected function confirmByMail(Subscription $subscription, string $email, Carbon $moment): bool
+    protected function confirmByMail(Subscription $subscription, string $email, Carbon $moment, ?Carbon $until = null): bool
     {
         try {
             $mailable = new CancellationConfirmed(
                 $subscription,
                 $moment,
                 $this->nameOf($subscription->product),
+                $until,
             );
 
             Mail::to($email)->send($mailable);

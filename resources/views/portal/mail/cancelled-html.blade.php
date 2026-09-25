@@ -18,7 +18,7 @@
 
     <p style="margin:0 0 16px;">{{ __('statamic-payments::portal.mail_cancelled_body', ['product' => $product, 'date' => $date, 'time' => $time]) }}</p>
 
-    <p style="margin:0 0 24px;">{{ __('statamic-payments::portal.mail_cancelled_no_further') }}</p>
+    <p style="margin:0 0 24px;">{{ $until ? __('statamic-payments::portal.mail_cancelled_until', ['date' => $until]) : __('statamic-payments::portal.mail_cancelled_no_further') }}</p>
 
     <p style="margin:0; font-size:13px; color:#71717a;">{{ __('statamic-payments::portal.mail_cancelled_keep') }}</p>
 </div>

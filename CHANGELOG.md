@@ -22,6 +22,12 @@
   statamic-payments` and `source_ref` among the payment's and its subscription's provider ids
   (current, previous, first payment). Before, a refund revoked every grant of the buyer on that
   product, including a second purchase and one made by hand.
+- **A renewal extends this subscription's own grant** instead of calling entitlements' `renew()`,
+  which took any grant of the subject and could push a grant made by hand (or another
+  subscription's) forward. Never shortens, fires `EntitlementRenewed`, grants only when the
+  subscription has no grant of its own. Same for a pause in `keep` mode.
+- A price change that restarts the agreement at the provider remembers the old provider id, so its
+  grants and late cycles are still found.
 - **A subscription keeps billing and subject data of its first payment**: an allow-list
   (`entitlement_subject`, `team_id`, `team_uuid`, `paid_by`, `company`, `address`,
   `address_fields`, `vat_id`), extendable with `Subscriptions::inheritMeta(...)`. Cycles, follow-up

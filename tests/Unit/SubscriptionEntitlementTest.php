@@ -75,30 +75,48 @@ class SubscriptionEntitlementTest extends TestCase
     {
         // Der eigentliche Punkt. Ein Jahr Mitgliedschaft ist ein Zugang, nicht
         // zwölf — sonst wird „hat diese Person Zugang" eine Aggregation.
+        // Verlängert wird der eigene Zugang dieses Abos, nicht über `renew()`
+        // des Geschwisters (das nähme irgendeinen, siehe TeamSubjectTest).
         $geschwister = new StrictEntitlements;
-        $geschwister->renewAntwort = (object) ['slug' => 'mitgliedschaft'];
+        $grant = new class
+        {
+            public $expires_at = null;
+
+            public array $gesetzt = [];
+
+            public function forceFill(array $w): static
+            {
+                $this->gesetzt = $w;
+
+                return $this;
+            }
+
+            public function save(): bool
+            {
+                return true;
+            }
+        };
+        $geschwister->offeneGrants = [$grant];
         $this->bindEntitlements($geschwister);
 
         app(EntitlementsBridge::class)->renewFor($this->abo(), $this->zahlung());
 
-        $this->assertCount(1, $geschwister->renewed);
         $this->assertCount(0, $geschwister->granted, 'eine Verlängerung darf keinen zweiten Zugang schreiben');
-        $this->assertSame('2026-10-01', $geschwister->renewed[0]['until']);
-        $this->assertIsNotString($geschwister->renewed[0]['subject']);
+        $this->assertCount(0, $geschwister->renewed, 'renew() des Geschwisters greift fremde Zugänge');
+        $this->assertSame('2026-10-01', $grant->gesetzt['expires_at']->format('Y-m-d'));
     }
 
     #[Test]
     public function the_first_cycle_of_a_subscription_that_predates_the_bridge_is_granted(): void
     {
-        // renew() gibt null zurück: es gab nichts zu verlängern. Dann ist
+        // Kein eigener Zugang: es gab nichts zu verlängern. Dann ist
         // Vergeben die richtige Antwort und nicht Schweigen.
         $geschwister = new StrictEntitlements;
-        $geschwister->renewAntwort = null;
+        $geschwister->offeneGrants = [];
         $this->bindEntitlements($geschwister);
 
         app(EntitlementsBridge::class)->renewFor($this->abo(), $this->zahlung());
 
-        $this->assertCount(1, $geschwister->renewed);
         $this->assertCount(1, $geschwister->granted);
         $this->assertSame('mitgliedschaft', $geschwister->granted[0]['slug']);
     }

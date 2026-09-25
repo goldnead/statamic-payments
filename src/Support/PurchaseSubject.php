@@ -30,10 +30,17 @@ use Throwable;
  * Der Typ muss einer sein, hinter dem entitlements einen Datensatz findet, und
  * der Datensatz muss existieren. Sonst gilt die Adresse wie ohne `for`, und das
  * Log sagt, warum: ein Kauf scheitert nicht an einem gelöschten Team.
+ *
+ * **Das Paket prüft, dass der Datensatz existiert, nicht dass der Käufer für
+ * ihn kaufen darf.** Mitgliedschaft und Marke prüft der Aufrufer
+ * (statamic-teams in `Teams::checkout()`).
  */
 final class PurchaseSubject
 {
     public const META_KEY = 'entitlement_subject';
+
+    /** @var array<string, bool> "connection:table" → hat eine Spalte `name` */
+    private static array $hasName = [];
 
     /**
      * @return array{type: string, id: string}|null
@@ -124,8 +131,13 @@ final class PurchaseSubject
                 }
 
                 $model = new $class;
+                $cacheKey = ($model->getConnectionName() ?? '').':'.$model->getTable();
 
-                if (! Schema::connection($model->getConnectionName())->hasColumn($model->getTable(), 'name')) {
+                // Einmal je Tabelle und Prozess: jede Suche im Control Panel
+                // fragte sonst das Schema aller Morph-Typen neu ab.
+                self::$hasName[$cacheKey] ??= Schema::connection($model->getConnectionName())->hasColumn($model->getTable(), 'name');
+
+                if (! self::$hasName[$cacheKey]) {
                     continue;
                 }
 

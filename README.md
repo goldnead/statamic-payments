@@ -226,12 +226,19 @@ app(Checkout::class)->start('chorlizenz', $buyer, $returnUrl, null, [
   morph-map alias or an Eloquent class, or `user`), and the record must exist. Otherwise the
   purchase goes ahead for the address and a warning is logged. Any other PHP type (an array, a
   string) throws `InvalidArgumentException`.
+- **The package checks that the record exists, not that the buyer may buy for it.** Membership
+  and brand are the caller's to check (statamic-teams does in `Teams::checkout()`).
 - It is stored as `meta.entitlement_subject = {type, id}`. That key is reserved: passing it inside
   `meta` throws.
 - Grant, renewal, pause, cancellation, end, refund and chargeback then act on that subject, and
   only on grants this package wrote for **that** purchase (`source = statamic-payments`,
-  `source_ref` = the payment's or the subscription's provider id). A second purchase and a grant
-  made by hand stay untouched.
+  `source_ref` = the payment's or the subscription's provider id, current or earlier). A
+  renewal extends that grant itself, never shortens it and fires `EntitlementRenewed`; it does
+  not go through entitlements' `renew()`, which takes any grant of the subject. A second purchase,
+  a second subscription and a grant made by hand stay untouched.
+- A full refund or chargeback of one cycle payment takes the access of the whole subscription,
+  on purpose: the access is one grant for the agreement, not one per month, and money that went
+  back means that period was not paid for.
 - A subscription, its cycles, a follow-up offer and a resumed checkout keep the subject of the
   first payment unless the caller names another.
 

@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Integrations;
 
+use Carbon\CarbonImmutable;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\Catalogue;
@@ -211,7 +212,7 @@ class EntitlementsBridge
 
                 if ($mode === 'keep') {
                     if ($resumesAt !== null) {
-                        $facade::renew($subject, $slug, $resumesAt);
+                        $this->renewOwn($subject, $slug, $this->refsForSubscription($subscription), $resumesAt);
                     }
 
                     continue;
@@ -265,10 +266,12 @@ class EntitlementsBridge
         // Je Slug einzeln, und der Fehlschlag des einen haelt den naechsten
         // nicht auf: ein Abo auf ein Buendel verlaengert drei Zugaenge, und
         // zwei verlaengerte sind besser als keiner.
+        $refs = $this->refsForSubscription($subscription);
+
         foreach ($this->slugsFor($subscription->product) as $slug) {
             try {
                 $facade = self::FACADE;
-                $verlaengert = $facade::renew($subject, $slug, $bis);
+                $verlaengert = $this->renewOwn($subject, $slug, $refs, $bis);
 
                 // Nichts zu verlaengern heisst: es gab noch keinen Zugang. Das ist
                 // der erste Zyklus eines Abos, das vor dieser Bruecke begann, oder
@@ -747,6 +750,63 @@ class EntitlementsBridge
     protected function ownedBy(mixed $query, array $refs): mixed
     {
         return $query->where('source', self::SOURCE)->whereIn('source_ref', $refs);
+    }
+
+    /**
+     * Den eigenen Zugang dieses Abos bis `$bis` verlängern. Null, wenn es
+     * keinen gibt; dann vergibt der Aufrufer.
+     *
+     * **Nicht `renew()` aus entitlements.** Das nimmt irgendeinen Zugang des
+     * Subjekts auf das Produkt, und ein befristeter von Hand sortiert vor dem
+     * offenen des Abos: die Verlängerung schob den fremden Zugang weiter, und
+     * die Erstattung ließ ihn danach stehen (Kritik R2, 25.09.2026, als Test
+     * in TeamSubjectTest). Hier nur, was {@see ownedBy()} diesem Abo zuordnet.
+     *
+     * Dieselben Regeln wie dort: nie verkürzen, Nachfrist weg, Zustand wieder
+     * aktiv, `EntitlementRenewed` für die Zuhörer von entitlements.
+     *
+     * @param  list<string>  $refs
+     */
+    protected function renewOwn(mixed $subject, string $slug, array $refs, Carbon $bis): ?object
+    {
+        $facade = self::FACADE;
+
+        $grant = $this->ownedBy($facade::forSubject($subject), $refs)
+            ->where('product_slug', $slug)
+            ->whereNull('revoked_at')
+            ->orderByDesc('id')
+            ->first();
+
+        if ($grant === null) {
+            return null;
+        }
+
+        $bisher = $grant->expires_at ?? null;
+
+        if ($bisher !== null && $bis->lessThanOrEqualTo($bisher)) {
+            return $grant;
+        }
+
+        $state = '\\Goldnead\\Entitlements\\Enums\\EntitlementState';
+        $active = enum_exists(ltrim($state, '\\')) ? $state::Active->value : 'active';
+
+        $grant->forceFill([
+            'expires_at' => $bis,
+            'grace_until' => null,
+            'status' => $active,
+            'announced_state' => $active,
+        ])->save();
+
+        $event = '\\Goldnead\\Entitlements\\Events\\EntitlementRenewed';
+
+        if (class_exists($event) && method_exists($grant, 'fresh')) {
+            event(new $event(
+                $grant->fresh() ?? $grant,
+                $bisher === null ? null : CarbonImmutable::parse($bisher),
+            ));
+        }
+
+        return $grant;
     }
 
     /**

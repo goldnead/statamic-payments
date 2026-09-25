@@ -601,10 +601,13 @@ class Subscriptions
         'company', 'address', 'address_fields', 'vat_id',
     ];
 
-    /** Zustand, den das Abo selbst in `meta` führt. Nie geerbt. */
+    /** Zustand, den das Abo selbst in `meta` führt, und Angaben nur einer Zahlung. Nie geerbt. */
     protected const OWN_STATE_META = [
         'coupon', 'pause', 'pauses', 'switches', 'switching', 'previous_provider_ids',
         'cancel_requested', 'cancelling_from',
+        // Und was nur der einen Zahlung gehört.
+        'access', 'withdrawal', 'subscription_change', 'reminder_consent',
+        'line_item_sum_cent', 'switched_subscription_id', 'resumed_subscription_id',
     ];
 
     /** @var list<string> Was Hosts und Geschwister dazugemeldet haben. */
@@ -781,6 +784,9 @@ class Subscriptions
             $payload['amount'] = $amount;
             $remote = $gateway->createSubscription($subscription->customer_reference, $payload);
 
+            // Die alte Kennung merken: ein Zyklus unter ihr findet sonst die
+            // Zeile nicht, und die Zugänge dieses Abos stehen unter ihr.
+            $subscription->rememberProviderId((string) $subscription->provider_id);
             $subscription->forceFill(['provider_id' => $remote->providerId])->save();
 
             return true;

@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Tests\Feature;
 
 use Goldnead\Entitlements\Enums\EntitlementState;
+use Goldnead\Entitlements\Events\EntitlementRenewed;
 use Goldnead\Entitlements\Facades\Entitlements;
 use Goldnead\Entitlements\Models\Entitlement;
 use Goldnead\Entitlements\Support\SubjectReference;
@@ -27,6 +28,7 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -152,7 +154,7 @@ class TeamSubjectTest extends TestCase
         $this->assertNotNull($result, 'the checkout for the first payment was refused');
         $this->payOnMollie($result->payment);
 
-        $subscription = Subscription::first();
+        $subscription = Subscription::query()->orderByDesc('id')->first();
         $this->assertNotNull($subscription, 'no agreement was created');
 
         return $subscription;
@@ -352,6 +354,89 @@ class TeamSubjectTest extends TestCase
         $this->assertArrayNotHasKey('subscription_intent', $subscription->meta);
         $this->assertSame("Chorweg 1\n20095 Hamburg", $subscription->meta['address'] ?? null);
         $this->assertTrue(Entitlements::forSubject($this->team())->where('product_slug', 'chor')->exists());
+    }
+
+    /**
+     * Aus der Probe der Kritik R2: entitlements' `renew()` greift irgendeinen
+     * Zugang des Subjekts, und ein befristeter Zugang von Hand sortiert vor
+     * dem offenen des Abos. Die Verlängerung schob dann den fremden Zugang
+     * weiter, und die Erstattung ließ ihn stehen.
+     */
+    #[Test]
+    public function a_renewal_extends_its_own_access_and_not_one_made_by_hand(): void
+    {
+        $subscription = $this->startTeamSubscription();
+        $first = Payment::query()->where('subscription_id', $subscription->getKey())->orderBy('id')->first();
+
+        $bisHand = Carbon::now()->addDays(3)->startOfSecond();
+        Entitlements::grant($this->team(), 'chor', 'manual', 'cp-trial', expiresAt: $bisHand);
+
+        $next = Carbon::now()->addMonth()->startOfSecond();
+        $subscription->forceFill(['next_payment_at' => $next])->save();
+        $cycle = $this->gateway->arrive('chor-abo', 4900, $subscription->provider_id);
+        $this->postJson(route('statamic-payments.webhook'), ['id' => $cycle])->assertOk();
+
+        $this->assertSame($bisHand->toIso8601String(), $this->grantOf('manual', 'cp-trial')->expires_at->toIso8601String(), 'the renewal moved a grant made by hand');
+        $this->assertNotNull($this->grantOf('statamic-payments', $first->provider_id)->expires_at, 'the agreement\'s own access was not renewed');
+
+        app(Refunds::class)->record($first, 4900, 're_x');
+
+        $this->assertSame(EntitlementState::Revoked, $this->grantOf('statamic-payments', $first->provider_id)->state());
+        $this->assertSame(EntitlementState::Active, $this->grantOf('manual', 'cp-trial')->state());
+    }
+
+    #[Test]
+    public function a_renewal_leaves_a_second_agreement_of_the_same_team_alone(): void
+    {
+        $a = $this->startTeamSubscription();
+        $firstA = Payment::query()->where('subscription_id', $a->getKey())->first();
+        $b = $this->startTeamSubscription();
+        $firstB = Payment::query()->where('subscription_id', $b->getKey())->first();
+
+        $bisB = Carbon::now()->addDays(5)->startOfSecond();
+        $this->grantOf('statamic-payments', $firstB->provider_id)->forceFill(['expires_at' => $bisB])->save();
+
+        $a->forceFill(['next_payment_at' => Carbon::now()->addMonths(2)])->save();
+        $cycle = $this->gateway->arrive('chor-abo', 4900, $a->provider_id);
+        $this->postJson(route('statamic-payments.webhook'), ['id' => $cycle])->assertOk();
+
+        $this->assertSame($bisB->toIso8601String(), $this->grantOf('statamic-payments', $firstB->provider_id)->expires_at->toIso8601String(), 'agreement A renewed agreement B\'s access');
+        $this->assertTrue($this->grantOf('statamic-payments', $firstA->provider_id)->expires_at->greaterThan(Carbon::now()->addMonth()));
+    }
+
+    #[Test]
+    public function a_renewal_never_shortens_and_says_so(): void
+    {
+        Event::fake([EntitlementRenewed::class]);
+
+        $subscription = $this->startTeamSubscription();
+        $first = Payment::query()->where('subscription_id', $subscription->getKey())->first();
+        $weit = Carbon::now()->addYear()->startOfSecond();
+        $this->grantOf('statamic-payments', $first->provider_id)->forceFill(['expires_at' => $weit])->save();
+
+        $subscription->forceFill(['next_payment_at' => Carbon::now()->addMonth()])->save();
+        app(EntitlementsBridge::class)->renewFor($subscription->fresh(), $first);
+
+        $this->assertSame($weit->toIso8601String(), $this->grantOf('statamic-payments', $first->provider_id)->expires_at->toIso8601String());
+        Event::assertNotDispatched(EntitlementRenewed::class);
+
+        $subscription->forceFill(['next_payment_at' => Carbon::now()->addYears(2)])->save();
+        app(EntitlementsBridge::class)->renewFor($subscription->fresh(), $first);
+
+        Event::assertDispatched(EntitlementRenewed::class);
+    }
+
+    #[Test]
+    public function a_price_change_that_restarts_the_agreement_keeps_finding_its_access(): void
+    {
+        $subscription = $this->startTeamSubscription();
+        $alt = $subscription->provider_id;
+
+        $this->assertTrue(app(Subscriptions::class)->reprice($subscription, 3900));
+
+        $subscription = $subscription->fresh();
+        $this->assertNotSame($alt, $subscription->provider_id);
+        $this->assertContains($alt, $subscription->meta['previous_provider_ids'] ?? [], 'the old provider id was forgotten');
     }
 
     #[Test]

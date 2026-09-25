@@ -87,7 +87,7 @@ class PaymentDetail extends JsonResource
             'buyer' => [
                 // Für wen gekauft wurde, wenn nicht für die Person selbst
                 // (`meta.entitlement_subject`, etwa ein Team).
-                'subject' => BuyerSubject::describe($meta),
+                'subject' => BuyerSubject::describeFor($meta, $payment->email),
                 // Nicht zweimal dasselbe: bei einem Teamkauf ist der Name oft
                 // schon die Firma.
                 'company' => self::string($meta['company'] ?? null) !== $payment->name ? self::string($meta['company'] ?? null) : null,

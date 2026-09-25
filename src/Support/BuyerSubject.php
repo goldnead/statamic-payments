@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Support;
 
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Str;
@@ -23,7 +24,7 @@ use Throwable;
  */
 final class BuyerSubject
 {
-    /** @var array<string, string|null> "type:id" → Name */
+    /** @var array<string, array{name: string|null, email: string|null}|null> "type:id" → Name und Adresse */
     private static array $names = [];
 
     /**
@@ -39,17 +40,14 @@ final class BuyerSubject
 
         ['type' => $type, 'id' => $id] = $pair;
 
-        $key = 'statamic-payments::messages.subject_type_'.$type;
-        $typeLabel = __($key);
-        $typeLabel = $typeLabel === $key ? Str::headline($type) : $typeLabel;
-
         $cacheKey = $type.':'.$id;
 
         if (! array_key_exists($cacheKey, self::$names)) {
             self::load($type, [$id]);
         }
 
-        $name = self::$names[$cacheKey] ?? '#'.$id;
+        $typeLabel = self::typeLabel($type);
+        $name = self::$names[$cacheKey]['name'] ?? '#'.$id;
 
         return [
             'type' => $type,
@@ -58,6 +56,64 @@ final class BuyerSubject
             'name' => $name,
             'display' => $typeLabel.' '.$name,
         ];
+    }
+
+    /**
+     * Wie {@see self::describe()}, aber nichts, wenn das Subjekt die Person
+     * ist, die bezahlt hat: ein Kauf „für" sich selbst ist kein „gekauft für".
+     * ChoirLive übergibt bei jedem Einzelkauf den eigenen Benutzer als `for`;
+     * die Liste zeigte den Namen dann zweimal.
+     *
+     * @return array{type: string, id: string, type_label: string, name: string, display: string}|null
+     */
+    public static function describeFor(mixed $meta, ?string $buyerEmail): ?array
+    {
+        $described = self::describe($meta);
+
+        if ($described === null || ! self::isPersonType($described['type'])) {
+            return $described;
+        }
+
+        $subjectEmail = self::$names[$described['type'].':'.$described['id']]['email'] ?? null;
+        $buyer = is_string($buyerEmail) ? trim($buyerEmail) : '';
+
+        return $subjectEmail !== null && $buyer !== '' && strcasecmp($subjectEmail, $buyer) === 0
+            ? null
+            : $described;
+    }
+
+    /**
+     * Ein Wort, nie ein Klassenname. Ohne Morph-Alias steht im Typ die Klasse
+     * (`App\Models\User`); ein Benutzermodell heißt dann „Benutzer", alles
+     * andere nach dem kurzen Klassennamen.
+     */
+    private static function typeLabel(string $type): string
+    {
+        $handle = self::isPersonType($type) ? 'user' : $type;
+
+        if (str_contains($handle, '\\')) {
+            $handle = Str::snake(class_basename($handle));
+        }
+
+        $key = 'statamic-payments::messages.subject_type_'.$handle;
+        $label = __($key);
+
+        return is_string($label) && $label !== $key ? $label : Str::headline($handle);
+    }
+
+    /** Ob hinter dem Typ eine Person steht: `user` oder ein Benutzermodell ohne Alias. */
+    private static function isPersonType(string $type): bool
+    {
+        if ($type === 'user') {
+            return true;
+        }
+
+        $class = Relation::getMorphedModel($type) ?? $type;
+
+        return class_exists($class) && (
+            is_subclass_of($class, Authenticatable::class)
+            || $class === config('auth.providers.users.model')
+        );
     }
 
     /**
@@ -102,7 +158,8 @@ final class BuyerSubject
                 foreach ($ids as $id) {
                     $user = User::find($id);
                     $name = is_object($user) && method_exists($user, 'name') ? $user->name() : null;
-                    self::$names['user:'.$id] = self::text($name) ?? self::text($user?->email());
+                    $email = self::text($user?->email());
+                    self::$names['user:'.$id] = ['name' => self::text($name) ?? $email, 'email' => $email];
                 }
 
                 return;
@@ -115,17 +172,34 @@ final class BuyerSubject
             }
 
             foreach ($class::query()->whereKey($ids)->get() as $record) {
-                foreach (['name', 'title', 'label', 'email'] as $attribute) {
-                    if (($value = self::text($record->getAttribute($attribute))) !== null) {
-                        self::$names[$type.':'.$record->getKey()] = $value;
+                $email = self::text(self::attribute($record, 'email'));
+                $name = null;
 
+                foreach (['name', 'title', 'label'] as $attribute) {
+                    if (($name = self::text(self::attribute($record, $attribute))) !== null) {
                         break;
                     }
                 }
+
+                self::$names[$type.':'.$record->getKey()] = ['name' => $name ?? $email, 'email' => $email];
             }
         } catch (Throwable) {
             // Eine Anzeige. Eine fehlende Tabelle oder ein umbenanntes Modell
             // kostet den Namen, nie die Seite.
+        }
+    }
+
+    /**
+     * Je Spalte einzeln abgesichert: ein Modell mit
+     * `preventAccessingMissingAttributes` wirft bei einer Tabelle ohne
+     * `email`, und der Name ginge sonst mit verloren.
+     */
+    private static function attribute(Model $record, string $key): mixed
+    {
+        try {
+            return $record->getAttribute($key);
+        } catch (Throwable) {
+            return null;
         }
     }
 

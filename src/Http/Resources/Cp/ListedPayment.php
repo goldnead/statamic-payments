@@ -47,7 +47,7 @@ class ListedPayment extends JsonResource
             'email' => $this->email,
             'name' => $this->name,
             // Für wen gekauft wurde, wenn nicht für die Person selbst.
-            'subject_display' => BuyerSubject::describe($this->meta)['display'] ?? null,
+            'subject_display' => BuyerSubject::describeFor($this->meta, $this->email)['display'] ?? null,
             'provider_id' => $this->provider_id,
             'url' => cp_route('utilities.payments.show', ['payPayment' => $this->id]),
         ];

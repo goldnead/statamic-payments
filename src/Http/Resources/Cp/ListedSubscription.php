@@ -97,7 +97,7 @@ class ListedSubscription extends JsonResource
             'name' => $this->name,
             // Für wen das Abo läuft, wenn nicht für die Person selbst
             // (`meta.entitlement_subject`, von der ersten Zahlung übernommen).
-            'subject_display' => BuyerSubject::describe($this->meta)['display'] ?? null,
+            'subject_display' => BuyerSubject::describeFor($this->meta, $this->email)['display'] ?? null,
 
             'starts_at' => $this->starts_at?->toIso8601String(),
             'next_payment_at' => $this->next_payment_at?->toIso8601String(),

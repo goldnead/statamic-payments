@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Upgrading
+
+- No migration, no new permission, no new config key. Payments without `meta.entitlement_subject`
+  behave exactly as before.
+- A subclass of `EntitlementsBridge` that overrides `grantSlug()`, `grantLine()` or `extendFor()`
+  must widen `string $subject` to `mixed $subject`: the subject is now resolved before it gets there.
+
+### Added
+
+- **Buying for someone else (a team).** `meta.entitlement_subject = {type, id}` on a payment (as
+  `Teams::checkout()` in statamic-teams sets it) makes the entitlements bridge grant, renew, pause,
+  close and revoke for that subject instead of the buyer's address. Only types entitlements can find
+  a record behind are accepted: a morph-map alias or an Eloquent model class, plus `user`. Anything
+  else falls back to the address and logs a warning.
+- **A subscription keeps the caller's meta of its first payment** (`Subscriptions::inheritedMeta()`),
+  without the keys the package keeps for itself. Renewal, pause, cancellation, end and dunning
+  therefore reach the same subject. Agreements created before this release find the subject on
+  their first payment.
+- **Team billing address for the invoice.** A `meta.address` in the fields statamic-teams writes
+  (`line1`, `line2`, `postal_code`, `city`, `company`, …) becomes the text statamic-invoices prints;
+  `meta.company` is filled from it when not set, the fields stay under `meta.address_fields`. An
+  address given as text, or as an array without `line1`, is kept as it was.
+- **Control Panel:** payments and subscriptions show "Bought for: Team …" in the listing and the
+  detail when the payment carries a subject; the payment detail also shows the company.
+
 ## 1.26.0 — 2026-09-24
 
 ### Upgrading

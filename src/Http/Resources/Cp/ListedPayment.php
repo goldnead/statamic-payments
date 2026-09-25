@@ -5,6 +5,7 @@ namespace Goldnead\StatamicPayments\Http\Resources\Cp;
 use Goldnead\StatamicPayments\Http\Resources\Cp\Concerns\DescribesProducts;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Portal\Display;
+use Goldnead\StatamicPayments\Support\BuyerSubject;
 use Goldnead\StatamicPayments\Support\LocalTime;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -45,6 +46,8 @@ class ListedPayment extends JsonResource
             'charged_back_label' => __('statamic-payments::messages.charged_back'),
             'email' => $this->email,
             'name' => $this->name,
+            // Für wen gekauft wurde, wenn nicht für die Person selbst.
+            'subject_display' => BuyerSubject::describe($this->meta)['display'] ?? null,
             'provider_id' => $this->provider_id,
             'url' => cp_route('utilities.payments.show', ['payPayment' => $this->id]),
         ];

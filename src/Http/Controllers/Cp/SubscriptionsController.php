@@ -205,6 +205,7 @@ class SubscriptionsController extends CpController
             'field_ended_at' => __('statamic-payments::messages.subscription_field_ended_at'),
             'field_total' => __('statamic-payments::messages.subscription_field_total'),
             'field_buyer' => __('statamic-payments::messages.subscription_field_buyer'),
+            'field_subject' => __('statamic-payments::messages.subscription_field_subject'),
             'field_name' => __('statamic-payments::messages.subscription_field_name'),
             'field_provider' => __('statamic-payments::messages.subscription_field_provider'),
             'field_provider_id' => __('statamic-payments::messages.subscription_column_provider_id'),

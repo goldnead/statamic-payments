@@ -11,6 +11,7 @@ use Goldnead\StatamicPayments\Models\PaymentCommunication;
 use Goldnead\StatamicPayments\Models\PaymentItem;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Models\Withdrawal;
+use Goldnead\StatamicPayments\Support\BuyerSubject;
 use Goldnead\StatamicPayments\Support\Invoices;
 use Goldnead\StatamicPayments\Support\Money;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -84,6 +85,10 @@ class PaymentDetail extends JsonResource
             ])->values()->all(),
 
             'buyer' => [
+                // Für wen gekauft wurde, wenn nicht für die Person selbst
+                // (`meta.entitlement_subject`, etwa ein Team).
+                'subject' => BuyerSubject::describe($meta),
+                'company' => self::string($meta['company'] ?? null),
                 'email' => $payment->email,
                 'name' => $payment->name,
                 'country' => $payment->country,

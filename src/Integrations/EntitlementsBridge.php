@@ -5,6 +5,8 @@ namespace Goldnead\StatamicPayments\Integrations;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\Catalogue;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -82,9 +84,9 @@ class EntitlementsBridge
             return;
         }
 
-        $subject = $payment->email;
+        $subject = $this->subjectOfPayment($payment);
 
-        if (! is_string($subject) || $subject === '') {
+        if ($subject === null) {
             // Nothing to grant it to. Already logged loudly by the fulfilment.
             return;
         }
@@ -127,9 +129,9 @@ class EntitlementsBridge
             return;
         }
 
-        $subject = $subscription->email ?: $payment->email;
+        $subject = $this->subjectOfSubscription($subscription, $payment);
 
-        if (! is_string($subject) || $subject === '') {
+        if ($subject === null) {
             return;
         }
 
@@ -156,9 +158,9 @@ class EntitlementsBridge
             return;
         }
 
-        $subject = $subscription->email;
+        $subject = $this->subjectOfSubscription($subscription);
 
-        if (! is_string($subject) || $subject === '') {
+        if ($subject === null) {
             return;
         }
 
@@ -195,9 +197,9 @@ class EntitlementsBridge
             return;
         }
 
-        $subject = $subscription->email;
+        $subject = $this->subjectOfSubscription($subscription);
 
-        if (! is_string($subject) || $subject === '') {
+        if ($subject === null) {
             return;
         }
 
@@ -207,13 +209,13 @@ class EntitlementsBridge
 
                 if ($mode === 'keep') {
                     if ($resumesAt !== null) {
-                        $facade::renew($this->subjectFor($subject), $slug, $resumesAt);
+                        $facade::renew($subject, $slug, $resumesAt);
                     }
 
                     continue;
                 }
 
-                $query = $facade::forSubject($this->subjectFor($subject))
+                $query = $facade::forSubject($subject)
                     ->where('product_slug', $slug)
                     ->whereNull('revoked_at');
 
@@ -245,7 +247,7 @@ class EntitlementsBridge
     /**
      * Push every grant of this agreement's product to `$bis`, or grant it.
      */
-    protected function extendFor(Subscription $subscription, string $subject, ?Carbon $bis): void
+    protected function extendFor(Subscription $subscription, mixed $subject, ?Carbon $bis): void
     {
         if ($bis === null) {
             // Kein Datum vom Anbieter: lieber nichts verlaengern als raten. Ein
@@ -264,7 +266,7 @@ class EntitlementsBridge
         foreach ($this->slugsFor($subscription->product) as $slug) {
             try {
                 $facade = self::FACADE;
-                $verlaengert = $facade::renew($this->subjectFor($subject), $slug, $bis);
+                $verlaengert = $facade::renew($subject, $slug, $bis);
 
                 // Nichts zu verlaengern heisst: es gab noch keinen Zugang. Das ist
                 // der erste Zyklus eines Abos, das vor dieser Bruecke begann, oder
@@ -272,7 +274,7 @@ class EntitlementsBridge
                 // ist Vergeben richtig.
                 if ($verlaengert === null) {
                     $facade::grant(
-                        $this->subjectFor($subject),
+                        $subject,
                         $slug,
                         'statamic-payments',
                         (string) $subscription->provider_id,
@@ -309,9 +311,9 @@ class EntitlementsBridge
             return;
         }
 
-        $subject = $subscription->email;
+        $subject = $this->subjectOfSubscription($subscription);
 
-        if (! is_string($subject) || $subject === '') {
+        if ($subject === null) {
             return;
         }
 
@@ -338,7 +340,7 @@ class EntitlementsBridge
         foreach ($this->slugsFor($subscription->product) as $slug) {
             try {
                 $facade = self::FACADE;
-                $grant = $facade::forSubject($this->subjectFor($subject))
+                $grant = $facade::forSubject($subject)
                     ->where('product_slug', $slug)
                     ->whereNull('expires_at')
                     ->orderByDesc('id')
@@ -471,9 +473,9 @@ class EntitlementsBridge
             return;
         }
 
-        $subject = $payment->email;
+        $subject = $this->subjectOfPayment($payment);
 
-        if (! is_string($subject) || $subject === '') {
+        if ($subject === null) {
             return;
         }
 
@@ -489,7 +491,7 @@ class EntitlementsBridge
                 try {
                     $facade = self::FACADE;
 
-                    $grants = $facade::forSubject($this->subjectFor($subject))
+                    $grants = $facade::forSubject($subject)
                         ->where('product_slug', $slug)
                         ->get();
 
@@ -587,6 +589,116 @@ class EntitlementsBridge
     }
 
     /**
+     * Wem der Zugang aus dieser Zahlung gehört.
+     *
+     * `meta.entitlement_subject = {type, id}`, wenn der Aufrufer es gesetzt
+     * hat, sonst die Adresse wie bisher. So kauft eine Person für ein Team
+     * (`Teams::checkout()` in statamic-teams setzt genau das), und der Zugang
+     * gehört dem Team statt der Person, die geklickt hat.
+     *
+     * Eine Folgezahlung trägt das Feld auch: sie erbt die Angaben der ersten
+     * Zahlung (`Fulfilment::fromTheFirstPayment()`).
+     */
+    protected function subjectOfPayment(Payment $payment): mixed
+    {
+        $explicit = $this->explicitSubject($payment->meta, ['payment_id' => $payment->getKey()]);
+
+        if ($explicit !== null) {
+            return $explicit;
+        }
+
+        return is_string($payment->email) && $payment->email !== ''
+            ? $this->subjectFor($payment->email)
+            : null;
+    }
+
+    /**
+     * Wem der Zugang aus diesem Abo gehört, für Verlängerung, Pause, Kündigung
+     * und Ende.
+     *
+     * Zuerst das Abo selbst (seit 1.27 übernimmt es die Angaben der ersten
+     * Zahlung), dann die Zahlung, um die es gerade geht, dann die erste
+     * Zahlung des Abos. Die letzte Stufe gilt Abos, die vor 1.27 angelegt
+     * wurden: ihr `meta` kennt das Feld nicht, ihre erste Zahlung schon.
+     */
+    protected function subjectOfSubscription(Subscription $subscription, ?Payment $payment = null): mixed
+    {
+        $context = ['subscription_id' => $subscription->getKey()];
+
+        $explicit = $this->explicitSubject($subscription->meta, $context);
+
+        if ($explicit === null && $payment !== null) {
+            $explicit = $this->explicitSubject($payment->meta, $context + ['payment_id' => $payment->getKey()]);
+        }
+
+        if ($explicit === null && ! is_array(data_get($subscription->meta, 'entitlement_subject'))) {
+            $first = Payment::query()
+                ->where('subscription_id', $subscription->getKey())
+                ->orderBy('id')
+                ->first();
+
+            if ($first !== null) {
+                $explicit = $this->explicitSubject($first->meta, $context + ['payment_id' => $first->getKey()]);
+            }
+        }
+
+        if ($explicit !== null) {
+            return $explicit;
+        }
+
+        $email = $subscription->email ?: $payment?->email;
+
+        return is_string($email) && $email !== '' ? $this->subjectFor($email) : null;
+    }
+
+    /**
+     * `meta.entitlement_subject`, geprüft, als `SubjectReference`.
+     *
+     * Nur Typen, unter denen entitlements einen Datensatz findet: ein Alias
+     * der Morph-Map oder ein Eloquent-Modell als Klassenname, dazu `user` für
+     * Statamic-Nutzer aus dem Dateispeicher (so schreibt `MorphSubjectResolver`
+     * sie). Alles andere wäre ein Zugang, der niemandem gehört und erst
+     * auffällt, wenn sich jemand beschwert. Dann gilt die Adresse, und das
+     * Log sagt, warum.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    protected function explicitSubject(mixed $meta, array $context): mixed
+    {
+        $raw = data_get($meta, 'entitlement_subject');
+
+        if ($raw === null) {
+            return null;
+        }
+
+        $klasse = '\\Goldnead\\Entitlements\\Support\\SubjectReference';
+        $type = is_array($raw) && is_string($raw['type'] ?? null) ? trim($raw['type']) : '';
+        $id = is_array($raw) && (is_string($raw['id'] ?? null) || is_int($raw['id'] ?? null)) ? trim((string) $raw['id']) : '';
+
+        if ($type !== '' && $id !== '' && self::resolvableType($type) && class_exists($klasse)) {
+            return new $klasse($type, $id);
+        }
+
+        Log::warning('statamic-payments: meta.entitlement_subject names nothing entitlements can resolve; the access goes to the buyer\'s address instead.', $context + [
+            'entitlement_subject' => $raw,
+        ]);
+
+        return null;
+    }
+
+    /** Whether entitlements can find a record behind this subject type. */
+    public static function resolvableType(string $type): bool
+    {
+        if ($type === 'user') {
+            return true;
+        }
+
+        $class = Relation::getMorphedModel($type) ?? $type;
+
+        return class_exists($class) && is_subclass_of($class, Model::class);
+    }
+
+    /**
      * `meta.access` = `['starts_at' => 'Y-m-d'|null, 'days' => int|null]`.
      *
      * Der Beginn ist der Tagesanfang des genannten Datums in der Zeitzone der
@@ -632,7 +744,7 @@ class EntitlementsBridge
         return [$startsAt, $expiresAt];
     }
 
-    protected function grantLine(Payment $payment, ?string $handle, string $subject, ?array $frozen = null): void
+    protected function grantLine(Payment $payment, ?string $handle, mixed $subject, ?array $frozen = null): void
     {
         if (! is_string($handle) || $handle === '') {
             return;
@@ -676,11 +788,11 @@ class EntitlementsBridge
     }
 
     /** One grant, through the sibling. */
-    protected function grantSlug(Payment $payment, string $slug, string $subject, ?Carbon $startsAt, ?Carbon $expiresAt): void
+    protected function grantSlug(Payment $payment, string $slug, mixed $subject, ?Carbon $startsAt, ?Carbon $expiresAt): void
     {
         $facade = self::FACADE;
         $facade::grant(
-            $this->subjectFor($subject),
+            $subject,
             $slug,
             'statamic-payments',
             (string) $payment->provider_id,

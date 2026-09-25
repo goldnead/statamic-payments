@@ -531,7 +531,7 @@ class Subscriptions
             'starts_at' => $startsAt,
             'email' => $payment->email,
             'name' => $payment->name,
-            'meta' => $this->couponFor($payment, (int) ($catalogue['amount_cent'] ?? $payment->amount_cent), (string) ($catalogue['currency'] ?? $payment->currency)),
+            'meta' => self::inheritedMeta($payment) + ($this->couponFor($payment, (int) ($catalogue['amount_cent'] ?? $payment->amount_cent), (string) ($catalogue['currency'] ?? $payment->currency)) ?? []) ?: null,
         ]);
 
         try {
@@ -586,6 +586,37 @@ class Subscriptions
         }
 
         return $subscription;
+    }
+
+    /**
+     * Schlüssel, die ein Abo in `meta` selbst führt, oder die nur der einen
+     * Zahlung gehören. Sie wandern nicht von der ersten Zahlung aufs Abo: ein
+     * `pause` aus einer fremden Notiz hielte das Abo für pausiert, ein
+     * `access` gehört dem Zugangsfenster eines einzelnen Kaufs.
+     */
+    public const NOT_INHERITED_META = [
+        'coupon', 'pause', 'pauses', 'switches', 'switching', 'previous_provider_ids',
+        'cancel_requested', 'cancelling_from', 'reminder_consent', 'access',
+        'subscription_change', 'switched_subscription_id', 'resumed_subscription_id',
+        'withdrawal', 'line_item_sum_cent',
+    ];
+
+    /**
+     * Was das Abo von seiner ersten Zahlung übernimmt: die Angaben des
+     * Aufrufers, ohne das, was das Paket selbst führt.
+     *
+     * Allen voran `entitlement_subject` (für wen der Zugang ist, etwa ein
+     * Team) und die Rechnungsangaben. Ohne sie träfe die Verlängerung, die
+     * Kündigung und die Mahnung die Adresse der Person, die geklickt hat,
+     * und der Zugang des Teams liefe nie weiter und würde nie geschlossen.
+     *
+     * @return array<string, mixed>
+     */
+    public static function inheritedMeta(Payment $payment): array
+    {
+        $meta = is_array($payment->meta) ? $payment->meta : [];
+
+        return array_diff_key($meta, array_flip([...PaymentDetails::RESERVED_META, ...self::NOT_INHERITED_META]));
     }
 
     /**

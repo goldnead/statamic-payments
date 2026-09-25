@@ -407,6 +407,58 @@ final class PaymentDetails
         }
 
         /** @var array<string, mixed> $meta */
+        return self::billingAddress($meta);
+    }
+
+    /**
+     * Eine Anschrift in Feldern wird zu der Anschrift, die eine Rechnung druckt.
+     *
+     * statamic-invoices liest `meta.address` als Text und `meta.company` als
+     * Empfänger (§ 14 Abs. 4 Nr. 1 UStG: bei einem Firmenkauf die Firma).
+     * statamic-teams gibt die Anschrift eines Teams aber in Feldern mit
+     * (`company`, `name`, `line1`, `line2`, `postal_code`, `city`, `country`).
+     * Unverändert durchgereicht landete ein Array in einer Textspalte, und über
+     * 250 EUR fehlte der Rechnung die Pflichtangabe Anschrift.
+     *
+     * Deshalb hier, bevor die Zeile entsteht: `address` wird Text (Straße,
+     * Zusatz, PLZ und Ort, je eine Zeile; das Land druckt die Rechnung aus der
+     * Spalte `country`), `company` kommt aus den Feldern, wenn der Aufrufer es
+     * nicht selbst gesetzt hat, und die Felder bleiben unter `address_fields`
+     * lesbar. Eine Anschrift als Text bleibt, wie sie ist.
+     *
+     * @param  array<string, mixed>  $meta
+     * @return array<string, mixed>
+     */
+    private static function billingAddress(array $meta): array
+    {
+        $fields = $meta['address'] ?? null;
+
+        // Nur die Form mit `line1`, die statamic-teams schreibt. Ein Aufrufer mit
+        // eigener Form (`street`, …) bekommt sein Array unverändert zurück, wie
+        // bisher: raten, welche Felder eine Zeile sind, hieße Teile verlieren.
+        if (! is_array($fields) || ! array_key_exists('line1', $fields) || ! is_string($fields['line1'])) {
+            return $meta;
+        }
+
+        $text = static fn (mixed $value): ?string => is_string($value) && trim($value) !== '' ? trim($value) : null;
+
+        $lines = array_values(array_filter([
+            $text($fields['line1']),
+            $text($fields['line2'] ?? null),
+            $text(trim(($text($fields['postal_code'] ?? null) ?? '').' '.($text($fields['city'] ?? null) ?? ''))),
+        ]));
+
+        $meta['address_fields'] = $fields;
+        unset($meta['address']);
+
+        if ($lines !== []) {
+            $meta['address'] = implode("\n", $lines);
+        }
+
+        if ($text($meta['company'] ?? null) === null && ($company = $text($fields['company'] ?? null)) !== null) {
+            $meta['company'] = $company;
+        }
+
         return $meta;
     }
 

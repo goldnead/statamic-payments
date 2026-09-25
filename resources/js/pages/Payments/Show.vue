@@ -53,6 +53,11 @@ const t = (key, replacements) => __(`statamic-payments::messages.${key}`, replac
 
 /* Rows for the description lists. `value: null` renders the dash. */
 const buyerRows = computed(() => [
+    // For whom it was bought, when that is not the person who paid: a team,
+    // say. First, because that is who the access and the invoice belong to.
+    // Only when set: a "Bought for: none" on every ordinary order is noise.
+    ...(p.value.buyer.subject ? [{ label: t('detail_field_subject'), value: p.value.buyer.subject.display }] : []),
+    ...(p.value.buyer.company ? [{ label: t('detail_field_company'), value: p.value.buyer.company }] : []),
     { label: t('detail_field_email'), value: p.value.buyer.email },
     { label: t('detail_field_name'), value: p.value.buyer.name },
     { label: t('detail_field_country'), value: p.value.buyer.country ? `${p.value.buyer.country}${p.value.buyer.country_source ? ` (${p.value.buyer.country_source})` : ''}` : null },

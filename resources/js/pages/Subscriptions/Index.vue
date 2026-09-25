@@ -96,6 +96,8 @@ const detailFields = computed(() => {
         { label: t.field_card_expires_at, value: row.card_expires_at },
         { label: t.field_cancelled_at, value: row.cancelled_at_display },
         { label: t.field_ended_at, value: row.ended_at_display },
+        // Only when the agreement runs for somebody else (a team, say).
+        ...(row.subject_display ? [{ label: t.field_subject, value: row.subject_display }] : []),
         { label: t.field_buyer, value: row.email },
         { label: t.field_name, value: row.name },
         { label: t.field_provider, value: row.provider },
@@ -189,7 +191,8 @@ const detailFields = computed(() => {
             </template>
 
             <template #cell-email="{ row }">
-                <span>{{ row.email || t.none }}</span>
+                <span v-if="row.subject_display" class="block">{{ row.subject_display }}</span>
+                <span :class="row.subject_display ? 'block text-2xs text-gray-500 dark:text-gray-400' : ''">{{ row.email || t.none }}</span>
                 <span v-if="row.name" class="block text-2xs text-gray-500 dark:text-gray-400">{{ row.name }}</span>
             </template>
 

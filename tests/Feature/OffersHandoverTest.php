@@ -254,7 +254,7 @@ class OffersHandoverTest extends TestCase
                 return true;
             }
 
-            protected function grantSlug(Payment $payment, string $slug, string $subject, ?Carbon $startsAt, ?Carbon $expiresAt): void
+            protected function grantSlug(Payment $payment, string $slug, mixed $subject, ?Carbon $startsAt, ?Carbon $expiresAt): void
             {
                 $this->vergeben[] = $slug;
             }

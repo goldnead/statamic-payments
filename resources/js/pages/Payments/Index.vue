@@ -98,7 +98,8 @@ const statusColor = (status) => ({
             </template>
 
             <template #cell-email="{ row }">
-                <span>{{ row.email || '—' }}</span>
+                <span v-if="row.subject_display" class="block">{{ row.subject_display }}</span>
+                <span :class="row.subject_display ? 'block text-2xs text-gray-500 dark:text-gray-400' : ''">{{ row.email || '—' }}</span>
                 <span v-if="row.name" class="block text-2xs text-gray-500 dark:text-gray-400">{{ row.name }}</span>
             </template>
 

@@ -29,6 +29,10 @@ Findings from the ChoirLive end-to-end check.
   notes and the § 312k/§ 356a receipts formatted in `app.timezone`, so a UTC server wrote
   "19:07 Uhr" for 21:07 in Berlin. All go through `LocalTime` now; storage stays UTC.
 
+- **Subscription line name:** "ChoirLive Chortarif (jährlich) — jährlich" named the rhythm twice.
+  A product name that already contains the rhythm word gets no suffix (`Subscriptions::lineLabel()`,
+  whole word only: "halbjährlich" is not "jährlich"). This is the name the invoice line carries.
+
 ### Documented
 
 - The portal needs no confirmed user account: the link goes to the address on the order and

@@ -250,9 +250,18 @@ class Subscriptions
         ?string $currency,
     ): string {
         if ($times === null || $times < 2) {
+            $takt = self::intervalLabel($interval);
+
+            // Nennt der Produktname den Takt schon („Chortarif (jährlich)"),
+            // steht er nicht ein zweites Mal dahinter. Als ganzes Wort:
+            // „halbjährlich" ist nicht „jährlich".
+            if ($takt !== '' && preg_match('/(?<![\p{L}\p{N}])'.preg_quote($takt, '/').'(?![\p{L}\p{N}])/iu', $name) === 1) {
+                return $name;
+            }
+
             return __('statamic-payments::messages.invoice_line_subscription', [
                 'name' => $name,
-                'interval' => self::intervalLabel($interval),
+                'interval' => $takt,
             ]);
         }
 

@@ -139,6 +139,10 @@ return [
             'description' => 'One per line. Parameters a mail service appends to the link in transit, which the signature check would otherwise trip over — `_se` comes from Brevo\'s click counter, for instance. `expires` and `signature` can never be listed here, whatever is entered.',
         ],
 
+        'anrede' => [
+            'label' => 'Form of address (German)',
+            'description' => 'How the German texts address buyers: checkout, customer portal, withdrawal, cancellation, reminders and dunning. Pick the one the rest of your site uses; a portal that switches from "du" to "Sie" halfway through reads like two shops. English texts are not affected.',
+        ],
         'display_timezone' => [
             'label' => 'Display timezone',
             'description' => 'The zone buyers read dates and times in: customer portal, cancellation confirmation, reminders. A name such as Europe/Berlin. Empty uses the timezone on receipts, then Statamic\'s display timezone, then the application\'s. Storage is always UTC; please do not change the application timezone, or every stored time shifts.',
@@ -309,6 +313,8 @@ return [
         'capture_consent' => 'Only with consent',
         'capture_always' => 'Always',
         'capture_never' => 'Never',
+        'anrede_sie' => 'Sie (formal)',
+        'anrede_du' => 'Du (informal)',
     ],
 
 ];

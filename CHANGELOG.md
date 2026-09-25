@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.29.0 — 2026-09-25
+
+### Added
+
+- `anrede` setting (`sie` | `du`, env `STATAMIC_PAYMENTS_ANREDE`, on the settings screen per brand):
+  how the German buyer-facing texts address the buyer. Portal, checkout refusals, withdrawal and
+  cancellation pages, their mails, reminders and dunning all follow it. `du` lines ship in
+  `lang/de/du/`. Finding from ChoirLive: account and team pages said "du", the portal after cancelling
+  said "Ihr Vertrag".
+
+### Changed
+
+- Settings screen descriptions (Control Panel) now say "du" like the rest of this addon's CP texts.
+
+### Upgrading
+
+- Default is `sie`: nothing a buyer reads changes until you pick `du`. No migration.
+
 ## 1.28.0 — 2026-09-25
 
 Findings from the ChoirLive end-to-end check.

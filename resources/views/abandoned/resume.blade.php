@@ -1,6 +1,6 @@
 @extends('statamic-payments::portal.layout')
 
-@section('title', __('statamic-payments::abandoned.resume_title'))
+@section('title', \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::abandoned.resume_title'))
 
 @section('content')
     {{--
@@ -10,8 +10,8 @@
         § 356 Abs. 5 — ohne ihn wird trotzdem bestellt, nur bleibt das
         Widerrufsrecht bestehen.
     --}}
-    <h1>{{ __('statamic-payments::abandoned.resume_title') }}</h1>
-    <p class="lede">{{ __('statamic-payments::abandoned.resume_intro') }}</p>
+    <h1>{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::abandoned.resume_title') }}</h1>
+    <p class="lede">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::abandoned.resume_intro') }}</p>
 
     <div class="block">
         <table class="lines">
@@ -24,26 +24,26 @@
                 @endforeach
                 @if ($discount)
                     <tr>
-                        <td>{{ __('statamic-payments::abandoned.resume_discount') }}</td>
+                        <td>{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::abandoned.resume_discount') }}</td>
                         <td class="num">− {{ $discount }} {{ $currency }}</td>
                     </tr>
                 @endif
                 <tr>
-                    <td><strong>{{ __('statamic-payments::abandoned.resume_total') }}</strong></td>
+                    <td><strong>{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::abandoned.resume_total') }}</strong></td>
                     <td class="num"><strong>{{ $total }} {{ $currency }}</strong></td>
                 </tr>
             </tbody>
         </table>
-        <p class="hint">{{ __('statamic-payments::abandoned.resume_price_hint') }}</p>
+        <p class="hint">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::abandoned.resume_price_hint') }}</p>
     </div>
 
     <form method="POST" action="{{ $action }}" class="block">
         @csrf
 
-        <h2>{{ __('statamic-payments::abandoned.resume_withdrawal_heading') }}</h2>
-        <p class="muted">{{ __('statamic-payments::abandoned.resume_withdrawal_text') }}
+        <h2>{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::abandoned.resume_withdrawal_heading') }}</h2>
+        <p class="muted">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::abandoned.resume_withdrawal_text') }}
             @if ($policyUrl)
-                <a href="{{ $policyUrl }}">{{ __('statamic-payments::abandoned.resume_policy_link') }}</a>
+                <a href="{{ $policyUrl }}">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::abandoned.resume_policy_link') }}</a>
             @endif
         </p>
 
@@ -57,11 +57,11 @@
         {{-- The captcha, where the site has one (P7). This order starts a checkout like any other. --}}
         {!! app(\Goldnead\StatamicPayments\Support\CheckoutGuard::class)->widget() !!}
 
-        <button type="submit" class="btn">{{ __('statamic-payments::abandoned.resume_button') }}</button>
-        <p class="muted" style="margin-top:10px; text-align:center;">{{ __('statamic-payments::abandoned.resume_button_hint') }}</p>
+        <button type="submit" class="btn">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::abandoned.resume_button') }}</button>
+        <p class="muted" style="margin-top:10px; text-align:center;">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::abandoned.resume_button_hint') }}</p>
     </form>
 
     <div class="foot">
-        {{ __('statamic-payments::abandoned.resume_foot', ['email' => $payment->email]) }}
+        {{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::abandoned.resume_foot', ['email' => $payment->email]) }}
     </div>
 @endsection

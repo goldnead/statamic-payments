@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Portal\Orders;
 use Goldnead\StatamicPayments\Portal\PortalAccess;
 use Goldnead\StatamicPayments\Portal\PortalSession;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Goldnead\StatamicPayments\Support\Catalogue;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -50,7 +51,7 @@ abstract class PortalController extends Controller
     {
         return redirect()
             ->route('statamic-payments.portal.request')
-            ->with('statamic-payments.portal.status', __('statamic-payments::portal.session_over'));
+            ->with('statamic-payments.portal.status', Anrede::trans('statamic-payments::portal.session_over'));
     }
 
     /**

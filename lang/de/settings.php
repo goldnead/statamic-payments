@@ -17,7 +17,7 @@ return [
 
         'withdrawal' => [
             'title' => 'Widerrufsbutton, § 356a BGB',
-            'description' => 'Seit dem 19.06.2026 muss ein Laden, der im Fernabsatz mit Verbrauchern abschließt, eine elektronische Widerrufsfunktion anbieten. Das Addon bringt die Form mit; die beiden Angaben, die nur Sie haben — wohin ein Widerruf gemeldet wird und wo Ihre Widerrufsbelehrung liegt — stehen hier. Adresse und Drosselung der Routen bleiben in config/statamic-payments.php: sie werden gelesen, während die Routen entstehen, und eine Änderung käme dort erst nach dem nächsten Deploy an.',
+            'description' => 'Seit dem 19.06.2026 muss ein Laden, der im Fernabsatz mit Verbrauchern abschließt, eine elektronische Widerrufsfunktion anbieten. Das Addon bringt die Form mit; die beiden Angaben, die nur du hast — wohin ein Widerruf gemeldet wird und wo deine Widerrufsbelehrung liegt — stehen hier. Adresse und Drosselung der Routen bleiben in config/statamic-payments.php: sie werden gelesen, während die Routen entstehen, und eine Änderung käme dort erst nach dem nächsten Deploy an.',
         ],
 
         'cancellation' => [
@@ -37,7 +37,7 @@ return [
 
         'abandoned' => [
             'title' => 'Abgebrochene Kassen',
-            'description' => 'Jemand hat eine Kasse begonnen und nicht abgeschlossen. Ob eine Erinnerung rausgehen darf, ist eine Einwilligungsfrage — die Adresse wurde gegeben, um einen Kauf abzuschließen, nicht um Werbung zu bekommen. Klären Sie das, bevor Sie hier etwas einschalten.',
+            'description' => 'Jemand hat eine Kasse begonnen und nicht abgeschlossen. Ob eine Erinnerung rausgehen darf, ist eine Einwilligungsfrage — die Adresse wurde gegeben, um einen Kauf abzuschließen, nicht um Werbung zu bekommen. Kläre das, bevor du hier etwas einschaltest.',
         ],
 
         'protection' => [
@@ -73,7 +73,7 @@ return [
         ],
         'prune_unpaid_after_days' => [
             'label' => 'Unbezahlte Kassen löschen nach (Tagen)',
-            'description' => 'Nicht Ordnungsliebe: was in der Zeile steht, sind Name und Adresse von jemandem, mit dem nie ein Vertrag zustande kam. 0 schaltet das Löschen ab. Wählen Sie eine Zahl, die zu Ihren laufenden Erinnerungsstrecken passt.',
+            'description' => 'Nicht Ordnungsliebe: was in der Zeile steht, sind Name und Adresse von jemandem, mit dem nie ein Vertrag zustande kam. 0 schaltet das Löschen ab. Wähle eine Zahl, die zu deinen laufenden Erinnerungsstrecken passt.',
         ],
 
         'withdrawal_enabled' => [
@@ -82,15 +82,15 @@ return [
         ],
         'withdrawal_notify' => [
             'label' => 'Meldeadresse',
-            'description' => 'Wohin Ihre Kopie eines Widerrufs geht, mit der zugeordneten Zahlung und den Hinweisen. Leer nimmt die Absenderadresse des Kundenkontos und danach die der Anwendung. Die Empfangsbestätigung an den Verbraucher geht unabhängig davon raus.',
+            'description' => 'Wohin deine Kopie eines Widerrufs geht, mit der zugeordneten Zahlung und den Hinweisen. Leer nimmt die Absenderadresse des Kundenkontos und danach die der Anwendung. Die Empfangsbestätigung an den Verbraucher geht unabhängig davon raus.',
         ],
         'withdrawal_policy_url' => [
             'label' => 'Widerrufsbelehrung (URL)',
-            'description' => 'Wo Ihre Belehrung liegt. Die Formularseite verlinkt darauf; die Belehrung selbst ist Ihr Dokument, nicht das des Addons.',
+            'description' => 'Wo deine Belehrung liegt. Die Formularseite verlinkt darauf; die Belehrung selbst ist dein Dokument, nicht das des Addons.',
         ],
         'withdrawal_days' => [
             'label' => 'Widerrufsfrist (Tage)',
-            'description' => 'Wird nur dazu benutzt, Ihnen zu sagen, ob eine Erklärung innerhalb der Frist kam. Der Verbraucher wird an dieser Zahl nie abgewiesen — ob die Frist gelaufen ist, ist eine Rechtsfrage, die die Zeile nicht allein klären kann.',
+            'description' => 'Wird nur dazu benutzt, dir zu sagen, ob eine Erklärung innerhalb der Frist kam. Der Verbraucher wird an dieser Zahl nie abgewiesen — ob die Frist gelaufen ist, ist eine Rechtsfrage, die die Zeile nicht allein klären kann.',
         ],
 
         'cancellation_enabled' => [
@@ -99,11 +99,11 @@ return [
         ],
         'cancellation_notify' => [
             'label' => 'Meldeadresse',
-            'description' => 'Wohin Ihre Kopie einer Kündigung geht. Leer wie beim Widerruf.',
+            'description' => 'Wohin deine Kopie einer Kündigung geht. Leer wie beim Widerruf.',
         ],
         'cancellation_policy_url' => [
             'label' => 'Kündigungshinweise (URL)',
-            'description' => 'Eine Seite von Ihnen, die Fristen und dergleichen erklärt. Wird von der Formularseite verlinkt, wenn gesetzt.',
+            'description' => 'Eine Seite von dir, die Fristen und dergleichen erklärt. Wird von der Formularseite verlinkt, wenn gesetzt.',
         ],
 
         'portal_enabled' => [
@@ -139,17 +139,21 @@ return [
             'description' => 'Eine je Zeile. Parameter, die ein Mailanbieter unterwegs an den Link hängt und die die Signaturprüfung sonst stolpern lassen — `_se` kommt zum Beispiel von Brevos Klickzähler. `expires` und `signature` können hier nie stehen, was auch immer eingetragen wird.',
         ],
 
+        'anrede' => [
+            'label' => 'Anrede',
+            'description' => 'Wie die deutschen Texte Käufer ansprechen: Kasse, Kundenkonto, Widerruf, Kündigung, Erinnerungen und Mahnungen. Nimm die Anrede, die der Rest deiner Seite spricht. Ein Konto, das mittendrin vom Du zum Sie wechselt, liest sich wie zwei Läden. Englische Texte bleiben, wie sie sind.',
+        ],
         'display_timezone' => [
             'label' => 'Anzeige-Zeitzone',
             'description' => 'In welcher Zone Käufer Datum und Uhrzeit lesen: Kundenportal, Kündigungsbestätigung, Erinnerungen. Ein Name wie Europe/Berlin. Leer nimmt die Zeitzone der Belege, dann die Anzeige-Zeitzone von Statamic, dann die der Anwendung. Gespeichert wird immer in UTC; die Zeitzone der Anwendung bitte nicht ändern, sonst verschieben sich alle gespeicherten Zeiten.',
         ],
         'legal_timezone' => [
             'label' => 'Zeitzone der Belege',
-            'description' => 'In welcher Zone Datum und Uhrzeit einer Empfangsbestätigung angegeben werden. Leer nimmt die Anzeige-Zeitzone. Setzen Sie sie, wenn die Anwendung in UTC läuft und der Laden nicht: die Uhrzeit auf einem Beleg sollte die des Händlers sein.',
+            'description' => 'In welcher Zone Datum und Uhrzeit einer Empfangsbestätigung angegeben werden. Leer nimmt die Anzeige-Zeitzone. Setz sie, wenn die Anwendung in UTC läuft und der Laden nicht: die Uhrzeit auf einem Beleg sollte die des Händlers sein.',
         ],
         'consent_accepted_texts' => [
             'label' => 'Anerkannte Einwilligungssätze',
-            'description' => 'Einer je Zeile, im genauen Wortlaut Ihrer eigenen Kasse. Ein eingereichter Einwilligungstext wird nur dann auf die Zeile geschrieben, wenn er einer von diesen ist — ein verstecktes Feld ist ein Feld, das jeder bearbeiten kann, und ein Beleg, dessen Wortlaut sich der Käufer ausgesucht hat, belegt nichts.',
+            'description' => 'Einer je Zeile, im genauen Wortlaut deiner eigenen Kasse. Ein eingereichter Einwilligungstext wird nur dann auf die Zeile geschrieben, wenn er einer von diesen ist — ein verstecktes Feld ist ein Feld, das jeder bearbeiten kann, und ein Beleg, dessen Wortlaut sich der Käufer ausgesucht hat, belegt nichts.',
         ],
 
         'abandoned_enabled' => [
@@ -314,6 +318,8 @@ return [
         'capture_consent' => 'Nur mit Einwilligung',
         'capture_always' => 'Immer',
         'capture_never' => 'Nie',
+        'anrede_sie' => 'Sie',
+        'anrede_du' => 'Du',
     ],
 
 ];

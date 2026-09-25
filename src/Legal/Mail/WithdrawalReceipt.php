@@ -5,6 +5,7 @@ namespace Goldnead\StatamicPayments\Legal\Mail;
 use Goldnead\StatamicPayments\Legal\Moment;
 use Goldnead\StatamicPayments\Models\Withdrawal;
 use Goldnead\StatamicPayments\Portal\Mail\SendsAsTheConfiguredSender;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
@@ -32,7 +33,7 @@ class WithdrawalReceipt extends Mailable
     {
         return new Envelope(
             from: $this->configuredSender(),
-            subject: (string) __('statamic-payments::withdrawal.mail_receipt_subject', ['id' => $this->withdrawal->public_id]),
+            subject: (string) Anrede::trans('statamic-payments::withdrawal.mail_receipt_subject', ['id' => $this->withdrawal->public_id]),
         );
     }
 

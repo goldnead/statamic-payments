@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Legal\Cancellations;
 use Goldnead\StatamicPayments\Legal\Moment;
 use Goldnead\StatamicPayments\Models\Cancellation;
 use Goldnead\StatamicPayments\Portal\EmailAddress;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Goldnead\StatamicPayments\Support\LocalTime;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
@@ -77,7 +78,7 @@ class CancellationController extends Controller
         if (! $this->declaredHere($request, $cancellation)) {
             return redirect()
                 ->route('statamic-payments.cancellation.form')
-                ->with('statamic-payments.portal.status', __('statamic-payments::cancellation.restart'));
+                ->with('statamic-payments.portal.status', Anrede::trans('statamic-payments::cancellation.restart'));
         }
 
         return response()->view('statamic-payments::cancellation.confirm', [

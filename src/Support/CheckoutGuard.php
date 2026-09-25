@@ -192,7 +192,7 @@ class CheckoutGuard
     /** The reason, in words a buyer can read. */
     public static function message(string $reason): string
     {
-        return (string) __('statamic-payments::checkout.refused_'.match ($reason) {
+        return (string) Anrede::trans('statamic-payments::checkout.refused_'.match ($reason) {
             'blocked_email', 'blocked_domain', 'blocked_ip' => 'blocked',
             'rate_limited' => 'rate_limited',
             'captcha' => 'captcha',

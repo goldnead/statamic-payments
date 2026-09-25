@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Portal\Mail;
 
+use Goldnead\StatamicPayments\Support\Anrede;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
@@ -30,7 +31,7 @@ class PortalLinkMail extends Mailable
     {
         return new Envelope(
             from: $this->configuredSender(),
-            subject: (string) __('statamic-payments::portal.mail_link_subject'),
+            subject: (string) Anrede::trans('statamic-payments::portal.mail_link_subject'),
         );
     }
 

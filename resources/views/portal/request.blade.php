@@ -11,11 +11,11 @@
     $button = $cancelling ? 'cancel_entry_button' : 'request_button';
 @endphp
 
-@section('title', __('statamic-payments::portal.'.$title))
+@section('title', \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.'.$title))
 
 @section('content')
-    <h1>{{ __('statamic-payments::portal.'.$title) }}</h1>
-    <p class="lede">{{ __('statamic-payments::portal.'.$intro) }}</p>
+    <h1>{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.'.$title) }}</h1>
+    <p class="lede">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.'.$intro) }}</p>
 
     <form method="POST" action="{{ route('statamic-payments.portal.request.send') }}" class="block">
         @csrf
@@ -26,11 +26,11 @@
                  link opens, never whether anything is revealed. --}}
             <input type="hidden" name="payBrand" value="{{ $brand }}">
         @endif
-        <label class="muted" for="pay-email">{{ __('statamic-payments::portal.request_label') }}</label>
+        <label class="muted" for="pay-email">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.request_label') }}</label>
         <input id="pay-email" type="email" name="email" autocomplete="email" required
-               placeholder="{{ __('statamic-payments::portal.request_placeholder') }}">
-        <button type="submit" class="btn">{{ __('statamic-payments::portal.'.$button) }}</button>
+               placeholder="{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.request_placeholder') }}">
+        <button type="submit" class="btn">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.'.$button) }}</button>
     </form>
 
-    <p class="foot">{{ __('statamic-payments::portal.request_foot', ['minutes' => max(1, (int) config('statamic-payments.portal.link_ttl_minutes', 30))]) }}</p>
+    <p class="foot">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.request_foot', ['minutes' => max(1, (int) config('statamic-payments.portal.link_ttl_minutes', 30))]) }}</p>
 @endsection

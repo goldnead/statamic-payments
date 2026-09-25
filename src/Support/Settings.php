@@ -215,6 +215,10 @@ class Settings implements ProvidesSettings
                 'title' => __('statamic-payments::settings.groups.legal.title'),
                 'description' => __('statamic-payments::settings.groups.legal.description'),
                 'fields' => [
+                    static::field('anrede', 'select', ['options' => [
+                        Anrede::SIE => __('statamic-payments::settings.options.anrede_sie'),
+                        Anrede::DU => __('statamic-payments::settings.options.anrede_du'),
+                    ]]),
                     static::field('display_timezone', 'string', ['nullable' => true]),
                     static::field('legal.timezone', 'string', ['nullable' => true]),
                     static::field('consent.accepted_texts', 'list'),

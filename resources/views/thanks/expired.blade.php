@@ -1,6 +1,6 @@
 @extends('statamic-payments::portal.layout')
 
-@section('title', __('statamic-payments::checkout.thanks_expired_title'))
+@section('title', \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::checkout.thanks_expired_title'))
 
 @section('content')
     {{--
@@ -8,10 +8,10 @@
         here says whether an order exists: the link could be anybody's. What was
         bought is in the buyer's own account, behind the address they bought with.
     --}}
-    <h1>{{ __('statamic-payments::checkout.thanks_expired_title') }}</h1>
-    <p class="lede">{{ __('statamic-payments::checkout.thanks_expired_body') }}</p>
+    <h1>{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::checkout.thanks_expired_title') }}</h1>
+    <p class="lede">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::checkout.thanks_expired_body') }}</p>
 
     @if ($portal)
-        <a class="btn" href="{{ $portal }}">{{ __('statamic-payments::checkout.thanks_expired_portal') }}</a>
+        <a class="btn" href="{{ $portal }}">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::checkout.thanks_expired_portal') }}</a>
     @endif
 @endsection

@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Http\Controllers\Cp;
 
 use Goldnead\StatamicPayments\Http\Resources\Cp\CancellationsCollection;
 use Goldnead\StatamicPayments\Models\Cancellation;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Illuminate\Http\Resources\Json\ResourceCollection;
 
 /**
@@ -72,7 +73,7 @@ class CancellationsController extends LegalRequestsController
             'field_effective_at' => __('statamic-payments::messages.cancellation_column_effective_at'),
             'field_subscription' => __('statamic-payments::messages.cancellation_column_subscription'),
             'field_provider_cancelled_at' => __('statamic-payments::messages.cancellation_column_provider_cancelled_at'),
-            'effective_earliest' => __('statamic-payments::cancellation.effective_earliest'),
+            'effective_earliest' => Anrede::trans('statamic-payments::cancellation.effective_earliest'),
             'provider_cancelled' => __('statamic-payments::messages.cancellation_provider_cancelled'),
             'provider_not_cancelled' => __('statamic-payments::messages.cancellation_provider_not_cancelled'),
             'unmatched' => __('statamic-payments::messages.cancellation_unmatched'),

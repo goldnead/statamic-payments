@@ -1,6 +1,6 @@
-{{ __('statamic-payments::portal.mail_link_greeting') }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.mail_link_greeting') }}
 
-{{ __('statamic-payments::portal.mail_link_body', ['minutes' => $minutes]) }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.mail_link_body', ['minutes' => $minutes]) }}
 
 {{--
     Unescaped, and it has to be. This is a plain-text body: there is no HTML
@@ -13,4 +13,4 @@
 --}}
 {!! $url !!}
 
-{{ __('statamic-payments::portal.mail_link_ignore') }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.mail_link_ignore') }}

@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Portal\Mail;
 
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Goldnead\StatamicPayments\Support\LocalTime;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
@@ -47,7 +48,7 @@ class CancellationConfirmed extends Mailable
     {
         return new Envelope(
             from: $this->configuredSender(),
-            subject: (string) __('statamic-payments::portal.mail_cancelled_subject'),
+            subject: (string) Anrede::trans('statamic-payments::portal.mail_cancelled_subject'),
         );
     }
 

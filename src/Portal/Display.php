@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Portal;
 
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Goldnead\StatamicPayments\Support\LocalTime;
 use Goldnead\StatamicPayments\Support\Money;
 
@@ -48,13 +49,13 @@ final class Display
         $suffix = $short ? '_short' : '';
 
         if ($summary['forever'] || $summary['until'] === null) {
-            return (string) __('statamic-payments::subscriptions.coupon_forever'.$suffix, ['code' => $summary['code'], 'off' => $off]);
+            return (string) Anrede::trans('statamic-payments::subscriptions.coupon_forever'.$suffix, ['code' => $summary['code'], 'off' => $off]);
         }
 
-        return (string) __('statamic-payments::subscriptions.coupon_until'.$suffix, [
+        return (string) Anrede::trans('statamic-payments::subscriptions.coupon_until'.$suffix, [
             'code' => $summary['code'],
             'off' => $off,
-            'date' => LocalTime::of($summary['until'])?->translatedFormat(__('statamic-payments::portal.date_format')),
+            'date' => LocalTime::of($summary['until'])?->translatedFormat(Anrede::trans('statamic-payments::portal.date_format')),
         ]);
     }
 
@@ -65,8 +66,8 @@ final class Display
         $number = number_format(
             $cent / (10 ** $decimals),
             $decimals,
-            (string) __('statamic-payments::portal.decimal_point'),
-            (string) __('statamic-payments::portal.thousands_separator'),
+            (string) Anrede::trans('statamic-payments::portal.decimal_point'),
+            (string) Anrede::trans('statamic-payments::portal.thousands_separator'),
         );
 
         return trim($number.' '.(string) $currency);

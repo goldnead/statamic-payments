@@ -5,6 +5,7 @@ namespace Goldnead\StatamicPayments\Http\Controllers\Portal;
 use Goldnead\StatamicPayments\Portal\LinkRequests;
 use Goldnead\StatamicPayments\Portal\LinkTokenizer;
 use Goldnead\StatamicPayments\Portal\PortalSession;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Goldnead\StatamicPayments\Support\Brands;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
@@ -88,7 +89,7 @@ class MagicLinkController extends Controller
 
         return redirect()
             ->route($route, array_filter(['payBrand' => $this->namedBrand($request)]))
-            ->with('statamic-payments.portal.status', __('statamic-payments::portal.link_sent'));
+            ->with('statamic-payments.portal.status', Anrede::trans('statamic-payments::portal.link_sent'));
     }
 
     /**
@@ -125,7 +126,7 @@ class MagicLinkController extends Controller
 
         return redirect()
             ->route('statamic-payments.portal.request')
-            ->with('statamic-payments.portal.status', __('statamic-payments::portal.signed_out'));
+            ->with('statamic-payments.portal.status', Anrede::trans('statamic-payments::portal.signed_out'));
     }
 
     /**

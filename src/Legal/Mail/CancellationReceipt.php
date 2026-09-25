@@ -5,6 +5,7 @@ namespace Goldnead\StatamicPayments\Legal\Mail;
 use Goldnead\StatamicPayments\Legal\Moment;
 use Goldnead\StatamicPayments\Models\Cancellation;
 use Goldnead\StatamicPayments\Portal\Mail\SendsAsTheConfiguredSender;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Goldnead\StatamicPayments\Support\LocalTime;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
@@ -29,7 +30,7 @@ class CancellationReceipt extends Mailable
     {
         return new Envelope(
             from: $this->configuredSender(),
-            subject: (string) __('statamic-payments::cancellation.mail_receipt_subject', ['id' => $this->cancellation->public_id]),
+            subject: (string) Anrede::trans('statamic-payments::cancellation.mail_receipt_subject', ['id' => $this->cancellation->public_id]),
         );
     }
 
@@ -43,7 +44,7 @@ class CancellationReceipt extends Mailable
             with: [
                 'id' => $this->cancellation->public_id,
                 'identification' => $this->cancellation->identification,
-                'kind' => __('statamic-payments::cancellation.kind_'.$this->cancellation->kind),
+                'kind' => Anrede::trans('statamic-payments::cancellation.kind_'.$this->cancellation->kind),
                 // § 312k Abs. 2 S. 4: die Bestätigung nennt den Inhalt der
                 // Erklärung, und bei der außerordentlichen gehört der Grund dazu.
                 'reason' => $this->cancellation->isExtraordinary() ? $this->cancellation->reason : null,

@@ -732,6 +732,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Anrede
+    |--------------------------------------------------------------------------
+    |
+    | How the German texts a buyer reads address them: `sie` (the default, the
+    | wording this addon has always shipped) or `du`. Covers the checkout, the
+    | customer portal, withdrawal and cancellation, reminders and dunning mails.
+    | The `du` lines live in `lang/de/du/`; a locale without them (English) is
+    | not affected. Pick the one the rest of your site speaks: a portal that
+    | switches from "du" to "Sie" halfway through reads like two shops.
+    |
+    */
+
+    'anrede' => env('STATAMIC_PAYMENTS_ANREDE', 'sie'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Widerrufsbutton — § 356a BGB
     |--------------------------------------------------------------------------
     |

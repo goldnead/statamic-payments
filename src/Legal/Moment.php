@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Legal;
 
+use Goldnead\StatamicPayments\Support\Anrede;
 use Goldnead\StatamicPayments\Support\LocalTime;
 use Illuminate\Support\Carbon;
 
@@ -31,8 +32,8 @@ final class Moment
         $local = $moment->copy()->setTimezone($zone);
 
         return [
-            'date' => $local->translatedFormat((string) __('statamic-payments::portal.date_format')),
-            'time' => $local->translatedFormat((string) __('statamic-payments::portal.time_format')),
+            'date' => $local->translatedFormat((string) Anrede::trans('statamic-payments::portal.date_format')),
+            'time' => $local->translatedFormat((string) Anrede::trans('statamic-payments::portal.time_format')),
             'zone' => $local->tzName,
         ];
     }

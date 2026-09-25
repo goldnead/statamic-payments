@@ -1,10 +1,10 @@
-{{ __('statamic-payments::withdrawal.mail_greeting') }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::withdrawal.mail_greeting') }}
 
-{{ __('statamic-payments::withdrawal.mail_receipt_body', ['date' => $date, 'time' => $time, 'zone' => $zone]) }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::withdrawal.mail_receipt_body', ['date' => $date, 'time' => $time, 'zone' => $zone]) }}
 
-{{ __('statamic-payments::withdrawal.mail_receipt_id') }}: {{ $id }}
-{{ __('statamic-payments::withdrawal.mail_receipt_reference') }}: {{ $reference }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::withdrawal.mail_receipt_id') }}: {{ $id }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::withdrawal.mail_receipt_reference') }}: {{ $reference }}
 
-{{ __('statamic-payments::withdrawal.mail_receipt_next') }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::withdrawal.mail_receipt_next') }}
 
-{{ __('statamic-payments::withdrawal.mail_keep') }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::withdrawal.mail_keep') }}

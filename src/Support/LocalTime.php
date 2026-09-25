@@ -97,13 +97,13 @@ final class LocalTime
     /** The portal's date (`portal.date_format`) in the shop's zone. */
     public static function portalDate(?CarbonInterface $moment): string
     {
-        return self::format($moment, (string) __('statamic-payments::portal.date_format'));
+        return self::format($moment, (string) Anrede::trans('statamic-payments::portal.date_format'));
     }
 
     /** The portal's time (`portal.time_format`) in the shop's zone. */
     public static function portalTime(?CarbonInterface $moment): string
     {
-        return self::format($moment, (string) __('statamic-payments::portal.time_format'));
+        return self::format($moment, (string) Anrede::trans('statamic-payments::portal.time_format'));
     }
 
     /** "05.10.2026" (`L`). */

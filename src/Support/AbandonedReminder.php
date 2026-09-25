@@ -146,7 +146,7 @@ class AbandonedReminder
     {
         $variables = $this->variables($payment);
         $subject = config('statamic-payments.abandoned.mail.subject');
-        $subject = is_string($subject) && trim($subject) !== '' ? $subject : (string) __('statamic-payments::abandoned.mail_subject');
+        $subject = is_string($subject) && trim($subject) !== '' ? $subject : (string) Anrede::trans('statamic-payments::abandoned.mail_subject');
         $html = null;
 
         $slug = config('statamic-payments.abandoned.mail.template');

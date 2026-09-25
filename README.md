@@ -1095,6 +1095,21 @@ about it is under `statamic-payments.portal`.
 cancellation without login, which stays untouched. Pause and switch buttons appear where
 `portal.allow_pause` / `pausable` and `portal.allow_switch` with `switch_to` allow them.
 
+### Du or Sie
+
+`anrede` (`STATAMIC_PAYMENTS_ANREDE`, also on the settings screen, per brand) sets how the German
+texts address a buyer: `sie` (default, the wording this addon has always shipped) or `du`. It covers
+everything a buyer reads: checkout refusals, the customer portal, withdrawal and cancellation pages,
+the confirmation mails, reminders and dunning. Pick the one the rest of your site speaks; an account
+area that switches from "du" to "Sie" halfway through reads like two shops.
+
+The `du` lines live in `lang/de/du/<group>.php`, only the ones that differ; everything else comes from
+the normal file. The words the statute prescribes ("Verträge hier kündigen", "jetzt kündigen",
+"Vertrag widerrufen", "Widerruf bestätigen") contain no form of address and are the same in both.
+English is not affected. A site with published translations overrides `du` lines the usual way, under
+`lang/vendor/statamic-payments/de/du/`. In your own code, `Support\Anrede::trans($key)` is `__()` with
+the shop's form of address.
+
 ### The link
 
 Signed, encrypted, and good for thirty minutes. There is no token table: the payload rides inside

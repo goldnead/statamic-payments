@@ -1,15 +1,15 @@
-{{ __('statamic-payments::cancellation.mail_greeting') }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::cancellation.mail_greeting') }}
 
-{{ __('statamic-payments::cancellation.mail_receipt_body', ['date' => $date, 'time' => $time, 'zone' => $zone]) }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::cancellation.mail_receipt_body', ['date' => $date, 'time' => $time, 'zone' => $zone]) }}
 
-{{ __('statamic-payments::cancellation.mail_receipt_id') }}: {{ $id }}
-{{ __('statamic-payments::cancellation.field_identification') }}: {{ $identification }}
-{{ __('statamic-payments::cancellation.field_kind') }}: {{ $kind }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::cancellation.mail_receipt_id') }}: {{ $id }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::cancellation.field_identification') }}: {{ $identification }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::cancellation.field_kind') }}: {{ $kind }}
 @if ($reason)
-{{ __('statamic-payments::cancellation.field_reason') }}: {{ $reason }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::cancellation.field_reason') }}: {{ $reason }}
 @endif
-{{ __('statamic-payments::cancellation.field_effective') }}: {{ $effective ?? __('statamic-payments::cancellation.effective_earliest') }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::cancellation.field_effective') }}: {{ $effective ?? \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::cancellation.effective_earliest') }}
 
-{{ __('statamic-payments::cancellation.mail_receipt_next') }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::cancellation.mail_receipt_next') }}
 
-{{ __('statamic-payments::cancellation.mail_keep') }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::cancellation.mail_keep') }}

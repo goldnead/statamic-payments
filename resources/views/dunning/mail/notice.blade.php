@@ -1,14 +1,14 @@
-{{ $buyer['name'] !== '' ? __('statamic-payments::dunning.mail_greeting_name', ['name' => $buyer['name']]) : __('statamic-payments::dunning.mail_greeting') }}
+{{ $buyer['name'] !== '' ? \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::dunning.mail_greeting_name', ['name' => $buyer['name']]) : \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::dunning.mail_greeting') }}
 
-{{ __('statamic-payments::dunning.mail_body', ['plan' => $plan['name'], 'amount' => $plan['display']]) }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::dunning.mail_body', ['plan' => $plan['name'], 'amount' => $plan['display']]) }}
 
 @if ($final)
-{{ __('statamic-payments::dunning.mail_final') }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::dunning.mail_final') }}
 @else
-{{ __('statamic-payments::dunning.mail_again') }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::dunning.mail_again') }}
 @endif
 
-{{ __('statamic-payments::dunning.mail_button') }}:
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::dunning.mail_button') }}:
 {!! $portal_url !!}
 
-{{ __('statamic-payments::dunning.mail_expires') }}
+{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::dunning.mail_expires') }}

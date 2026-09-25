@@ -482,7 +482,7 @@ class SubscriptionSwitches
         }
 
         $name = (string) ($entry['name'] ?? $to);
-        $label = __('statamic-payments::subscriptions.switch_line', ['name' => $name]);
+        $label = Anrede::trans('statamic-payments::subscriptions.switch_line', ['name' => $name]);
 
         // Charged already for this switch and not used by a finished one.
         $consumed = array_map(

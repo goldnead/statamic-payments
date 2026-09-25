@@ -1,6 +1,6 @@
 @extends('statamic-payments::portal.layout')
 
-@section('title', __('statamic-payments::portal.cancel_title'))
+@section('title', \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancel_title'))
 
 @section('content')
     {{--
@@ -9,29 +9,29 @@
         wording the statute prescribes. Nothing else is on it that could be
         pressed by mistake.
     --}}
-    <h1>{{ __('statamic-payments::portal.cancel_title') }}</h1>
-    <p class="lede">{{ __('statamic-payments::portal.cancel_intro') }}</p>
+    <h1>{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancel_title') }}</h1>
+    <p class="lede">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancel_intro') }}</p>
 
     <div class="block">
         <table class="lines">
             <tbody>
                 <tr>
-                    <td>{{ __('statamic-payments::portal.cancel_contract') }}</td>
+                    <td>{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancel_contract') }}</td>
                     <td class="num">{{ $name }}</td>
                 </tr>
                 <tr>
-                    <td>{{ __('statamic-payments::portal.cancel_price') }}</td>
+                    <td>{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancel_price') }}</td>
                     <td class="num">{{ \Goldnead\StatamicPayments\Portal\Display::money((int) $subscription->amount_cent, $subscription->currency) }} · {{ \Goldnead\StatamicPayments\Portal\Display::rhythm($subscription->interval) }}</td>
                 </tr>
                 @if ($began)
                     <tr>
-                        <td>{{ __('statamic-payments::portal.cancel_started') }}</td>
+                        <td>{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancel_started') }}</td>
                         <td class="num">{{ \Goldnead\StatamicPayments\Support\LocalTime::portalDate($began) }}</td>
                     </tr>
                 @endif
                 @if ($until)
                     <tr>
-                        <td>{{ __('statamic-payments::portal.cancel_paid_until') }}</td>
+                        <td>{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancel_paid_until') }}</td>
                         <td class="num">{{ \Goldnead\StatamicPayments\Support\LocalTime::portalDate($until) }}</td>
                     </tr>
                 @endif
@@ -46,18 +46,18 @@
             Kasse verspricht (Kündigung zum Laufzeitende).
         --}}
         <p class="notice">{{ $until
-            ? __('statamic-payments::portal.cancel_effect_until', ['date' => \Goldnead\StatamicPayments\Support\LocalTime::portalDate($until)])
-            : __('statamic-payments::portal.cancel_effect') }}</p>
+            ? \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancel_effect_until', ['date' => \Goldnead\StatamicPayments\Support\LocalTime::portalDate($until)])
+            : \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancel_effect') }}</p>
 
         <form method="POST" action="{{ route('statamic-payments.portal.cancel.run', ['paySubscription' => $subscription->getKey()]) }}">
             @csrf
-            <button type="submit" class="btn">{{ __('statamic-payments::portal.cancel_now') }}</button>
+            <button type="submit" class="btn">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancel_now') }}</button>
         </form>
     @else
-        <p class="notice">{{ __('statamic-payments::portal.cancel_not_live') }}</p>
+        <p class="notice">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancel_not_live') }}</p>
     @endif
 
     <div class="foot">
-        <a href="{{ route('statamic-payments.portal.show') }}">{{ __('statamic-payments::portal.cancel_abort') }}</a>
+        <a href="{{ route('statamic-payments.portal.show') }}">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancel_abort') }}</a>
     </div>
 @endsection

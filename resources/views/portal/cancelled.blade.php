@@ -1,9 +1,9 @@
 @extends('statamic-payments::portal.layout')
 
-@section('title', __('statamic-payments::portal.cancelled_title'))
+@section('title', \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancelled_title'))
 
 @section('content')
-    <h1>{{ __('statamic-payments::portal.cancelled_title') }}</h1>
+    <h1>{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancelled_title') }}</h1>
 
     {{--
         The date and the time, on the screen as well as in the mail. The mail is
@@ -11,18 +11,18 @@
         proves nothing — but somebody standing here has just ended a contract and
         should be able to read when, without waiting for a mail server.
     --}}
-    <p class="lede">{{ __('statamic-payments::portal.cancelled_confirmation', [
+    <p class="lede">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancelled_confirmation', [
         'name' => $name,
         'date' => \Goldnead\StatamicPayments\Support\LocalTime::portalDate($moment),
         'time' => \Goldnead\StatamicPayments\Support\LocalTime::portalTime($moment),
     ]) }}</p>
 
     @if ($until ?? null)
-        <p class="lede">{{ __('statamic-payments::portal.cancelled_until', ['date' => \Goldnead\StatamicPayments\Support\LocalTime::portalDate($until)]) }}</p>
+        <p class="lede">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancelled_until', ['date' => \Goldnead\StatamicPayments\Support\LocalTime::portalDate($until)]) }}</p>
     @endif
 
     @if ($delivered)
-        <p class="notice">{{ __('statamic-payments::portal.cancelled_mailed', ['email' => $email]) }}</p>
+        <p class="notice">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancelled_mailed', ['email' => $email]) }}</p>
     @else
         {{--
             The cancellation stands; the confirmation in Textform did not go out.
@@ -30,10 +30,10 @@
             person it concerns is the one reading this — and because the page
             they are looking at is, for the moment, the only record they have.
         --}}
-        <p class="errors" role="alert">{{ __('statamic-payments::portal.cancelled_not_mailed', ['email' => $email]) }}</p>
+        <p class="errors" role="alert">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancelled_not_mailed', ['email' => $email]) }}</p>
     @endif
 
     <div class="foot">
-        <a href="{{ route('statamic-payments.portal.show') }}">{{ __('statamic-payments::portal.cancelled_back') }}</a>
+        <a href="{{ route('statamic-payments.portal.show') }}">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.cancelled_back') }}</a>
     </div>
 @endsection

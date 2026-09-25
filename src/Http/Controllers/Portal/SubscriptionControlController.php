@@ -5,6 +5,7 @@ namespace Goldnead\StatamicPayments\Http\Controllers\Portal;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Portal\Display;
 use Goldnead\StatamicPayments\Portal\PortalAccess;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Goldnead\StatamicPayments\Support\LocalTime;
 use Goldnead\StatamicPayments\Support\SubscriptionPauses;
 use Goldnead\StatamicPayments\Support\SubscriptionSwitches;
@@ -34,7 +35,7 @@ class SubscriptionControlController extends PortalController
         abort_if($subscription === null, 404);
 
         if (! app(SubscriptionPauses::class)->portalMayPause($subscription)) {
-            return $this->backToOrders(__('statamic-payments::subscriptions.portal_pause_unavailable'));
+            return $this->backToOrders(Anrede::trans('statamic-payments::subscriptions.portal_pause_unavailable'));
         }
 
         return response()->view('statamic-payments::portal.pause', [
@@ -57,7 +58,7 @@ class SubscriptionControlController extends PortalController
         $pauses = app(SubscriptionPauses::class);
 
         if (! $pauses->portalMayPause($subscription)) {
-            return $this->backToOrders(__('statamic-payments::subscriptions.portal_pause_unavailable'));
+            return $this->backToOrders(Anrede::trans('statamic-payments::subscriptions.portal_pause_unavailable'));
         }
 
         $resumeOn = null;
@@ -73,17 +74,17 @@ class SubscriptionControlController extends PortalController
             if ($resumeOn === null || $resumeOn->lte(Carbon::today())) {
                 return redirect()
                     ->route('statamic-payments.portal.pause.confirm', ['paySubscription' => $subscription->getKey()])
-                    ->with('statamic-payments.portal.error', __('statamic-payments::subscriptions.portal_pause_date_invalid'));
+                    ->with('statamic-payments.portal.error', Anrede::trans('statamic-payments::subscriptions.portal_pause_date_invalid'));
             }
         }
 
         if (! $pauses->pause($subscription, $resumeOn, 'portal')) {
-            return $this->backToOrders(__('statamic-payments::subscriptions.portal_pause_failed'));
+            return $this->backToOrders(Anrede::trans('statamic-payments::subscriptions.portal_pause_failed'));
         }
 
         return redirect()
             ->route('statamic-payments.portal.show')
-            ->with('statamic-payments.portal.status', __('statamic-payments::subscriptions.portal_paused'));
+            ->with('statamic-payments.portal.status', Anrede::trans('statamic-payments::subscriptions.portal_paused'));
     }
 
     public function resume(Request $request, string $paySubscription)
@@ -100,18 +101,18 @@ class SubscriptionControlController extends PortalController
         // Control Panel may be ended by the buyer too, where pausing is allowed
         // for this product at all.
         if (! $subscription->isPaused() || ! app(SubscriptionPauses::class)->portalAllows($subscription)) {
-            return $this->backToOrders(__('statamic-payments::subscriptions.portal_pause_unavailable'));
+            return $this->backToOrders(Anrede::trans('statamic-payments::subscriptions.portal_pause_unavailable'));
         }
 
         if (! app(SubscriptionPauses::class)->resume($subscription, 'portal')) {
-            return $this->backToOrders(__('statamic-payments::subscriptions.portal_resume_failed'));
+            return $this->backToOrders(Anrede::trans('statamic-payments::subscriptions.portal_resume_failed'));
         }
 
         $subscription = $subscription->fresh() ?? $subscription;
 
         return redirect()
             ->route('statamic-payments.portal.show')
-            ->with('statamic-payments.portal.status', __('statamic-payments::subscriptions.portal_resumed', [
+            ->with('statamic-payments.portal.status', Anrede::trans('statamic-payments::subscriptions.portal_resumed', [
                 'date' => LocalTime::portalDate($subscription->next_payment_at),
             ]));
     }
@@ -130,7 +131,7 @@ class SubscriptionControlController extends PortalController
         $targets = $switches->targetsFor($subscription, portal: true);
 
         if ($targets === []) {
-            return $this->backToOrders(__('statamic-payments::subscriptions.portal_switch_unavailable'));
+            return $this->backToOrders(Anrede::trans('statamic-payments::subscriptions.portal_switch_unavailable'));
         }
 
         $choices = [];
@@ -149,9 +150,9 @@ class SubscriptionControlController extends PortalController
                 'rhythm' => Display::rhythm((string) $subscription->interval),
                 'effect' => $preview['immediate']
                     ? ($preview['proration_cent'] > 0
-                        ? __('statamic-payments::subscriptions.portal_switch_now_charge', ['amount' => Display::money($preview['proration_cent'], $subscription->currency)])
-                        : __('statamic-payments::subscriptions.portal_switch_now_free'))
-                    : __('statamic-payments::subscriptions.portal_switch_later', [
+                        ? Anrede::trans('statamic-payments::subscriptions.portal_switch_now_charge', ['amount' => Display::money($preview['proration_cent'], $subscription->currency)])
+                        : Anrede::trans('statamic-payments::subscriptions.portal_switch_now_free'))
+                    : Anrede::trans('statamic-payments::subscriptions.portal_switch_later', [
                         'date' => LocalTime::portalDate($preview['effective_at'] ?? null),
                     ]),
             ];
@@ -178,16 +179,16 @@ class SubscriptionControlController extends PortalController
         $switches = app(SubscriptionSwitches::class);
 
         if (! array_key_exists($to, $switches->targetsFor($subscription, portal: true))) {
-            return $this->backToOrders(__('statamic-payments::subscriptions.portal_switch_unavailable'));
+            return $this->backToOrders(Anrede::trans('statamic-payments::subscriptions.portal_switch_unavailable'));
         }
 
         if (! $switches->switch($subscription, $to, 'portal')) {
-            return $this->backToOrders(__('statamic-payments::subscriptions.portal_switch_failed'));
+            return $this->backToOrders(Anrede::trans('statamic-payments::subscriptions.portal_switch_failed'));
         }
 
         return redirect()
             ->route('statamic-payments.portal.show')
-            ->with('statamic-payments.portal.status', __('statamic-payments::subscriptions.portal_switched', ['name' => $this->nameOf($to)]));
+            ->with('statamic-payments.portal.status', Anrede::trans('statamic-payments::subscriptions.portal_switched', ['name' => $this->nameOf($to)]));
     }
 
     /**

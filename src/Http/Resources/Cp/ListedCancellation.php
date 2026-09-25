@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Http\Resources\Cp;
 
 use Goldnead\StatamicPayments\Models\Cancellation;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
@@ -23,7 +24,7 @@ class ListedCancellation extends JsonResource
             'email' => $this->email,
             'identification' => $this->identification,
             'kind' => $this->kind,
-            'kind_label' => __('statamic-payments::cancellation.kind_'.$this->kind),
+            'kind_label' => Anrede::trans('statamic-payments::cancellation.kind_'.$this->kind),
             'reason' => $this->reason,
             'effective_at' => $this->effective_at?->toDateString(),
             'declared_at' => $this->declared_at->toIso8601String(),

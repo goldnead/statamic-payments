@@ -119,7 +119,7 @@ class DunningNotice
             // suppression list knows no such exemption. The sequence still ends
             // on its own schedule.
             if ($payment) {
-                PaymentLog::note($payment, 'dunning_suppressed', __('statamic-payments::dunning.log_suppressed', ['email' => $email]));
+                PaymentLog::note($payment, 'dunning_suppressed', Anrede::trans('statamic-payments::dunning.log_suppressed', ['email' => $email]));
             }
 
             return self::SKIPPED;
@@ -316,7 +316,7 @@ class DunningNotice
         $subject = config('statamic-payments.dunning.mail.subject');
         $subject = is_string($subject) && trim($subject) !== ''
             ? $subject
-            : (string) __('statamic-payments::dunning.mail_subject');
+            : (string) Anrede::trans('statamic-payments::dunning.mail_subject');
 
         return [
             'subject' => $subject,

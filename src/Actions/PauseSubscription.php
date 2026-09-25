@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Actions;
 
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Goldnead\StatamicPayments\Support\SubscriptionPauses;
 use Illuminate\Support\Carbon;
 use Statamic\Actions\Action;
@@ -32,7 +33,7 @@ class PauseSubscription extends Action
 
     public static function title()
     {
-        return __('statamic-payments::subscriptions.pause');
+        return Anrede::trans('statamic-payments::subscriptions.pause');
     }
 
     public function icon(): string
@@ -64,12 +65,12 @@ class PauseSubscription extends Action
     public function buttonText()
     {
         /** @translation */
-        return __('statamic-payments::subscriptions.pause');
+        return Anrede::trans('statamic-payments::subscriptions.pause');
     }
 
     public function confirmationText()
     {
-        return __('statamic-payments::subscriptions.pause_confirm');
+        return Anrede::trans('statamic-payments::subscriptions.pause_confirm');
     }
 
     public function run($items, $values)
@@ -85,7 +86,7 @@ class PauseSubscription extends Action
             return trans_choice('statamic-payments::subscriptions.paused_bulk', $paused->count(), ['count' => $paused->count()]);
         }
 
-        Toast::error(__('statamic-payments::subscriptions.pause_failed', [
+        Toast::error(Anrede::trans('statamic-payments::subscriptions.pause_failed', [
             'failed' => $refused->count(),
             'total' => $items->count(),
         ]));

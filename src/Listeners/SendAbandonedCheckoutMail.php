@@ -7,6 +7,7 @@ use Goldnead\StatamicPayments\Facades\PaymentLog;
 use Goldnead\StatamicPayments\Mail\AbandonedCheckoutMail;
 use Goldnead\StatamicPayments\Models\PaymentCommunication;
 use Goldnead\StatamicPayments\Support\AbandonedReminder;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
@@ -38,7 +39,7 @@ class SendAbandonedCheckoutMail
         }
 
         if ($this->reminder->suppressed($email, (int) $payment->brand_id)) {
-            PaymentLog::note($payment, 'abandoned_suppressed', __('statamic-payments::abandoned.log_suppressed', ['email' => $email]));
+            PaymentLog::note($payment, 'abandoned_suppressed', Anrede::trans('statamic-payments::abandoned.log_suppressed', ['email' => $email]));
 
             return;
         }

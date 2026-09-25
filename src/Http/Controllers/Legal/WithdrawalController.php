@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Legal\Moment;
 use Goldnead\StatamicPayments\Legal\Withdrawals;
 use Goldnead\StatamicPayments\Models\Withdrawal;
 use Goldnead\StatamicPayments\Portal\EmailAddress;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 
@@ -86,7 +87,7 @@ class WithdrawalController extends Controller
         if (! $this->declaredHere($request, $withdrawal)) {
             return redirect()
                 ->route('statamic-payments.withdrawal.form')
-                ->with('statamic-payments.portal.status', __('statamic-payments::withdrawal.restart'));
+                ->with('statamic-payments.portal.status', Anrede::trans('statamic-payments::withdrawal.restart'));
         }
 
         return response()->view('statamic-payments::withdrawal.confirm', [

@@ -5,6 +5,7 @@ namespace Goldnead\StatamicPayments\Http\Resources\Cp;
 use Goldnead\StatamicPayments\Http\Resources\Cp\Concerns\DescribesProducts;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Portal\Display;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Goldnead\StatamicPayments\Support\BuyerSubject;
 use Goldnead\StatamicPayments\Support\Dunning;
 use Goldnead\StatamicPayments\Support\LocalTime;
@@ -206,7 +207,7 @@ class ListedSubscription extends JsonResource
                     ]).(isset($switch['proration_failed_payment_id'])
                         // The difference was charged and did not arrive: the
                         // new product runs unpaid for the rest of the period.
-                        ? '. '.__('statamic-payments::subscriptions.history_proration_failed')
+                        ? '. '.Anrede::trans('statamic-payments::subscriptions.history_proration_failed')
                         : ''),
                 'failed' => isset($switch['proration_failed_payment_id']),
             ];
@@ -219,7 +220,7 @@ class ListedSubscription extends JsonResource
 
             $lines[] = [
                 'at' => $pause['resumed_at'] ?? null,
-                'text' => __('statamic-payments::subscriptions.history_pause', [
+                'text' => Anrede::trans('statamic-payments::subscriptions.history_pause', [
                     'from' => $this->day($pause['paused_at'] ?? null),
                     'to' => $this->day($pause['resumed_at'] ?? null),
                 ]),

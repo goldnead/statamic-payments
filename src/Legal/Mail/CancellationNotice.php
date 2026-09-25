@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Legal\Cancellations;
 use Goldnead\StatamicPayments\Legal\Moment;
 use Goldnead\StatamicPayments\Models\Cancellation;
 use Goldnead\StatamicPayments\Portal\Mail\SendsAsTheConfiguredSender;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Goldnead\StatamicPayments\Support\LocalTime;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
@@ -28,7 +29,7 @@ class CancellationNotice extends Mailable
     {
         return new Envelope(
             from: $this->configuredSender(),
-            subject: (string) __('statamic-payments::cancellation.mail_merchant_subject', ['id' => $this->cancellation->public_id]),
+            subject: (string) Anrede::trans('statamic-payments::cancellation.mail_merchant_subject', ['id' => $this->cancellation->public_id]),
         );
     }
 
@@ -45,7 +46,7 @@ class CancellationNotice extends Mailable
                 // Über die laufende Nummer getroffen: zugeordnet, nicht
                 // gekündigt, und der Händler soll wissen, warum.
                 'byNumber' => $subscription !== null && ! Cancellations::matchedByProviderId($this->cancellation, $subscription),
-                'kind' => __('statamic-payments::cancellation.kind_'.$this->cancellation->kind),
+                'kind' => Anrede::trans('statamic-payments::cancellation.kind_'.$this->cancellation->kind),
                 'effective' => $this->cancellation->effective_at ? LocalTime::portalDate($this->cancellation->effective_at) : null,
                 'date' => $moment['date'],
                 'time' => $moment['time'],

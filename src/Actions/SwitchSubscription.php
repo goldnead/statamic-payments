@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Actions;
 
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Goldnead\StatamicPayments\Support\SubscriptionSwitches;
 use Statamic\Actions\Action;
 use Statamic\Facades\CP\Toast;
@@ -21,7 +22,7 @@ class SwitchSubscription extends Action
 
     public static function title()
     {
-        return __('statamic-payments::subscriptions.switch');
+        return Anrede::trans('statamic-payments::subscriptions.switch');
     }
 
     public function icon(): string
@@ -39,8 +40,8 @@ class SwitchSubscription extends Action
         return [
             'to' => [
                 'type' => 'select',
-                'display' => __('statamic-payments::subscriptions.switch_to'),
-                'instructions' => __('statamic-payments::subscriptions.switch_to_instructions'),
+                'display' => Anrede::trans('statamic-payments::subscriptions.switch_to'),
+                'instructions' => Anrede::trans('statamic-payments::subscriptions.switch_to_instructions'),
                 'options' => $options,
                 'validate' => 'required',
             ],
@@ -67,12 +68,12 @@ class SwitchSubscription extends Action
     public function buttonText()
     {
         /** @translation */
-        return __('statamic-payments::subscriptions.switch');
+        return Anrede::trans('statamic-payments::subscriptions.switch');
     }
 
     public function confirmationText()
     {
-        return __('statamic-payments::subscriptions.switch_confirm');
+        return Anrede::trans('statamic-payments::subscriptions.switch_confirm');
     }
 
     public function run($items, $values)
@@ -88,7 +89,7 @@ class SwitchSubscription extends Action
             return trans_choice('statamic-payments::subscriptions.switched_bulk', $switched->count(), ['count' => $switched->count()]);
         }
 
-        Toast::error(__('statamic-payments::subscriptions.switch_failed'));
+        Toast::error(Anrede::trans('statamic-payments::subscriptions.switch_failed'));
 
         return ['message' => false];
     }

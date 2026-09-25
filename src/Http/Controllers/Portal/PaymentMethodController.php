@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Http\Controllers\Portal;
 
 use Goldnead\StatamicPayments\Contracts\MandateGateway;
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Goldnead\StatamicPayments\Support\Gateways;
 use Goldnead\StatamicPayments\Support\Money;
 use Illuminate\Http\Request;
@@ -55,7 +56,7 @@ class PaymentMethodController extends PortalController
         // the buyer who got there anyway is told what is true rather than shown
         // a 500.
         if (! $gateway instanceof MandateGateway || ! $gateway->supportsMandateUpdate() || ! $subscription->isRunning()) {
-            return $this->back(__('statamic-payments::portal.method_unavailable'));
+            return $this->back(Anrede::trans('statamic-payments::portal.method_unavailable'));
         }
 
         try {
@@ -64,7 +65,7 @@ class PaymentMethodController extends PortalController
                     'currency' => $subscription->currency,
                     'value' => Money::format($gateway->mandateVerificationCent(), $subscription->currency),
                 ],
-                'description' => __('statamic-payments::portal.method_charge_description'),
+                'description' => Anrede::trans('statamic-payments::portal.method_charge_description'),
                 'redirectUrl' => route('statamic-payments.portal.method.return'),
                 'metadata' => [
                     // For whoever reads the provider's dashboard afterwards and
@@ -79,7 +80,7 @@ class PaymentMethodController extends PortalController
                 'exception' => $e->getMessage(),
             ]);
 
-            return $this->back(__('statamic-payments::portal.method_failed'));
+            return $this->back(Anrede::trans('statamic-payments::portal.method_failed'));
         }
 
         $this->note($subscription);
@@ -104,7 +105,7 @@ class PaymentMethodController extends PortalController
             return $this->askForALink();
         }
 
-        return $this->back(__('statamic-payments::portal.method_returned'));
+        return $this->back(Anrede::trans('statamic-payments::portal.method_returned'));
     }
 
     protected function note(Subscription $subscription): void

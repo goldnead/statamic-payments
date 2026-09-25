@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Actions;
 
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Goldnead\StatamicPayments\Support\SubscriptionPauses;
 use Statamic\Actions\Action;
 use Statamic\Facades\CP\Toast;
@@ -17,7 +18,7 @@ class ResumeSubscription extends Action
 
     public static function title()
     {
-        return __('statamic-payments::subscriptions.resume');
+        return Anrede::trans('statamic-payments::subscriptions.resume');
     }
 
     public function icon(): string
@@ -40,12 +41,12 @@ class ResumeSubscription extends Action
     public function buttonText()
     {
         /** @translation */
-        return __('statamic-payments::subscriptions.resume');
+        return Anrede::trans('statamic-payments::subscriptions.resume');
     }
 
     public function confirmationText()
     {
-        return __('statamic-payments::subscriptions.resume_confirm');
+        return Anrede::trans('statamic-payments::subscriptions.resume_confirm');
     }
 
     public function run($items, $values)
@@ -60,7 +61,7 @@ class ResumeSubscription extends Action
             return trans_choice('statamic-payments::subscriptions.resumed_bulk', $resumed->count(), ['count' => $resumed->count()]);
         }
 
-        Toast::error(__('statamic-payments::subscriptions.resume_failed', [
+        Toast::error(Anrede::trans('statamic-payments::subscriptions.resume_failed', [
             'failed' => $refused->count(),
             'total' => $items->count(),
         ]));

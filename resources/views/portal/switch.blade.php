@@ -1,10 +1,10 @@
 @extends('statamic-payments::portal.layout')
 
-@section('title', __('statamic-payments::subscriptions.portal_switch_title'))
+@section('title', \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::subscriptions.portal_switch_title'))
 
 @section('content')
-    <h1>{{ __('statamic-payments::subscriptions.portal_switch_title') }}</h1>
-    <p class="lede">{{ __('statamic-payments::subscriptions.portal_switch_intro', [
+    <h1>{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::subscriptions.portal_switch_title') }}</h1>
+    <p class="lede">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::subscriptions.portal_switch_intro', [
         'name' => $name,
         'amount' => \Goldnead\StatamicPayments\Portal\Display::money((int) $subscription->amount_cent, $subscription->currency),
     ]) }}</p>
@@ -34,10 +34,10 @@
             </ul>
         </div>
 
-        <button type="submit" class="btn">{{ __('statamic-payments::subscriptions.portal_switch_now') }}</button>
+        <button type="submit" class="btn">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::subscriptions.portal_switch_now') }}</button>
     </form>
 
     <div class="foot">
-        <a href="{{ route('statamic-payments.portal.show') }}">{{ __('statamic-payments::subscriptions.portal_back') }}</a>
+        <a href="{{ route('statamic-payments.portal.show') }}">{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::subscriptions.portal_back') }}</a>
     </div>
 @endsection

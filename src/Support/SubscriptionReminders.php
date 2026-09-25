@@ -258,7 +258,7 @@ class SubscriptionReminders
 
         if ($suppressed) {
             if ($payment) {
-                PaymentLog::note($payment, 'reminder_suppressed', __('statamic-payments::reminders.log_suppressed', ['email' => $email]));
+                PaymentLog::note($payment, 'reminder_suppressed', Anrede::trans('statamic-payments::reminders.log_suppressed', ['email' => $email]));
             }
 
             return DunningNotice::SKIPPED;
@@ -304,7 +304,7 @@ class SubscriptionReminders
         $subject = config("statamic-payments.reminders.{$kind}.subject");
         $subject = is_string($subject) && trim($subject) !== ''
             ? $subject
-            : (string) __("statamic-payments::reminders.{$kind}_subject", ['plan' => $variables['plan']['name']]);
+            : (string) Anrede::trans("statamic-payments::reminders.{$kind}_subject", ['plan' => $variables['plan']['name']]);
 
         return [
             'subject' => $subject,
@@ -337,7 +337,7 @@ class SubscriptionReminders
                 'rhythm' => Display::rhythm((string) $subscription->interval),
             ],
             'date' => $date->toDateString(),
-            'date_display' => $date->translatedFormat(__('statamic-payments::portal.date_format')),
+            'date_display' => $date->translatedFormat(Anrede::trans('statamic-payments::portal.date_format')),
             // Valid until the day it is about: a mail five days before a charge
             // whose link died after thirty minutes is a mail with a dead button.
             'portal_url' => $this->portalUrl($subscription, $date),

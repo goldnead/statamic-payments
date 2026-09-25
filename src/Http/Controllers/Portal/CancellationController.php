@@ -5,6 +5,7 @@ namespace Goldnead\StatamicPayments\Http\Controllers\Portal;
 use Goldnead\StatamicPayments\Facades\PaymentLog;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Portal\Mail\CancellationConfirmed;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Goldnead\StatamicPayments\Support\Subscriptions;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -107,7 +108,7 @@ class CancellationController extends PortalController
             if (($subscription->fresh() ?? $subscription)->isClaimed()) {
                 return redirect()
                     ->route('statamic-payments.portal.cancel.confirm', ['paySubscription' => $subscription->getKey()])
-                    ->with('statamic-payments.portal.error', __('statamic-payments::subscriptions.portal_cancel_busy'));
+                    ->with('statamic-payments.portal.error', Anrede::trans('statamic-payments::subscriptions.portal_cancel_busy'));
             }
 
             // Nothing was written — that is a property of `Subscriptions::cancel()`
@@ -115,7 +116,7 @@ class CancellationController extends PortalController
             // truth: it did not happen, and they should try again.
             return redirect()
                 ->route('statamic-payments.portal.cancel.confirm', ['paySubscription' => $subscription->getKey()])
-                ->with('statamic-payments.portal.error', __('statamic-payments::portal.cancel_failed'));
+                ->with('statamic-payments.portal.error', Anrede::trans('statamic-payments::portal.cancel_failed'));
         }
 
         $subscription = $subscription->fresh() ?? $subscription;
@@ -143,7 +144,7 @@ class CancellationController extends PortalController
     {
         return redirect()
             ->route('statamic-payments.portal.show')
-            ->with('statamic-payments.portal.error', __('statamic-payments::subscriptions.portal_cancel_elsewhere'));
+            ->with('statamic-payments.portal.error', Anrede::trans('statamic-payments::subscriptions.portal_cancel_elsewhere'));
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace Goldnead\StatamicPayments\Actions;
 
 use Goldnead\StatamicPayments\Models\Subscription;
+use Goldnead\StatamicPayments\Support\Anrede;
 use Illuminate\Support\Facades\Log;
 use Statamic\Actions\Action;
 
@@ -23,7 +24,7 @@ class ReleaseSubscription extends Action
 
     public static function title()
     {
-        return __('statamic-payments::subscriptions.release');
+        return Anrede::trans('statamic-payments::subscriptions.release');
     }
 
     public function icon(): string
@@ -36,11 +37,11 @@ class ReleaseSubscription extends Action
         return [
             'keep' => [
                 'type' => 'select',
-                'display' => __('statamic-payments::subscriptions.release_keep'),
-                'instructions' => __('statamic-payments::subscriptions.release_keep_instructions'),
+                'display' => Anrede::trans('statamic-payments::subscriptions.release_keep'),
+                'instructions' => Anrede::trans('statamic-payments::subscriptions.release_keep_instructions'),
                 'options' => [
-                    'new' => __('statamic-payments::subscriptions.release_keep_new'),
-                    'old' => __('statamic-payments::subscriptions.release_keep_old'),
+                    'new' => Anrede::trans('statamic-payments::subscriptions.release_keep_new'),
+                    'old' => Anrede::trans('statamic-payments::subscriptions.release_keep_old'),
                 ],
                 'validate' => 'required|in:new,old',
             ],
@@ -62,7 +63,7 @@ class ReleaseSubscription extends Action
     public function buttonText()
     {
         /** @translation */
-        return __('statamic-payments::subscriptions.release');
+        return Anrede::trans('statamic-payments::subscriptions.release');
     }
 
     public function run($items, $values)

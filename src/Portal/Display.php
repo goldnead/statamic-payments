@@ -80,6 +80,36 @@ final class Display
      * unit after it. „alle 1 Monat" is what a template that only interpolates
      * produces, and it is the phrasing nobody says out loud.
      */
+    /**
+     * The end of an agreement that no longer charges, in one phrase, or null.
+     *
+     * While the paid term runs: „Läuft bis 26.09.2027" (the portal prints it
+     * after the status „Gekündigt"); `$standalone` for a screen that shows it
+     * on its own line: „Gekündigt, läuft bis 26.09.2027". After the term:
+     * „Beendet am 26.09.2027", the term's last day, not the day it was
+     * cancelled. {@see Subscription::endsAt()}
+     */
+    public static function ending(Subscription $subscription, bool $standalone = false): ?string
+    {
+        $end = $subscription->endsAt();
+
+        if ($end === null) {
+            return null;
+        }
+
+        $date = LocalTime::portalDate($end);
+
+        if ($end->isFuture()) {
+            $key = $standalone && $subscription->status === Subscription::STATUS_CANCELLED
+                ? 'statamic-payments::portal.subscription_cancelled_runs_until'
+                : 'statamic-payments::portal.subscription_runs_until';
+
+            return Anrede::trans($key, ['date' => $date]);
+        }
+
+        return Anrede::trans('statamic-payments::portal.subscription_ended', ['date' => $date]);
+    }
+
     public static function rhythm(string $interval): string
     {
         if (preg_match('/^\s*(\d+)\s*(day|week|month|year)s?\s*$/i', $interval, $match) !== 1) {

@@ -56,6 +56,8 @@ return [
     'subscription_next' => 'Next charge on :date',
     'subscription_remaining' => ':count charges remaining',
     'subscription_ended' => 'Ended on :date',
+    'subscription_runs_until' => 'Runs until :date',
+    'subscription_cancelled_runs_until' => 'Cancelled, runs until :date',
 
     'status_initiated' => 'Being set up',
     'status_pending' => 'Starts later',

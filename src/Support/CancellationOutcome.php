@@ -34,6 +34,8 @@ final class CancellationOutcome
         public readonly ?Carbon $moment = null,
         public readonly ?Carbon $until = null,
         public readonly bool $confirmationSent = false,
+        /** @var list<string> the further addresses a copy of the confirmation reached */
+        public readonly array $copiedTo = [],
     ) {}
 
     public function cancelled(): bool

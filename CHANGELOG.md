@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A cancelled agreement whose paid term still runs no longer reads „Beendet am <day it was
+  cancelled>" next to „Bezahlt bis <end of term>". The portal says „Gekündigt · Läuft bis
+  <end of term>" while the term runs and „Beendet am <end of term>" afterwards. New
+  `Subscription::endsAt()` (end of the paid term where it lies after the stop, else the stop) and
+  `Portal\Display::ending($subscription, standalone: false)`; `standalone: true` gives the
+  sentence on its own line („Gekündigt, läuft bis 26.09.2027") for an app.
+
+### Added
+
+- `Cancellations::cancel($subscription, ?$email, array $copies = [])`: further addresses get the
+  same confirmation as a mail of their own (a team's billing address), each once, never the
+  recipient again, logged with `meta.copy`. A copy that fails changes nothing else;
+  `CancellationOutcome::$copiedTo` lists the addresses reached.
+
 ## 1.29.1 — 2026-09-26
 
 ### Changed

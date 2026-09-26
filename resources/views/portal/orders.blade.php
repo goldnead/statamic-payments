@@ -41,8 +41,8 @@
                                     @endif
                                     @if ($subscription['live'] && $subscription['next_payment_at'])
                                         · {{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.subscription_next', ['date' => \Goldnead\StatamicPayments\Support\LocalTime::portalDate($subscription['next_payment_at'])]) }}
-                                    @elseif (! $subscription['live'] && ! $subscription['paused'] && $subscription['cancelled_at'])
-                                        · {{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.subscription_ended', ['date' => \Goldnead\StatamicPayments\Support\LocalTime::portalDate($subscription['cancelled_at'])]) }}
+                                    @elseif (($subscription['ending'] ?? null) !== null)
+                                        · {{ $subscription['ending'] }}
                                     @endif
                                     @if ($subscription['remaining'] !== null)
                                         · {{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::portal.subscription_remaining', ['count' => $subscription['remaining']]) }}

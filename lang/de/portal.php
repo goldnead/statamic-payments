@@ -61,6 +61,8 @@ return [
     'subscription_next' => 'Nächste Abbuchung am :date',
     'subscription_remaining' => 'Noch :count Abbuchungen',
     'subscription_ended' => 'Beendet am :date',
+    'subscription_runs_until' => 'Läuft bis :date',
+    'subscription_cancelled_runs_until' => 'Gekündigt, läuft bis :date',
 
     'status_initiated' => 'Wird eingerichtet',
     'status_pending' => 'Beginnt später',

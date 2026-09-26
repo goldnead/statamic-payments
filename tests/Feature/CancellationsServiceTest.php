@@ -102,6 +102,50 @@ class CancellationsServiceTest extends TestCase
     }
 
     #[Test]
+    public function copies_go_to_further_addresses_each_once_and_logged(): void
+    {
+        $outcome = app(Cancellations::class)->cancel($this->subscription, 'konto@example.de', [
+            'rechnung@chor.example',
+            'KONTO@example.de',  // the recipient already, in other case
+            'rechnung@chor.example',
+            'keine-adresse',
+            '',
+        ]);
+
+        $this->assertTrue($outcome->confirmationSent);
+        $this->assertSame(['rechnung@chor.example'], $outcome->copiedTo);
+        Mail::assertSent(CancellationConfirmed::class, 2);
+        Mail::assertSent(CancellationConfirmed::class, fn (CancellationConfirmed $mail) => $mail->hasTo('konto@example.de') && ! $mail->hasCc('rechnung@chor.example'));
+        Mail::assertSent(CancellationConfirmed::class, fn (CancellationConfirmed $mail) => $mail->hasTo('rechnung@chor.example'));
+
+        $this->assertEqualsCanonicalizing(
+            ['konto@example.de', 'rechnung@chor.example'],
+            PaymentLog::for($this->payment)->where('kind', 'cancellation_confirmation')->pluck('recipient')->all(),
+        );
+    }
+
+    #[Test]
+    public function a_copy_that_fails_does_not_undo_the_confirmation(): void
+    {
+        Mail::shouldReceive('to')->andReturnUsing(function ($to) {
+            $pending = \Mockery::mock();
+            $pending->shouldReceive('send')->andReturnUsing(function () use ($to) {
+                if ($to === 'rechnung@chor.example') {
+                    throw new \RuntimeException('smtp down');
+                }
+            });
+
+            return $pending;
+        });
+
+        $outcome = app(Cancellations::class)->cancel($this->subscription, null, ['rechnung@chor.example']);
+
+        $this->assertSame(CancellationOutcome::CANCELLED, $outcome->status);
+        $this->assertTrue($outcome->confirmationSent);
+        $this->assertSame([], $outcome->copiedTo);
+    }
+
+    #[Test]
     public function a_provider_that_refuses_changes_nothing_and_sends_nothing(): void
     {
         $this->gateway->refuseToCancel = true;

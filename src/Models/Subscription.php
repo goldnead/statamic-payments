@@ -123,6 +123,35 @@ class Subscription extends Model
         return in_array($this->status, self::CLAIMS, true);
     }
 
+    /**
+     * When the contract ends, or ended, once nobody charges it any more.
+     *
+     * The end of the paid term where it lies after the moment the agreement
+     * stopped, else that moment. A cancelled annual plan runs to the end of
+     * the year it paid for; the day it was cancelled is not the day it ended
+     * (Staging 26.09.2026: „Beendet am 26.09.2026" next to „Bezahlt bis
+     * 26.09.2027"). The same chain as {@see paidThroughAt()} and the
+     * entitlements bridge, so the access, „Bezahlt bis" and this date agree.
+     *
+     * Null while it runs, is paused or is in a change.
+     */
+    public function endsAt(): ?Carbon
+    {
+        if ($this->isRunning() || $this->isClaimed()) {
+            return null;
+        }
+
+        $stopped = $this->cancelled_at ?? $this->ended_at;
+
+        if ($stopped === null) {
+            return null;
+        }
+
+        $term = $this->next_payment_at ?? $this->paidThroughAt();
+
+        return Carbon::instance($term !== null && $term->greaterThan($stopped) ? $term : $stopped);
+    }
+
     /** Claimed, and nobody has touched it for `CLAIM_STALE_MINUTES`. */
     public function isStuck(): bool
     {

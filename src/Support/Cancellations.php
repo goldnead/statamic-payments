@@ -39,8 +39,15 @@ class Cancellations
      * row. A mail that cannot be sent does not undo the cancellation: the
      * outcome says `confirmationSent: false` and the failure is logged loudly,
      * because the statute's confirmation did not leave the building.
+     *
+     * `$copies`: further addresses that get the same confirmation as a mail of
+     * their own (a team's billing address next to the person who cancelled).
+     * Each once, never the recipient again, only valid addresses. A copy that
+     * fails is logged and left out of `copiedTo`; it changes nothing else.
+     *
+     * @param  array<int, string|null>  $copies
      */
-    public function cancel(Subscription $subscription, ?string $email = null): CancellationOutcome
+    public function cancel(Subscription $subscription, ?string $email = null, array $copies = []): CancellationOutcome
     {
         $email = $email !== null && $email !== '' ? $email : ($subscription->email ?: null);
         $name = $this->nameOf((string) $subscription->product);
@@ -75,6 +82,15 @@ class Cancellations
 
         $subscription = $subscription->fresh() ?? $subscription;
         $moment = $this->momentOf($subscription);
+        $sent = $email !== null && $this->confirm($subscription, $email, $moment, $name, $until);
+
+        $copiedTo = [];
+
+        foreach ($this->copyAddresses($copies, $email) as $copy) {
+            if ($this->confirm($subscription, $copy, $moment, $name, $until, copy: true)) {
+                $copiedTo[] = $copy;
+            }
+        }
 
         return new CancellationOutcome(
             CancellationOutcome::CANCELLED,
@@ -83,8 +99,33 @@ class Cancellations
             $email,
             $moment,
             $until,
-            $email !== null && $this->confirm($subscription, $email, $moment, $name, $until),
+            $sent,
+            $copiedTo,
         );
+    }
+
+    /**
+     * @param  array<int, string|null>  $copies
+     * @return list<string>
+     */
+    protected function copyAddresses(array $copies, ?string $email): array
+    {
+        $seen = $email !== null ? [mb_strtolower(trim($email))] : [];
+        $out = [];
+
+        foreach ($copies as $copy) {
+            $copy = is_string($copy) ? trim($copy) : '';
+            $key = mb_strtolower($copy);
+
+            if ($copy === '' || in_array($key, $seen, true) || filter_var($copy, FILTER_VALIDATE_EMAIL) === false) {
+                continue;
+            }
+
+            $seen[] = $key;
+            $out[] = $copy;
+        }
+
+        return $out;
     }
 
     /**
@@ -107,7 +148,7 @@ class Cancellations
         return $subscription->cancelled_at ?? $subscription->ended_at ?? Carbon::now();
     }
 
-    protected function confirm(Subscription $subscription, string $email, Carbon $moment, string $name, ?Carbon $until): bool
+    protected function confirm(Subscription $subscription, string $email, Carbon $moment, string $name, ?Carbon $until, bool $copy = false): bool
     {
         try {
             $mailable = new CancellationConfirmed($subscription, $moment, $name, $until);
@@ -115,15 +156,20 @@ class Cancellations
             Mail::to($email)->send($mailable);
 
             if ($payment = $subscription->payments()->orderByDesc('paid_at')->orderByDesc('id')->first()) {
-                PaymentLog::mail($payment, 'cancellation_confirmation', $email, $mailable->envelope()->subject, meta: ['subscription_id' => $subscription->getKey()]);
+                PaymentLog::mail($payment, 'cancellation_confirmation', $email, $mailable->envelope()->subject, meta: array_filter([
+                    'subscription_id' => $subscription->getKey(),
+                    'copy' => $copy ?: null,
+                ]));
             }
 
             return true;
         } catch (Throwable $e) {
-            Log::error('statamic-payments: an agreement was cancelled and the confirmation in Textform could not be sent.', [
-                'subscription_id' => $subscription->getKey(),
-                'exception' => $e->getMessage(),
-            ]);
+            Log::error($copy
+                ? 'statamic-payments: an agreement was cancelled and a copy of the confirmation could not be sent.'
+                : 'statamic-payments: an agreement was cancelled and the confirmation in Textform could not be sent.', [
+                    'subscription_id' => $subscription->getKey(),
+                    'exception' => $e->getMessage(),
+                ]);
 
             return false;
         }

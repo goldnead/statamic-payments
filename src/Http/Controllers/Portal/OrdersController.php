@@ -103,6 +103,9 @@ class OrdersController extends PortalController
             'live' => $subscription->isLive(),
             'next_payment_at' => $subscription->next_payment_at,
             'cancelled_at' => $subscription->cancelled_at,
+            // „Läuft bis …" while the paid term runs, „Beendet am …" (its
+            // last day) after it; never the day it was cancelled.
+            'ending' => Display::ending($subscription),
             'remaining' => $subscription->remaining(),
             'paused' => $subscription->isPaused(),
             'resumes_at' => $subscription->resumes_at,

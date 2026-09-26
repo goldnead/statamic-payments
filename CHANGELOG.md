@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.29.1 — 2026-09-26
+
+### Changed
+
+- The cancellation sequence (provider first, confirmation in Textform `CancellationConfirmed`,
+  entry in the payment's log) is one public call now:
+  `app(Support\Cancellations::class)->cancel(Subscription $subscription, ?string $email = null): Support\CancellationOutcome`.
+  The portal's `CancellationController` uses it; an app API ending the same agreement can too,
+  without rebuilding the three steps. Who may cancel stays the caller's decision. The outcome
+  carries `status` (`cancelled`, `already_ended`, `busy`, `failed`), `cancelled()`, `moment`,
+  `until`, `confirmationSent`, `name`, `email`. No behaviour change in the portal.
+
 ## 1.29.0 — 2026-09-25
 
 ### Added

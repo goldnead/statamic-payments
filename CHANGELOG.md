@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.29.3 — 2026-10-06
+
+### Fixed
+
+- The Suite licence notice no longer appears inside a framed control panel (an add-on's
+  overlay, a live preview). There it covered the frame's own controls, for example Inline
+  Edit's Save button. It still appears in the control panel itself.
+
 ## 1.29.2 — 2026-09-26
 
 ### Fixed

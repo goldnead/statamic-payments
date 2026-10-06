@@ -115,6 +115,13 @@ function baueHinweis(url) {
  * kein Eintrag im DOM.
  */
 export function suiteLicenceNotice() {
+    // Nicht in einem eingebetteten Control Panel (Overlay eines Addons, Live-
+    // Vorschau): dort lag der Hinweis ueber den Knoepfen des Rahmens, etwa dem
+    // Speichern von Inline Edit, und dieselbe Person sieht ihn aussen ohnehin.
+    if (window.self !== window.top) {
+        return;
+    }
+
     let config = null;
 
     try {

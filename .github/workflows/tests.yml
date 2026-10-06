@@ -225,6 +225,8 @@ jobs:
 
       - run: npm ci
 
+      - run: node --test tests/js/
+
       - run: npm run build
 
       # The committed bundle is what every installed site loads. A source change

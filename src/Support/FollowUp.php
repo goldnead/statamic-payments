@@ -221,7 +221,7 @@ class FollowUp
                 // caller that hands its own attribution in still wins.
                 //
                 // Was **nicht** geerbt wird: `consent_at` und `consent_text`.
-                // Die Zustimmung nach § 356 Abs. 5 BGB gilt für den Kauf, bei
+                // Die Zustimmung nach § 356 Abs. 6 BGB gilt für den Kauf, bei
                 // dem sie erklärt wurde, und für keinen zweiten. Ein Nachfass-
                 // angebot ist ein eigener Vertrag mit eigener Bestellschalt-
                 // fläche, also kommt seine Zustimmung aus `$details` — oder

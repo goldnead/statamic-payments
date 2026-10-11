@@ -318,7 +318,7 @@ class Checkout
      * where it came from (`meta.resumed_from`) so that the original is counted
      * as recovered when this one is paid.
      *
-     * **The consent under § 356 (5) BGB is not carried over.** A restart is a
+     * **The consent under § 356 (6) BGB is not carried over.** A restart is a
      * new order: the button rule of § 312j (3) wants a button pressed for
      * *this* payment, and a consent is a declaration made on a screen, not a
      * column to copy. The page behind the reminder link shows the lines, the

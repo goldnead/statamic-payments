@@ -31,7 +31,7 @@ use Throwable;
  * Abs. 5 ihm garantiert. Also geht alles durch und wird gemeldet.
  *
  * Dasselbe gilt für ein **erloschenes** Widerrufsrecht: steht am Treffer eine
- * Zustimmung nach § 356 Abs. 5 (`consent_at`), wird das dem Händler als
+ * Zustimmung nach § 356 Abs. 6 (`consent_at`), wird das dem Händler als
  * Hinweis mitgegeben. Ob das Recht wirklich erloschen ist, ist eine Frage an
  * einen Menschen mit dem Vorgang vor sich, nicht an eine Spalte.
  *

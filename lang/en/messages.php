@@ -204,7 +204,7 @@ return [
     'detail_field_subject' => 'Bought for',
     'detail_field_company' => 'Company',
     'detail_field_customer_reference' => 'Customer reference',
-    'detail_section_consent' => 'Consent (§ 356 (5) BGB)',
+    'detail_section_consent' => 'Consent (§ 356 (6) BGB)',
     'detail_field_consent_at' => 'Consented at',
     'detail_field_withdrawal_version' => 'Instruction, version',
     'detail_consent_none' => 'No consent recorded. The right of withdrawal has not expired.',
@@ -264,7 +264,7 @@ return [
     'detail_webhooks_empty' => 'No delivery for this payment.',
 
     /*
-    | § 356 (5) BGB: the consent that ends the right of withdrawal for digital
+    | § 356 (6) BGB: the consent that ends the right of withdrawal for digital
     | content delivered at once. This is the wording written onto a payment
     | when a form sends none of its own. The form MUST show exactly this
     | sentence, or the row proves something other than what the buyer read.

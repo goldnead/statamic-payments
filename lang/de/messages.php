@@ -209,7 +209,7 @@ return [
     'detail_field_subject' => 'Gekauft für',
     'detail_field_company' => 'Firma',
     'detail_field_customer_reference' => 'Kundenreferenz',
-    'detail_section_consent' => 'Einwilligung (§ 356 Abs. 5 BGB)',
+    'detail_section_consent' => 'Einwilligung (§ 356 Abs. 6 BGB)',
     'detail_field_consent_at' => 'Zugestimmt am',
     'detail_field_withdrawal_version' => 'Belehrung, Fassung',
     'detail_consent_none' => 'Keine Zustimmung festgehalten. Das Widerrufsrecht ist nicht erloschen.',
@@ -269,7 +269,7 @@ return [
     'detail_webhooks_empty' => 'Keine Zustellung zu dieser Zahlung.',
 
     /*
-    | § 356 Abs. 5 BGB: die Zustimmung, mit der bei digitalen Inhalten das
+    | § 356 Abs. 6 BGB: die Zustimmung, mit der bei digitalen Inhalten das
     | Widerrufsrecht erlischt. Das ist der Wortlaut, der an eine Zahlung
     | geschrieben wird, wenn ein Formular keinen eigenen mitschickt. Das
     | Formular MUSS genau diesen Satz zeigen, sonst belegt die Zeile etwas

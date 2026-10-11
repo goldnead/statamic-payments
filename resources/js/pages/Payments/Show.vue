@@ -336,7 +336,7 @@ const hasLinks = computed(() => {
                     </Card>
                 </Panel>
 
-                <!-- Einwilligung (§ 356 Abs. 5 BGB) -->
+                <!-- Einwilligung (§ 356 Abs. 6 BGB) -->
                 <Panel :heading="t('detail_section_consent')">
                     <Card>
                         <dl class="divide-y divide-content-border">

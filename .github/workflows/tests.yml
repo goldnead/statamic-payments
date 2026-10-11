@@ -225,7 +225,8 @@ jobs:
 
       - run: npm ci
 
-      - run: node --test tests/js/
+      # Mit Glob: Node 22 nimmt ein Verzeichnis nicht mehr als Testordner.
+      - run: node --test tests/js/*.test.mjs
 
       - run: npm run build
 

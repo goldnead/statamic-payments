@@ -68,7 +68,7 @@ return [
     'mail_merchant_matched' => 'Matched payment: #:id (:provider_id), :product, :amount, status :status.',
     'mail_merchant_within' => 'The withdrawal arrived within the configured period of :days days from payment.',
     'mail_merchant_outside' => 'Note: the withdrawal arrived after the configured period of :days days from payment. Whether the period has actually run is for you to check.',
-    'mail_merchant_expired_hint' => 'Note: the payment carries a recorded consent under § 356 (5) BGB (immediate delivery of digital content). Whether the right of withdrawal has thereby expired is for you to check.',
+    'mail_merchant_expired_hint' => 'Note: the payment carries a recorded consent under § 356 (6) BGB (immediate delivery of digital content). Whether the right of withdrawal has thereby expired is for you to check.',
     'mail_merchant_unmatched' => 'No unambiguous payment could be matched. The withdrawal has been received all the same and needs handling by hand.',
     'mail_merchant_cp' => 'Open in the Control Panel',
 ];

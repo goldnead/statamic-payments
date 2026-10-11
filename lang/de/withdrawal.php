@@ -84,7 +84,7 @@ return [
     'mail_merchant_matched' => 'Zugeordnete Zahlung: #:id (:provider_id), :product, :amount, Status :status.',
     'mail_merchant_within' => 'Der Widerruf ging innerhalb der konfigurierten Frist von :days Tagen ab Zahlung ein.',
     'mail_merchant_outside' => 'Hinweis: Der Widerruf ging nach Ablauf der konfigurierten Frist von :days Tagen ab Zahlung ein. Ob die Frist tatsächlich abgelaufen ist, ist zu prüfen.',
-    'mail_merchant_expired_hint' => 'Hinweis: An der Zahlung ist eine Zustimmung nach § 356 Abs. 5 BGB festgehalten (sofortige Lieferung digitaler Inhalte). Ob das Widerrufsrecht damit erloschen ist, ist zu prüfen.',
+    'mail_merchant_expired_hint' => 'Hinweis: An der Zahlung ist eine Zustimmung nach § 356 Abs. 6 BGB festgehalten (sofortige Lieferung digitaler Inhalte). Ob das Widerrufsrecht damit erloschen ist, ist zu prüfen.',
     'mail_merchant_unmatched' => 'Keine eindeutige Zahlung zugeordnet. Der Widerruf ist trotzdem zugegangen und muss von Hand bearbeitet werden.',
     'mail_merchant_cp' => 'Im Control Panel öffnen',
 ];

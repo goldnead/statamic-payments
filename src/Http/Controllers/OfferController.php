@@ -42,7 +42,7 @@ class OfferController
             return back()->withErrors(['offer' => __('statamic-payments::messages.offer_refused')]);
         }
 
-        // § 356 Abs. 5 BGB: der Haken oben ist die Zustimmung, dass die
+        // § 356 Abs. 6 BGB: der Haken oben ist die Zustimmung, dass die
         // Lieferung sofort beginnt und das Widerrufsrecht damit erlischt.
         // Zeitpunkt und Wortlaut gehen mit dem ersten INSERT in die
         // Folgezahlung — nicht geerbt von der Erstbestellung, denn das hier ist

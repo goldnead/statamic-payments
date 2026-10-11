@@ -682,7 +682,7 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Einwilligung — § 356 Abs. 5 BGB
+    | Einwilligung — § 356 Abs. 6 BGB
     |--------------------------------------------------------------------------
     |
     | `accepted_texts`: the consent sentences your pages actually show, on top

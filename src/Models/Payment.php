@@ -87,7 +87,7 @@ class Payment extends Model
     protected $guarded = [];
 
     /**
-     * Die Spalten, die den Beleg nach § 356 Abs. 5 BGB tragen.
+     * Die Spalten, die den Beleg nach § 356 Abs. 6 BGB tragen.
      *
      * Einmal geschrieben, nie geändert. Siehe {@see self::booted()}.
      *
@@ -140,7 +140,7 @@ class Payment extends Model
             }
         });
 
-        // Die Zustimmung nach § 356 Abs. 5 BGB ist ein Beleg, und ein Beleg,
+        // Die Zustimmung nach § 356 Abs. 6 BGB ist ein Beleg, und ein Beleg,
         // den ein späterer Schreibvorgang umformulieren kann, ist keiner. Ein
         // einmal gesetzter Wert bleibt: weder ein anderer Zeitpunkt noch ein
         // anderer Wortlaut noch ein Löschen gehen durch. Von null auf einen
@@ -166,7 +166,7 @@ class Payment extends Model
                 }
 
                 throw new LogicException(sprintf(
-                    'statamic-payments: `%s` an Zahlung %s ist bereits gesetzt und kann nicht geändert werden — die Zustimmung nach § 356 Abs. 5 BGB ist ein Beleg.',
+                    'statamic-payments: `%s` an Zahlung %s ist bereits gesetzt und kann nicht geändert werden — die Zustimmung nach § 356 Abs. 6 BGB ist ein Beleg.',
                     $column,
                     (string) $payment->getKey(),
                 ));

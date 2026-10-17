@@ -255,10 +255,12 @@ class Fulfilment
             // Not swallowed, and this is the one exception to the rule below.
             //
             // "The provider would not answer" covers two very different things:
-            // an id this account never issued, and an outage. For Mollie the
-            // difference does not matter, because Mollie redelivers on its own
-            // schedule whatever this endpoint says. For Stripe it decides
-            // everything: the event id is claimed before this runs, so a
+            // an id this account never issued, and an outage. For both
+            // providers the difference decides everything. Mollie redelivers
+            // only on a non-2xx (10 calls over 26 hours,
+            // https://docs.mollie.com/reference/webhooks), so a 200 during an
+            // outage ends the retries. For Stripe, too: the event id is
+            // claimed before this runs, so a
             // delivery that returns quietly during an outage never comes back —
             // not on a retry, not from the Resend button. A buyer paid, and the
             // only trace is a warning nobody reads.

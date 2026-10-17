@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.30.0 — 2026-10-17
+
+### Fixed
+
+- A Mollie webhook no longer answers 200 when Mollie itself cannot be asked (network error,
+  timeout, 5xx, 429, 408). `MollieGateway::fetch()` now throws `ProviderUnavailable` for those,
+  and the webhook endpoint answers 503. Mollie redelivers on anything but a 200 (10 calls over
+  26 hours, https://docs.mollie.com/reference/webhooks); the 200 used to end that, and the buyer
+  had paid for an order that was never fulfilled. A 404 stays an answer.
+- A double click on „buy" no longer creates two payments. `Checkout::start()` gives a repeated
+  start of the same basket by the same buyer (same address, products, quantities, discount,
+  return URL, methods) the open payment of the last ten minutes back, with the same checkout
+  URL. The claim is a unique index on the new `payments.checkout_key` (works on SQLite, where
+  `lockForUpdate()` does nothing), and two requests in flight at once end up on one row.
+  Every provider create call also carries an `idempotencyKey` (Mollie: `Idempotency-Key`
+  header), so a retry after a lost answer gets the first payment back.
+
+### Upgrade
+
+- Run `php artisan migrate` (adds `payments.checkout_key`, nullable, unique).
+- A custom `PaymentGateway` now receives `idempotencyKey` in the `createPayment()` payload.
+  Drop it or send it as your provider's idempotency header; do not pass it on in a request body.
+
 ## 1.29.3 — 2026-10-06
 
 ### Fixed

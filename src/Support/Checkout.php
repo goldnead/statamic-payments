@@ -6,6 +6,8 @@ use Goldnead\StatamicPayments\Contracts\FollowUpGateway;
 use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\PaymentItem;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -116,8 +118,9 @@ class Checkout
         // The other order — provider first, row second — loses the payment
         // entirely if the process dies in between, and the buyer has by then
         // been charged.
-        $payment = DB::transaction(function () use ($lines, $primary, $total, $off, $discount, $currency, $buyer, $details): Payment {
+        $build = fn (?string $checkoutKey): Payment => DB::transaction(function () use ($checkoutKey, $lines, $primary, $total, $off, $discount, $currency, $buyer, $details): Payment {
             $payment = Payment::create($details->onto([
+                'checkout_key' => $checkoutKey,
                 'provider' => $this->gateway->provider(),
                 'provider_id' => Payment::PLACEHOLDER_PROVIDER_PREFIX.Str::uuid(),
                 // The primary handle stays on the payment as well as in the
@@ -186,6 +189,41 @@ class Checkout
 
             return $payment;
         });
+
+        // Ein Klick, eine Zahlung. Der Fingerabdruck des Warenkorbs ist eindeutig
+        // in der Datenbank: von zwei gleichzeitigen Anfragen legt genau eine die
+        // Zeile an, die andere findet sie. Ein eindeutiger Index statt einer
+        // Sperre, weil `lockForUpdate()` unter SQLite nichts tut.
+        $checkoutKey = $this->checkoutKey($lines, $buyer, $total, $discount, $returnUrl, $details);
+        $payment = $checkoutKey !== null ? $this->liveCheckout($checkoutKey) : null;
+        $reused = $payment !== null;
+
+        if ($payment === null) {
+            try {
+                $payment = $build($checkoutKey);
+            } catch (UniqueConstraintViolationException $e) {
+                // Die andere Anfrage war schneller. Ihre Zeile ist die Zahlung;
+                // ist sie inzwischen keine mehr, entsteht eine eigene ohne Schluessel.
+                $payment = $this->liveCheckout((string) $checkoutKey);
+                $reused = $payment !== null;
+                $payment ??= $build(null);
+            }
+        }
+
+        // Die erste Anfrage ist noch beim Anbieter. Kurz auf ihre Adresse
+        // warten, statt dem Anbieter dieselbe Anfrage gleichzeitig zu stellen:
+        // Mollie antwortet darauf mit 409.
+        if ($reused && $this->checkoutUrlOf($payment) === null) {
+            $payment = $this->awaitCheckout($payment);
+        }
+
+        // Dieselbe Zahlung noch einmal gewollt, und der Anbieter hat sie schon
+        // angelegt: dieselbe Kasse zurueck. Steht noch keine Adresse, ist die
+        // erste Anfrage mitten im Anbieter-Aufruf; dann geht die zweite mit
+        // demselben Schluessel dorthin und bekommt dieselbe Zahlung zurueck.
+        if (is_string($url = $this->checkoutUrlOf($payment))) {
+            return new CheckoutResult($payment, $url);
+        }
 
         // Nothing to charge, so nobody is charged.
         //
@@ -256,14 +294,132 @@ class Checkout
             $payload['method'] = count($methods) === 1 ? $methods[0] : $methods;
         }
 
-        $session = $this->gateway->createPayment($payload);
+        // Eine Kennung je Zeile. Der Anbieter beantwortet dieselbe Kennung mit
+        // derselben Zahlung statt mit einer zweiten (Mollie: `Idempotency-Key`),
+        // auch wenn die Antwort auf dem Rueckweg verloren ging und neu gefragt wird.
+        $payload['idempotencyKey'] = hash('sha256', 'statamic-payments|checkout|'.$payment->getKey());
+
+        try {
+            $session = $this->gateway->createPayment($payload);
+        } catch (Throwable $e) {
+            // Eine wiederverwendete Zeile, deren erste Anfrage inzwischen fertig
+            // ist (der Anbieter kann die doppelte Kennung mit 409 abweisen):
+            // deren Adresse ist die Antwort, kein Fehler.
+            if ($reused && is_string($url = $this->checkoutUrlOf($payment->fresh() ?? $payment))) {
+                return new CheckoutResult($payment->fresh() ?? $payment, $url);
+            }
+
+            throw $e;
+        }
+
+        $meta = is_array($payment->meta) ? $payment->meta : [];
+        $meta['checkout_url'] = $session->checkoutUrl;
 
         $payment->forceFill([
             'provider_id' => $session->providerId,
             'status' => Payment::STATUS_OPEN,
+            'meta' => $meta,
         ])->save();
 
         return new CheckoutResult($payment->fresh() ?? $payment, $session->checkoutUrl);
+    }
+
+    /** How long an open checkout answers a repeated start with itself. */
+    public const REUSE_MINUTES = 5;
+
+    /**
+     * Der Fingerabdruck dieses Kaufs, oder null, wenn keiner moeglich ist.
+     *
+     * Ohne Adresse gibt es keinen Kaeufer, dem eine zweite Anfrage gleichen
+     * koennte; dann bleibt es bei einer Zahlung je Aufruf wie bisher.
+     *
+     * @param  list<array<string, mixed>>  $lines
+     */
+    protected function checkoutKey(array $lines, array $buyer, int $total, ?Discount $discount, ?string $returnUrl, PaymentDetails $details): ?string
+    {
+        $email = mb_strtolower(trim((string) ($buyer['email'] ?? '')));
+
+        if ($email === '') {
+            return null;
+        }
+
+        return hash('sha256', json_encode([
+            $this->gateway->provider(),
+            $email,
+            array_map(fn (array $l) => [(string) $l['handle'], (int) $l['quantity'], (int) $l['amount_cent']], $lines),
+            $discount?->code,
+            $total,
+            $returnUrl,
+            // What the hosted checkout offers is part of what is being bought.
+            PaymentMethods::configured(),
+            // Frozen on the row at creation: a corrected country or name is a
+            // new purchase, not the old row with the old tax rate. And the
+            // brand, so two brands never share a payment.
+            $buyer['name'] ?? null,
+            self::country($buyer['country'] ?? null),
+            Brands::stampId(),
+            Arr::except($details->onto([]), ['consent_at']),
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: $email);
+    }
+
+    /**
+     * The payment this key already stands for, if it is still a live one.
+     *
+     * Live: not yet fulfilled, not yet paid or failed, and young enough that the
+     * hosted checkout is still open. Anything else lets go of the key so the
+     * same basket can be bought again.
+     */
+    protected function liveCheckout(string $checkoutKey): ?Payment
+    {
+        $existing = Payment::query()->where('checkout_key', $checkoutKey)->first();
+
+        if ($existing === null) {
+            return null;
+        }
+
+        $live = in_array($existing->status, [Payment::STATUS_INITIATED, Payment::STATUS_OPEN], true)
+            && $existing->fulfilled_at === null
+            && $existing->created_at !== null
+            && $existing->created_at->gte(Carbon::now()->subMinutes(self::REUSE_MINUTES));
+
+        if ($live) {
+            return $existing;
+        }
+
+        Payment::query()->whereKey($existing->getKey())->where('checkout_key', $checkoutKey)->update(['checkout_key' => null]);
+
+        return null;
+    }
+
+    /**
+     * Gives the request that is still at the provider a moment to finish.
+     *
+     * Polls the row, not the provider. Whatever is not there when the time is
+     * up goes on to the provider with the same key, which answers with the first
+     * payment (or, for a request still in progress, with a conflict the caller
+     * turns into the row's address).
+     */
+    protected function awaitCheckout(Payment $payment): Payment
+    {
+        $until = microtime(true) + max(0, (int) config('statamic-payments.checkout.wait_ms', 3000)) / 1000;
+
+        do {
+            $fresh = $payment->fresh() ?? $payment;
+
+            if ($this->checkoutUrlOf($fresh) !== null || microtime(true) >= $until) {
+                return $fresh;
+            }
+
+            usleep(100_000);
+        } while (true);
+    }
+
+    /** Where the buyer pays this payment, if the provider has been asked already. */
+    protected function checkoutUrlOf(Payment $payment): ?string
+    {
+        $url = is_array($payment->meta) ? ($payment->meta['checkout_url'] ?? null) : null;
+
+        return is_string($url) && $url !== '' ? $url : null;
     }
 
     /** Die Klasse, die statamic-offers für seine Regeln anbietet. Nur als Name. */

@@ -11,13 +11,18 @@ use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\CheckoutSession;
 use Goldnead\StatamicPayments\Support\Money;
+use Goldnead\StatamicPayments\Support\ProviderUnavailable;
 use Goldnead\StatamicPayments\Support\RemotePayment;
 use Goldnead\StatamicPayments\Support\RemoteSubscription;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Mollie\Api\Exceptions\ApiException;
+use Mollie\Api\Exceptions\NetworkRequestException;
+use Mollie\Api\Exceptions\ServerException;
+use Mollie\Api\Exceptions\TooManyRequestsException;
 use Mollie\Api\MollieApiClient;
 use Mollie\Api\Types\SequenceType;
+use Throwable;
 
 /**
  * Mollie, behind the seam.
@@ -207,7 +212,7 @@ class MollieGateway implements ListsSubscriptions, MandateGateway, ReadsCardExpi
 
             try {
                 $date = Carbon::parse($expiry)->startOfDay();
-            } catch (\Throwable) {
+            } catch (Throwable) {
                 continue;
             }
 
@@ -326,7 +331,24 @@ class MollieGateway implements ListsSubscriptions, MandateGateway, ReadsCardExpi
 
     public function createPayment(array $payload): CheckoutSession
     {
-        $payment = $this->client->payments->create($payload);
+        // Same convention as `chargeAgain()`: the key is this package's way of
+        // saying "this is one request", and goes out as Mollie's header, not in
+        // the body. A double click, or a retry after a lost answer, then gets
+        // the first payment back instead of creating a second.
+        $key = is_string($payload['idempotencyKey'] ?? null) ? $payload['idempotencyKey'] : null;
+        unset($payload['idempotencyKey']);
+
+        if ($key !== null) {
+            $this->client->setIdempotencyKey($key);
+        }
+
+        try {
+            $payment = $this->client->payments->create($payload);
+        } finally {
+            if ($key !== null) {
+                $this->client->resetIdempotencyKey();
+            }
+        }
 
         return new CheckoutSession(
             providerId: (string) $payment->id,
@@ -334,9 +356,44 @@ class MollieGateway implements ListsSubscriptions, MandateGateway, ReadsCardExpi
         );
     }
 
+    /**
+     * Whether the failure says nothing about the payment: the network, a
+     * timeout, a 5xx, a rate limit. A 404 or a 422 is an answer.
+     *
+     * By exception type where the SDK has one (v3) and by status where it does
+     * not (v2 throws `ApiException` for everything; a transport failure there
+     * carries no HTTP status, so code 0).
+     */
+    protected static function couldNotBeAsked(Throwable $e): bool
+    {
+        if ($e instanceof NetworkRequestException || $e instanceof ServerException || $e instanceof TooManyRequestsException) {
+            return true;
+        }
+
+        if ($e instanceof ApiException) {
+            $status = (int) $e->getCode();
+
+            return $status === 0 || $status === 408 || $status === 429 || $status >= 500;
+        }
+
+        return false;
+    }
+
     public function fetch(string $providerId): RemotePayment
     {
-        $payment = $this->client->payments->get($providerId);
+        try {
+            $payment = $this->client->payments->get($providerId);
+        } catch (Throwable $e) {
+            // "Ask again later" is not an answer. Without this the caller
+            // reads a timeout like a 404, the webhook says 200, and Mollie —
+            // which redelivers on anything but a 200, ten times over 26 hours
+            // (https://docs.mollie.com/reference/webhooks) — is told to stop.
+            if (self::couldNotBeAsked($e)) {
+                throw new ProviderUnavailable("statamic-payments: Mollie could not be asked for [{$providerId}]: {$e->getMessage()}", 0, $e);
+            }
+
+            throw $e;
+        }
 
         // Einmal gelesen, zweimal gebraucht.
         $chargedBack = $this->chargedBackCent($payment);

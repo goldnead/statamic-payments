@@ -328,9 +328,27 @@ class FakeGateway implements ListsSubscriptions, SubscriptionGateway
         return 'fake';
     }
 
+    /**
+     * @var array<string, CheckoutSession> idempotency key => the answer given for it
+     *
+     * Mollie answers a repeated `Idempotency-Key` with the first answer instead
+     * of creating again. The fake does the same, and only for a key that was
+     * sent — it does not invent a key of its own.
+     */
+    public array $sessionsByKey = [];
+
+    /** The provider cannot be asked: a timeout, a 5xx, a refused connection. */
+    public bool $unavailableOnFetch = false;
+
     public function createPayment(array $payload): CheckoutSession
     {
         ($this->whileCalling)($payload);
+
+        $key = is_string($payload['idempotencyKey'] ?? null) ? $payload['idempotencyKey'] : null;
+
+        if ($key !== null && isset($this->sessionsByKey[$key])) {
+            return $this->sessionsByKey[$key];
+        }
 
         $this->lastPayload = $payload;
         $this->created++;
@@ -339,12 +357,22 @@ class FakeGateway implements ListsSubscriptions, SubscriptionGateway
         $this->metadata[$id] = is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [];
         $this->remote[$id] = new RemotePayment($id, Payment::STATUS_OPEN, $this->metadata[$id]);
 
-        return new CheckoutSession($id, 'https://checkout.example/'.$id);
+        $session = new CheckoutSession($id, 'https://checkout.example/'.$id);
+
+        if ($key !== null) {
+            $this->sessionsByKey[$key] = $session;
+        }
+
+        return $session;
     }
 
     public function fetch(string $providerId): RemotePayment
     {
         $this->fetched[] = $providerId;
+
+        if ($this->unavailableOnFetch) {
+            throw new ProviderUnavailable('the provider could not be asked');
+        }
 
         if ($this->throwOnFetch) {
             throw new RuntimeException('the provider is unreachable');

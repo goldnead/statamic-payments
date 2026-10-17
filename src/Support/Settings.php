@@ -4,6 +4,7 @@ namespace Goldnead\StatamicPayments\Support;
 
 use Goldnead\BrandContext\Contracts\ProvidesSettings;
 use Goldnead\BrandContext\Settings\SettingsRegistry;
+use Goldnead\StatamicPayments\Cp\SuiteNav;
 
 /**
  * Die Einstellungen, die ein Betreiber im Control Panel ändern darf — und die
@@ -253,6 +254,18 @@ class Settings implements ProvidesSettings
                 ],
             ],
         ];
+    }
+
+    /**
+     * Unter welchem Eintrag der eigenen CP-Navigation der Unterpunkt "Settings"
+     * hängt: [Sektion, Name], exakt wie in Nav::extend. Optional, gelesen von
+     * der Einstellungs-Schicht in statamic-brand-context (ab 1.16).
+     *
+     * @return array{0: string, 1: string}
+     */
+    public static function settingsNavParent(): array
+    {
+        return [SuiteNav::section(), __('statamic-payments::messages.utility_nav')];
     }
 
     /**

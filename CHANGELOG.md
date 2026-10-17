@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.31.0 — 2026-10-17
+
+### Changed
+
+- Settings: the addon now declares `settingsNavParent()` (`[section, name]` of its own Control Panel navigation entry). With statamic-brand-context 1.16 or newer its settings show as the sub-item "Einstellungen" under that entry; addons without a navigation of their own share one "Addon-Suite" page under Settings. Older brand-context versions ignore the method and keep the previous layout.
+
+### Upgrading
+
+- No migration, no new config key.
+
 ## 1.30.0 — 2026-10-17
 
 ### Fixed

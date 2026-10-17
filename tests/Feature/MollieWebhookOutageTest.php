@@ -61,13 +61,25 @@ class MollieWebhookOutageTest extends TestCase
 
     // ---------------------------------------------------------- the real SDK
 
-    protected function mollie(array $responses): MollieGateway
+    /**
+     * The SDK's mock client exists from v3 on; CI's prefer-lowest job installs
+     * v2. The responses come as a closure because building a `MockResponse`
+     * already fails there.
+     *
+     * @param  \Closure(): array<string, mixed>  $responses
+     */
+    protected function mollie(\Closure $responses): MollieGateway
+    {
+        return new MollieGateway($this->mockClient($responses));
+    }
+
+    protected function mockClient(\Closure $responses): MockMollieClient
     {
         if (! class_exists(MockMollieClient::class)) {
             $this->markTestSkipped('mollie/mollie-api-php v2 has no mock client');
         }
 
-        return new MollieGateway(new MockMollieClient($responses));
+        return new MockMollieClient($responses());
     }
 
     /** @return array<string, array{0: int}> */
@@ -87,7 +99,7 @@ class MollieWebhookOutageTest extends TestCase
     #[DataProvider('outageStatuses')]
     public function the_gateway_says_ask_again_later_for_what_is_not_an_answer(int $status): void
     {
-        $gateway = $this->mollie([
+        $gateway = $this->mollie(fn () => [
             GetPaymentRequest::class => MockResponse::error($status, 'Upstream', 'Not now'),
         ]);
 
@@ -102,14 +114,12 @@ class MollieWebhookOutageTest extends TestCase
         // The SDK retries a network error by itself (5 times, with a growing
         // pause). No pause here, and enough failures to outlast the retries:
         // what reaches the gateway is the last one.
-        $fail = fn (PendingRequest $request) => throw new RetryableNetworkRequestException($request, 'Connection failed');
+        $client = $this->mockClient(function () {
+            $fail = fn (PendingRequest $request) => throw new RetryableNetworkRequestException($request, 'Connection failed');
 
-        $client = new MockMollieClient([
-            GetPaymentRequest::class => new SequenceMockResponse(...array_fill(0, 6, $fail)),
-        ]);
+            return [GetPaymentRequest::class => new SequenceMockResponse(...array_fill(0, 6, $fail))];
+        });
         $client->setRetryStrategy(new LinearRetryStrategy(5, 0));
-
-        $this->mollie([]);
 
         $this->expectException(ProviderUnavailable::class);
 
@@ -119,7 +129,7 @@ class MollieWebhookOutageTest extends TestCase
     #[Test]
     public function a_404_stays_an_answer(): void
     {
-        $gateway = $this->mollie([
+        $gateway = $this->mollie(fn () => [
             GetPaymentRequest::class => MockResponse::notFound(),
         ]);
 

@@ -20,7 +20,7 @@ use Throwable;
  *
  * Zwei Schritte, und der erste legt nichts an. Der signierte GET aus der Mail
  * zeigt die Positionen, den Gesamtpreis, die Widerrufsbelehrung, den Haken
- * nach § 356 Abs. 5 und genau eine Schaltfläche „Zahlungspflichtig bestellen".
+ * nach § 356 Abs. 6 und genau eine Schaltfläche „Zahlungspflichtig bestellen".
  * Erst der POST dahinter startet über `Checkout::resume()` eine neue Zahlung
  * — mit einer Zustimmung, die eben auf dieser Seite gesetzt wurde, oder ohne.
  *

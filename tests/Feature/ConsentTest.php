@@ -13,7 +13,7 @@ use LogicException;
 use PHPUnit\Framework\Attributes\Test;
 
 /**
- * Die Zustimmung nach § 356 Abs. 5 BGB, festgehalten statt verworfen.
+ * Die Zustimmung nach § 356 Abs. 6 BGB, festgehalten statt verworfen.
  *
  * Vorher wurde `confirmed => accepted` geprüft und dann vergessen. Der Code
  * nannte das „the record" — es gab keines. Was hier belegt wird: Zeitpunkt und

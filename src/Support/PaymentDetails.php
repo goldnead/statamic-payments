@@ -44,7 +44,7 @@ use Throwable;
  * `SubjectReference`; landet geprüft als `meta.entitlement_subject`, siehe
  * {@see PurchaseSubject}. In `meta` selbst ist der Schlüssel gesperrt.
  *
- * Dazu die **Zustimmung nach § 356 Abs. 5 BGB**, als Paar:
+ * Dazu die **Zustimmung nach § 356 Abs. 6 BGB**, als Paar:
  *
  * - `consent_at` — wann der Käufer zugestimmt hat, dass die Lieferung sofort
  *   beginnt und sein Widerrufsrecht damit erlischt. Carbon, DateTimeInterface
@@ -80,7 +80,7 @@ final class PaymentDetails
     /**
      * Wie lang der Wortlaut einer Zustimmung höchstens sein darf.
      *
-     * Ein Satz nach § 356 Abs. 5 BGB ist zwei Zeilen lang. Viertausend Zeichen
+     * Ein Satz nach § 356 Abs. 6 BGB ist zwei Zeilen lang. Viertausend Zeichen
      * lassen Platz für eine Belehrung darüber; was länger ist, ist kein
      * Einwilligungstext mehr, sondern ein Dokument, das an eine andere Stelle
      * gehört. Abgelehnt und nicht gekürzt: ein gekürzter Beleg ist ein
@@ -335,7 +335,7 @@ final class PaymentDetails
     }
 
     /**
-     * Die Zustimmung nach § 356 Abs. 5 BGB, geprüft.
+     * Die Zustimmung nach § 356 Abs. 6 BGB, geprüft.
      *
      * Rechtliche Entscheidungen (01.09.2026, von Adrian zu prüfen): beide
      * Angaben oder keine; der Zeitpunkt darf nicht in der Zukunft liegen; der

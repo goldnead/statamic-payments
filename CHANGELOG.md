@@ -23,6 +23,14 @@
 - A custom `PaymentGateway` now receives `idempotencyKey` in the `createPayment()` payload.
   Drop it or send it as your provider's idempotency header; do not pass it on in a request body.
 
+## 1.29.4 — 2026-10-11
+
+### Changed
+
+- References to the consent for immediate delivery of digital content now cite § 356 Abs. 6 BGB
+  (Abs. 5 covers services): CP section label, merchant hint on a withdrawal, comments and docs.
+  No behaviour change.
+
 ## 1.29.3 — 2026-10-06
 
 ### Fixed

@@ -251,9 +251,9 @@ class WithdrawalTest extends TestCase
         $this->assertTrue($withdrawal->fresh()->right_expired_hint);
 
         // Der Verbraucher liest davon nichts …
-        Mail::assertSent(WithdrawalReceipt::class, fn (WithdrawalReceipt $m) => ! str_contains($m->render(), '356 Abs. 5'));
+        Mail::assertSent(WithdrawalReceipt::class, fn (WithdrawalReceipt $m) => ! str_contains($m->render(), '356 Abs. 6'));
         // … der Händler schon.
-        Mail::assertSent(WithdrawalNotice::class, fn (WithdrawalNotice $m) => str_contains($m->render(), '§ 356 Abs. 5 BGB'));
+        Mail::assertSent(WithdrawalNotice::class, fn (WithdrawalNotice $m) => str_contains($m->render(), '§ 356 Abs. 6 BGB'));
     }
 
     #[Test]

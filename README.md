@@ -269,7 +269,7 @@ once the addon is installed.
 Clicking a row (or **Details** in its menu) opens `cp/utilities/payments/{id}`: the amount, status
 and timestamps at the top, then panels the way a publish form groups its fields — **lines** (kind,
 quantity, unit price, the offer it was sold through), **buyer** (email, name, country, the address
-from `meta.address`, the VAT ID from `meta.vat_id`), **consent** under § 356 (5) BGB (when, the exact
+from `meta.address`, the VAT ID from `meta.vat_id`), **consent** under § 356 (6) BGB (when, the exact
 wording, the version of the instruction), the **access window** from `meta.access`, **origin** (UTM,
 referrer, landing page), **payment method**, **refunds**, **related** (original order, follow-up
 offers, subscription, invoice, withdrawals, cancellations) and **communication** — see below. With
@@ -390,7 +390,7 @@ consumers, and what this addon does about each. **None of this is legal
 advice**; the wording and the decisions below are documented so a lawyer can
 check them, not so you can skip the lawyer.
 
-### Recording the consent (§ 356 Abs. 5 BGB)
+### Recording the consent (§ 356 Abs. 6 BGB)
 
 For digital content delivered at once, the right of withdrawal ends only if the
 buyer expressly agreed to immediate delivery and acknowledged losing the right.
@@ -460,7 +460,7 @@ withdrawal, one mail, one time.
 happens after confirmation, on the server, on an unambiguous hit only (address,
 case-insensitively, plus our id or the provider's id), and the result reaches
 you and not the consumer. An unmatched declaration is still a declaration and
-still acknowledged. A recorded consent under § 356 Abs. 5 on the matched
+still acknowledged. A recorded consent under § 356 Abs. 6 on the matched
 payment is passed to you as a **hint** (`right_expired_hint`), never asserted
 to the consumer beforehand; so is a declaration arriving after
 `withdrawal.days` (default 14) from the payment. Whether the right has run is a
@@ -1046,7 +1046,7 @@ plain built-in mail goes out — German and English, no images, publishable unde
 
 `resume_url` is where the button points. Left `null`, it is a signed link
 (`/!/statamic-payments/weiter/{id}`, valid `resume_days`) to an **order page** in the portal layout:
-the lines, the total, the withdrawal note, the § 356 (5) consent box with the wording from
+the lines, the total, the withdrawal note, the § 356 (6) consent box with the wording from
 `meta.withdrawal` (or `messages.order_consent`), and one button reading „Zahlungspflichtig
 bestellen". Opening the link creates nothing — a mail client prefetching it must not order. The
 button is a signed POST that runs `Checkout::resume()`: the same lines, buyer, origin and discount as

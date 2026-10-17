@@ -7,7 +7,7 @@
         § 312j Abs. 2 und 3 BGB: die wesentlichen Angaben unmittelbar vor der
         Schaltfläche, und die Schaltfläche mit dem gesetzlichen Wortlaut. Der
         GET zeigt; erst der POST bestellt. Der Haken ist die Zustimmung nach
-        § 356 Abs. 5 — ohne ihn wird trotzdem bestellt, nur bleibt das
+        § 356 Abs. 6 — ohne ihn wird trotzdem bestellt, nur bleibt das
         Widerrufsrecht bestehen.
     --}}
     <h1>{{ \Goldnead\StatamicPayments\Support\Anrede::trans('statamic-payments::abandoned.resume_title') }}</h1>

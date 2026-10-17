@@ -692,7 +692,7 @@ class Fulfilment
             // wieder gegen ein Mandat, das die Seite nie angekuendigt hat.
             //
             // Bewusst hier und nicht als Waechter im Model: der `updating`-
-            // Waechter dort traegt eine Fehlermeldung nach § 356 Abs. 5 BGB und
+            // Waechter dort traegt eine Fehlermeldung nach § 356 Abs. 6 BGB und
             // gehoert der Zustimmung. Das Einfrieren haelt hier, weil diese
             // Methode die einzige Stelle ist, die die Spalte schreibt —
             // `PaymentDetails::ALLOWED` sperrt jeden Aufrufer aus, und

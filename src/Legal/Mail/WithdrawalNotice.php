@@ -15,7 +15,7 @@ use Illuminate\Mail\Mailables\Envelope;
  *
  * Hier steht alles, was der Verbraucher nicht zu sehen bekommt — ob eine
  * Zahlung gefunden wurde, welche, ob die Frist nach der Konfiguration noch
- * lief, ob am Treffer eine Zustimmung nach § 356 Abs. 5 steht. Hinweise, keine
+ * lief, ob am Treffer eine Zustimmung nach § 356 Abs. 6 steht. Hinweise, keine
  * Entscheidungen: was daraus folgt, entscheidet, wer die Mail liest.
  */
 class WithdrawalNotice extends Mailable

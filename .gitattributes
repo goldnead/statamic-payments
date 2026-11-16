@@ -23,3 +23,7 @@
 # LICENSE.md. `/dist` is the built Control Panel bundle — the thing installed
 # sites actually load. The sources it is built from are ignored above: a site
 # installing this addon has no Node toolchain and no reason to download them.
+
+# Internal listing files: not needed by installing sites.
+/art                export-ignore
+/MARKETPLACE.md    export-ignore

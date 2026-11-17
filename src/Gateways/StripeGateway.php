@@ -1153,6 +1153,22 @@ class StripeGateway implements ListsSubscriptions, PausesSubscriptions, ReadsCar
                 throw new ProviderUnavailable("statamic-payments: Stripe could not answer [{$call}] ({$status}): {$message}");
             }
 
+            // Ein abgelehnter Schluessel (401, 403) ist ebenfalls keine Antwort
+            // ueber die Sache, sondern ueber diese Seite. Als Ablehnung gelesen
+            // macht `Fulfilment::fetch()` daraus „unbekannt", der Webhook sagt
+            // 200, und nach einer Schluesselrotation wird niemand mehr
+            // erfuellt. Fuer `Transport::isTransient()` heisst das: die Zeile
+            // bleibt beansprucht und der naechste Durchlauf fragt nach, was
+            // laut dort nur Warten kostet.
+            if ($status === 401 || $status === 403) {
+                Log::error('statamic-payments: Stripe rejected the API key. Check STRIPE_KEY.', [
+                    'call' => $call,
+                    'status' => $status,
+                ]);
+
+                throw new ProviderUnavailable("statamic-payments: Stripe rejected the API key for [{$call}] ({$status}): {$message}");
+            }
+
             throw new RuntimeException("statamic-payments: Stripe refused [{$call}] with {$status}: {$message}");
         }
 

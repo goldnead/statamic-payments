@@ -392,6 +392,21 @@ class MollieGateway implements ListsSubscriptions, MandateGateway, ReadsCardExpi
                 throw new ProviderUnavailable("statamic-payments: Mollie could not be asked for [{$providerId}]: {$e->getMessage()}", 0, $e);
             }
 
+            // Ein abgelehnter Schluessel (401, 403) sagt nichts ueber die
+            // Zahlung, sondern ueber diese Seite. Als „unbekannt" gelesen
+            // antwortete der Webhook 200, Mollie hoerte auf zu wiederholen,
+            // und nach einer Schluesselrotation wuerde niemand mehr erfuellt.
+            // Also „spaeter nochmal", laut: bis der Schluessel stimmt, hat
+            // Mollie noch 26 Stunden Wiederholungen uebrig.
+            if ($e instanceof ApiException && in_array((int) $e->getCode(), [401, 403], true)) {
+                Log::error('statamic-payments: Mollie rejected the API key; the payment was left for redelivery. Check MOLLIE_KEY.', [
+                    'provider_id' => $providerId,
+                    'status' => (int) $e->getCode(),
+                ]);
+
+                throw new ProviderUnavailable("statamic-payments: Mollie rejected the API key for [{$providerId}] ({$e->getCode()}): {$e->getMessage()}", 0, $e);
+            }
+
             throw $e;
         }
 

@@ -69,6 +69,18 @@ class FulfilmentOnceTest extends TestCase
     }
 
     #[Test]
+    public function a_blank_funnel_name_is_filled_and_an_overlong_one_is_cut(): void
+    {
+        $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com'])?->payment;
+        $payment->forceFill(['name' => '   '])->save();
+        $this->gateway->markPaid($payment->provider_id, name: str_repeat('ä', 300));
+
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->assertSame(str_repeat('ä', 255), $payment->fresh()->name);
+    }
+
+    #[Test]
     public function an_empty_provider_name_overwrites_nothing(): void
     {
         $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com', 'name' => 'Erika Funnel'])?->payment;

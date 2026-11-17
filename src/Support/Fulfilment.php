@@ -638,8 +638,10 @@ class Fulfilment
 
         // Der Name, aber nur wenn keiner da ist: ein vom Funnel gesetzter hat
         // Vorrang, ein leerer des Anbieters ueberschreibt nichts.
-        if ($remote->name && trim((string) $payment->name) === '') {
-            $payment->forceFill(['name' => $remote->name])->save();
+        if ($remote->name !== null && trim($remote->name) !== '' && trim((string) $payment->name) === '') {
+            // Die Spalte ist varchar(255); ein ueberlanger Fremdwert darf die
+            // Auslieferung nach dem Claim nicht werfen lassen.
+            $payment->forceFill(['name' => mb_substr(trim($remote->name), 0, 255)])->save();
             $payment = $payment->fresh() ?? $payment;
         }
 

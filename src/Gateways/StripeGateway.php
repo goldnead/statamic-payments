@@ -12,6 +12,7 @@ use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\CheckoutSession;
 use Goldnead\StatamicPayments\Support\Money;
 use Goldnead\StatamicPayments\Support\ProviderUnavailable;
+use Goldnead\StatamicPayments\Support\RejectedKey;
 use Goldnead\StatamicPayments\Support\RemotePayment;
 use Goldnead\StatamicPayments\Support\RemoteSubscription;
 use Illuminate\Http\Client\ConnectionException;
@@ -1161,7 +1162,7 @@ class StripeGateway implements ListsSubscriptions, PausesSubscriptions, ReadsCar
             // bleibt beansprucht und der naechste Durchlauf fragt nach, was
             // laut dort nur Warten kostet.
             if ($status === 401 || $status === 403) {
-                Log::error('statamic-payments: Stripe rejected the API key. Check STRIPE_KEY.', [
+                RejectedKey::report('Stripe', 'STRIPE_KEY', [
                     'call' => $call,
                     'status' => $status,
                 ]);

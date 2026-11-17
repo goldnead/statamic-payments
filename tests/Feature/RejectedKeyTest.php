@@ -8,6 +8,7 @@ use Goldnead\StatamicPayments\Support\Fulfilment;
 use Goldnead\StatamicPayments\Support\ProviderUnavailable;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Mollie\Api\Fake\MockMollieClient;
 use Mollie\Api\Fake\MockResponse;
 use Mollie\Api\Http\Requests\GetPaymentRequest;
@@ -68,6 +69,44 @@ class RejectedKeyTest extends TestCase
         $this->expectException(ProviderUnavailable::class);
 
         (new Fulfilment($this->mollie(401)))->handle('tr_abc123');
+    }
+
+    #[Test]
+    public function a_rejected_key_raises_one_critical_per_hour_and_provider(): void
+    {
+        // Jede Zustellung schreibt ihren Fehler, und in der Flut geht der
+        // eine Satz unter, der zaehlt. Einmal je Stunde und Anbieter laut.
+        Log::spy();
+        Http::fake(['api.stripe.com/*' => Http::response(['error' => ['message' => 'Invalid API Key provided']], 401)]);
+        $stripe = new StripeGateway('sk_test_rotated', 'https://api.stripe.com');
+
+        foreach (range(1, 3) as $_) {
+            try {
+                $stripe->fetch('cs_test_abc');
+            } catch (ProviderUnavailable) {
+                // erwartet
+            }
+        }
+
+        foreach (range(1, 2) as $_) {
+            try {
+                $this->mollie(401)->fetch('tr_abc123');
+            } catch (ProviderUnavailable) {
+                // erwartet
+            }
+        }
+
+        Log::shouldHaveReceived('critical')->twice();
+
+        $this->travel(61)->minutes();
+
+        try {
+            $stripe->fetch('cs_test_abc');
+        } catch (ProviderUnavailable) {
+            // erwartet
+        }
+
+        Log::shouldHaveReceived('critical')->times(3);
     }
 
     #[Test]

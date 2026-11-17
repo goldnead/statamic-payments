@@ -5,6 +5,7 @@
 ### Fixed
 
 - A rejected API key (401 or 403) is no longer read as an unknown payment. `MollieGateway::fetch()` and every Stripe call now throw `ProviderUnavailable` and log an error naming the key setting; the webhook answers 503 and the provider keeps redelivering until the key is fixed. Before, the webhook answered 200 and, after a key rotation, nobody was fulfilled, with a warning as the only trace. For Stripe calls outside the webhook a rejected key now counts as transient in `Transport::isTransient()` (the row stays claimed and the next run asks again). No migration, no new config key.
+- **Monitoring:** on top of the error per call, a rejected key writes one `Log::critical` per provider and hour („Stripe rejects the API key; no payment from Stripe is fulfilled until STRIPE_KEY is fixed", same for Mollie), claimed through `Cache::add`. Point your log alerting (Sentry, Bugsink, a log watcher) at `critical` to hear about a rotated key within the hour. Needs a shared cache store across workers for the once-per-hour limit to hold.
 
 ## 1.31.2 — 2026-11-17
 

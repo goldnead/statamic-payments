@@ -12,6 +12,7 @@ use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\CheckoutSession;
 use Goldnead\StatamicPayments\Support\Money;
 use Goldnead\StatamicPayments\Support\ProviderUnavailable;
+use Goldnead\StatamicPayments\Support\RejectedKey;
 use Goldnead\StatamicPayments\Support\RemotePayment;
 use Goldnead\StatamicPayments\Support\RemoteSubscription;
 use Illuminate\Support\Carbon;
@@ -399,7 +400,7 @@ class MollieGateway implements ListsSubscriptions, MandateGateway, ReadsCardExpi
             // Also „spaeter nochmal", laut: bis der Schluessel stimmt, hat
             // Mollie noch 26 Stunden Wiederholungen uebrig.
             if ($e instanceof ApiException && in_array((int) $e->getCode(), [401, 403], true)) {
-                Log::error('statamic-payments: Mollie rejected the API key; the payment was left for redelivery. Check MOLLIE_KEY.', [
+                RejectedKey::report('Mollie', 'MOLLIE_KEY', [
                     'provider_id' => $providerId,
                     'status' => (int) $e->getCode(),
                 ]);

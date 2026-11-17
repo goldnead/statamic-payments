@@ -201,6 +201,7 @@ class StripeGateway implements ListsSubscriptions, PausesSubscriptions, ReadsCar
             // Stripe's mandate is the PaymentMethod. It is what a later
             // off-session charge names, and the four digits above are its own.
             mandateId: $this->firstString([$method['id'] ?? null]),
+            name: $this->firstString([$session['customer_details']['name'] ?? null]),
         );
     }
 

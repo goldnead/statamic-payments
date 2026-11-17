@@ -46,6 +46,40 @@ class FulfilmentOnceTest extends TestCase
     }
 
     #[Test]
+    public function the_providers_buyer_name_fills_an_empty_name(): void
+    {
+        $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com'])?->payment;
+        $this->assertEmpty($payment->name);
+        $this->gateway->markPaid($payment->provider_id, name: 'Erika Mustermann');
+
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->assertSame('Erika Mustermann', $payment->fresh()->name);
+    }
+
+    #[Test]
+    public function a_name_the_funnel_set_wins_over_the_providers(): void
+    {
+        $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com', 'name' => 'Erika Funnel'])?->payment;
+        $this->gateway->markPaid($payment->provider_id, name: 'Karte Anderer');
+
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->assertSame('Erika Funnel', $payment->fresh()->name);
+    }
+
+    #[Test]
+    public function an_empty_provider_name_overwrites_nothing(): void
+    {
+        $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com', 'name' => 'Erika Funnel'])?->payment;
+        $this->gateway->markPaid($payment->provider_id, name: null);
+
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->assertSame('Erika Funnel', $payment->fresh()->name);
+    }
+
+    #[Test]
     public function five_deliveries_fulfil_once(): void
     {
         Event::fake([PaymentPaid::class]);

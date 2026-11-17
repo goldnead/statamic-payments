@@ -113,6 +113,15 @@ final readonly class RemotePayment
          * korrigieren: was an der Kasse feststand, steht fest.
          */
         public ?int $amountCent = null,
+        /**
+         * Der Name des Kaeufers, wie er an der Kasse des Anbieters eingegeben
+         * wurde (Stripe: `customer_details.name`).
+         *
+         * Nur zum Auffuellen: ein vom Funnel gesetzter Name hat Vorrang, ein
+         * leerer Name des Anbieters ueberschreibt nichts. Bei Funnel-Modus
+         * `billing=minimal` ist er oft die einzige Namensquelle.
+         */
+        public ?string $name = null,
     ) {}
 
     public function isPaid(): bool

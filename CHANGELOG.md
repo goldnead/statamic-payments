@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Stripe subscriptions: when `invoice.paid` wins the fulfilment claim before the checkout session, the buyer's name from the session is now still taken over into an empty `Payment::name`. Before, the second delivery returned at the taken claim and the name was lost for good. A name already set is never overwritten; no second `PaymentPaid`. No migration, no new config key.
+
 ## 1.31.2 — 2026-11-17
 
 ### Fixed

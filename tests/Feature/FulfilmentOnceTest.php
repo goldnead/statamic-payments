@@ -81,6 +81,40 @@ class FulfilmentOnceTest extends TestCase
     }
 
     #[Test]
+    public function a_name_that_arrives_with_the_second_delivery_is_still_taken_over(): void
+    {
+        // Abo bei Stripe: `invoice.paid` kann den Claim vor der
+        // Checkout-Session gewinnen. Die Rechnung nennt keinen Namen, die
+        // Session schon, kehrt aber bei `claimed === 0` zurueck.
+        $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com'])?->payment;
+
+        $this->gateway->markPaid($payment->provider_id);
+        app(Fulfilment::class)->handle($payment->provider_id);
+        $this->assertEmpty($payment->fresh()->name);
+
+        Event::fake([PaymentPaid::class]);
+        $this->gateway->markPaid($payment->provider_id, name: 'Erika Mustermann');
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->assertSame('Erika Mustermann', $payment->fresh()->name);
+        Event::assertNotDispatched(PaymentPaid::class);
+    }
+
+    #[Test]
+    public function a_later_delivery_does_not_overwrite_a_name_already_taken_over(): void
+    {
+        $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com'])?->payment;
+
+        $this->gateway->markPaid($payment->provider_id, name: 'Erika Mustermann');
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->gateway->markPaid($payment->provider_id, name: 'Karte Anderer');
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->assertSame('Erika Mustermann', $payment->fresh()->name);
+    }
+
+    #[Test]
     public function an_empty_provider_name_overwrites_nothing(): void
     {
         $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com', 'name' => 'Erika Funnel'])?->payment;

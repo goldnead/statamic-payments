@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Stripe: the buyer's name from the checkout (`customer_details.name`) is now taken over into `Payment::name`, also in funnel mode `billing=minimal`, so invoices carry it. A name the funnel set wins; an empty Stripe name overwrites nothing. No migration, no new config key.
+
 ## 1.31.1 — 2026-11-16
 
 ### Changed

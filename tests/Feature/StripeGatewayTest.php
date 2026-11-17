@@ -131,6 +131,30 @@ class StripeGatewayTest extends TestCase
     }
 
     #[Test]
+    public function the_buyers_name_is_read_from_the_checkout_session(): void
+    {
+        Http::fake(['api.stripe.com/*' => Http::response($this->checkoutSession([
+            'customer_details' => ['name' => '  Erika Mustermann '],
+        ]))]);
+
+        $this->assertSame('Erika Mustermann', $this->stripe()->fetch('cs_test_a1b2c3')->name);
+    }
+
+    #[Test]
+    public function a_blank_or_missing_stripe_name_reads_as_null(): void
+    {
+        Http::fake(['api.stripe.com/*' => Http::response($this->checkoutSession([
+            'customer_details' => ['name' => '   '],
+        ]))]);
+
+        $this->assertNull($this->stripe()->fetch('cs_test_a1b2c3')->name);
+
+        Http::fake(['api.stripe.com/*' => Http::response($this->checkoutSession())]);
+
+        $this->assertNull($this->stripe()->fetch('cs_test_a1b2c3')->name);
+    }
+
+    #[Test]
     public function a_session_that_is_complete_but_unpaid_is_not_read_as_paid(): void
     {
         // The trap: Stripe's `status` says the buyer got to the end of the

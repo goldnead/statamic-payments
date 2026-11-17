@@ -393,7 +393,7 @@ class FakeGateway implements ListsSubscriptions, SubscriptionGateway
      * einer einmaligen. Getrennt angebbar, weil eine Folgeabbuchung ihr eigenes
      * Mandat zurueckmeldet und der Test genau das ausdruecken koennen muss.
      */
-    public function markPaid(string $providerId, ?string $email = null, ?string $cardLast4 = null, ?string $cardLabel = null, ?string $mandateId = null): void
+    public function markPaid(string $providerId, ?string $email = null, ?string $cardLast4 = null, ?string $cardLabel = null, ?string $mandateId = null, ?string $name = null): void
     {
         $this->remote[$providerId] = new RemotePayment(
             providerId: $providerId,
@@ -403,6 +403,7 @@ class FakeGateway implements ListsSubscriptions, SubscriptionGateway
             cardLast4: $cardLast4,
             cardLabel: $cardLabel,
             mandateId: $mandateId,
+            name: $name,
         );
     }
 

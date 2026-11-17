@@ -81,6 +81,24 @@ class FulfilmentOnceTest extends TestCase
     }
 
     #[Test]
+    public function session_first_then_an_invoice_without_a_name_keeps_the_name(): void
+    {
+        // Die andere Reihenfolge: die Checkout-Session gewinnt den Claim mit
+        // Namen, danach kommt `invoice.paid` ohne Namen.
+        Event::fake([PaymentPaid::class]);
+        $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com'])?->payment;
+
+        $this->gateway->markPaid($payment->provider_id, name: 'Erika Mustermann');
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->gateway->markPaid($payment->provider_id);
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->assertSame('Erika Mustermann', $payment->fresh()->name);
+        Event::assertDispatchedTimes(PaymentPaid::class, 1);
+    }
+
+    #[Test]
     public function a_name_that_arrives_with_the_second_delivery_is_still_taken_over(): void
     {
         // Abo bei Stripe: `invoice.paid` kann den Claim vor der

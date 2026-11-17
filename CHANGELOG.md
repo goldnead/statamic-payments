@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Fulfilment: a failure after the fulfilment claim but before `PaymentPaid` (a save of the buyer's email, name, country or card, or the abandonment cleanup) now gives the claim back and reaches the caller, so the provider redelivers. Before, the claim stayed staked, every redelivery saw it as taken, and the payment stayed paid without `PaymentPaid` for good. No migration, no new config key.
+
 ## 1.31.2 — 2026-11-17
 
 ### Fixed

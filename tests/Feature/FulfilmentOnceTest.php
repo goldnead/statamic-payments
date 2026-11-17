@@ -5,6 +5,7 @@ namespace Goldnead\StatamicPayments\Tests\Feature;
 use Goldnead\StatamicPayments\Events\PaymentFailed;
 use Goldnead\StatamicPayments\Events\PaymentPaid;
 use Goldnead\StatamicPayments\Models\Payment;
+use Goldnead\StatamicPayments\Support\Abandonment;
 use Goldnead\StatamicPayments\Support\Checkout;
 use Goldnead\StatamicPayments\Support\Fulfilment;
 use Goldnead\StatamicPayments\Tests\TestCase;
@@ -168,6 +169,79 @@ class FulfilmentOnceTest extends TestCase
 
         $this->assertSame(2, $attempts);
         $this->assertNotNull(Payment::first()->fulfilled_at);
+    }
+
+    #[Test]
+    public function a_failure_between_claim_and_event_gives_the_claim_back(): void
+    {
+        $payment = $this->paid();
+
+        // Nicht nur ein Listener kann werfen. Zwischen Claim und Ereignis
+        // laufen noch Schreibzugriffe und die Abbruch-Bereinigung. Wirft eine
+        // davon und der Claim bleibt stehen, sieht jede Wiederholung
+        // `claimed === 0` und schweigt: bezahlt, nie ausgeliefert.
+        $calls = 0;
+        $this->app->instance(Abandonment::class, new class($calls) extends Abandonment
+        {
+            public function __construct(private int &$calls) {}
+
+            public function settled(Payment $zahlung): void
+            {
+                if (++$this->calls === 1) {
+                    throw new \RuntimeException('database went away');
+                }
+            }
+        });
+
+        $paid = 0;
+        Event::listen(PaymentPaid::class, function () use (&$paid) {
+            $paid++;
+        });
+
+        try {
+            app(Fulfilment::class)->handle($payment->provider_id);
+            $this->fail('the exception should reach the caller, so the provider retries');
+        } catch (\RuntimeException) {
+            // expected
+        }
+
+        $this->assertSame(0, $paid);
+        $this->assertNull(Payment::first()->fulfilled_at, 'the claim must be released');
+
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->assertSame(1, $paid);
+        $this->assertNotNull(Payment::first()->fulfilled_at);
+    }
+
+    #[Test]
+    public function a_save_that_throws_after_the_claim_gives_the_claim_back(): void
+    {
+        $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com'])?->payment;
+        $this->gateway->markPaid($payment->provider_id, name: 'Erika Mustermann');
+
+        $throws = true;
+        Payment::saving(function () use (&$throws) {
+            if ($throws) {
+                throw new \RuntimeException('deadlock');
+            }
+        });
+
+        try {
+            app(Fulfilment::class)->handle($payment->provider_id);
+            $this->fail('the exception should reach the caller, so the provider retries');
+        } catch (\RuntimeException) {
+            // expected
+        }
+
+        $this->assertNull(Payment::first()->fulfilled_at, 'the claim must be released');
+
+        $throws = false;
+        Event::fake([PaymentPaid::class]);
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        Event::assertDispatchedTimes(PaymentPaid::class, 1);
+        $this->assertSame('Erika Mustermann', Payment::first()->name);
     }
 
     #[Test]

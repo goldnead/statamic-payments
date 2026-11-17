@@ -120,6 +120,37 @@ class RefundWithdrawsAccessTest extends TestCase
     }
 
     #[Test]
+    public function a_withdrawal_that_fails_is_retried_on_the_next_delivery(): void
+    {
+        // `revokeFor()` fing den Fehler frueher selbst und loggte nur. Dann
+        // lief der Rueckbau in `Refunds::record()` nie, die Erstattung stand
+        // als gebucht da, und keine weitere Zustellung entzog den Zugang.
+        $this->zugangVergeben();
+        $zahlung = $this->bezahlteZahlung();
+
+        $wirft = true;
+        Entitlement::retrieved(function () use (&$wirft) {
+            if ($wirft) {
+                throw new \RuntimeException('entitlements-Datenbank weg');
+            }
+        });
+
+        try {
+            app(Refunds::class)->record($zahlung, 10000, 're_1');
+            $this->fail('the failure has to reach the caller, so the provider redelivers');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('entitlements-Datenbank weg', $e->getMessage());
+        }
+
+        $wirft = false;
+        $this->assertSame(0, $zahlung->fresh()->refunded_cent);
+        $this->assertSame(EntitlementState::Active, Entitlement::first()->state());
+
+        $this->assertTrue(app(Refunds::class)->record($zahlung->fresh(), 10000, 're_1'));
+        $this->assertSame(EntitlementState::Revoked, Entitlement::first()->state());
+    }
+
+    #[Test]
     public function a_refund_without_the_bridge_switched_on_changes_no_access(): void
     {
         config(['statamic-payments.entitlements.enabled' => false]);

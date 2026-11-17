@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Refunds: when a `PaymentRefunded` listener throws (withdrawing access, a mail), `Refunds::record()` now rolls back this refund's booking and claim and rethrows, so the provider redelivers and the refund is booked and announced again. Before, claim and booking stayed, every redelivery saw the refund as known, and the event never fired again: money back, access open. An earlier refund on the same payment is kept. No migration, no new config key.
+- Refunds: when a `PaymentRefunded` listener throws (withdrawing access, a mail), `Refunds::record()` now rolls back this refund's booking and claim and rethrows, so the provider redelivers and the refund is booked and announced again. Before, claim and booking stayed, every redelivery saw the refund as known, and the event never fired again: money back, access open. An earlier refund on the same payment is kept. For this to reach the rollback, `EntitlementsBridge::revokeFor()` now rethrows the first failure after logging it and after trying every other grant (it used to swallow it); this also lets `Chargebacks::record()` roll back and retry a failed withdrawal. No migration, no new config key.
 
 ## 1.31.2 — 2026-11-17
 

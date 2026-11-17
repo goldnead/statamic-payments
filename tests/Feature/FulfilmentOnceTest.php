@@ -2,6 +2,7 @@
 
 namespace Goldnead\StatamicPayments\Tests\Feature;
 
+use Goldnead\StatamicPayments\Contracts\PaymentGateway;
 use Goldnead\StatamicPayments\Events\PaymentFailed;
 use Goldnead\StatamicPayments\Events\PaymentPaid;
 use Goldnead\StatamicPayments\Models\Payment;
@@ -10,6 +11,7 @@ use Goldnead\StatamicPayments\Support\Checkout;
 use Goldnead\StatamicPayments\Support\Fulfilment;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\Test;
 
 /**
@@ -242,6 +244,35 @@ class FulfilmentOnceTest extends TestCase
 
         Event::assertDispatchedTimes(PaymentPaid::class, 1);
         $this->assertSame('Erika Mustermann', Payment::first()->name);
+    }
+
+    #[Test]
+    public function a_release_that_fails_too_keeps_the_original_exception(): void
+    {
+        $payment = $this->paid();
+
+        Event::listen(PaymentPaid::class, function () {
+            throw new \RuntimeException('the mail server is down');
+        });
+
+        $fulfilment = new class(app(PaymentGateway::class)) extends Fulfilment
+        {
+            protected function releaseClaim(Payment $payment): void
+            {
+                throw new \LogicException('connection lost');
+            }
+        };
+
+        Log::spy();
+
+        try {
+            $fulfilment->handle($payment->provider_id);
+            $this->fail('the original exception should reach the caller');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('the mail server is down', $e->getMessage());
+        }
+
+        Log::shouldHaveReceived('critical')->once();
     }
 
     #[Test]

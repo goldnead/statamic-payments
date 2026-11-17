@@ -142,6 +142,62 @@ class RefundsTest extends TestCase
     }
 
     #[Test]
+    public function a_listener_that_throws_lets_the_next_delivery_book_the_refund_again(): void
+    {
+        // Wirft ein Listener auf `PaymentRefunded` (Zugang entziehen, Mail),
+        // blieben Anspruch und Buchung sonst stehen. Die naechste Zustellung
+        // faende die Kennung belegt und schwiege: Geld zurueck, Zugang offen.
+        $zahlung = $this->zahlung();
+        $versuche = 0;
+
+        Event::listen(PaymentRefunded::class, function () use (&$versuche) {
+            if (++$versuche === 1) {
+                throw new \RuntimeException('entitlements down');
+            }
+        });
+
+        try {
+            app(Refunds::class)->record($zahlung, 10000, 're_voll');
+            $this->fail('the exception should reach the caller, so the provider redelivers');
+        } catch (\RuntimeException) {
+            // erwartet
+        }
+
+        $this->assertSame(0, $zahlung->fresh()->refunded_cent, 'the booking must be rolled back');
+
+        $this->assertTrue(app(Refunds::class)->record($zahlung->fresh(), 10000, 're_voll'));
+        $this->assertSame(2, $versuche);
+        $this->assertSame(10000, $zahlung->fresh()->refunded_cent);
+        $this->assertSame(['re_voll'], $zahlung->fresh()->meta['refunds']);
+    }
+
+    #[Test]
+    public function rolling_back_one_refund_keeps_an_earlier_one(): void
+    {
+        $zahlung = $this->zahlung();
+        $dienst = app(Refunds::class);
+
+        $dienst->record($zahlung, 3000, 're_frueh');
+        $vorher = $zahlung->fresh()->refunded_at;
+
+        Event::listen(PaymentRefunded::class, function () {
+            throw new \RuntimeException('entitlements down');
+        });
+
+        try {
+            $dienst->record($zahlung->fresh(), 2000, 're_spaet');
+        } catch (\RuntimeException) {
+            // erwartet
+        }
+
+        $frisch = $zahlung->fresh();
+        $this->assertSame(3000, $frisch->refunded_cent);
+        $this->assertNotNull($frisch->refunded_at);
+        $this->assertSame(['re_frueh'], $frisch->meta['refunds']);
+        $this->assertNotNull($vorher);
+    }
+
+    #[Test]
     public function nothing_and_negative_amounts_are_refused(): void
     {
         $zahlung = $this->zahlung();

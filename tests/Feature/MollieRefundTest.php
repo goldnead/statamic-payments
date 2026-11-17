@@ -138,10 +138,11 @@ class MollieRefundTest extends TestCase
     }
 
     #[Test]
-    public function the_gateway_reads_only_refunds_that_can_no_longer_be_cancelled(): void
+    public function the_gateway_reads_only_completed_refunds(): void
     {
-        // processing und refunded: unterwegs oder erledigt, nicht mehr
-        // stornierbar. queued und pending lassen sich noch stornieren,
+        // Nur refunded ist endgueltig. processing kann laut Mollie noch
+        // `failed` werden, und eine dann schon gebuchte Erstattung nimmt
+        // niemand zurueck. queued und pending lassen sich noch stornieren,
         // failed und canceled gehen nie hinaus (https://docs.mollie.com/docs/refunds).
         $gateway = $this->mollie(fn () => [
             GetPaymentRequest::class => MockResponse::ok(self::payment([
@@ -165,8 +166,53 @@ class MollieRefundTest extends TestCase
 
         $this->assertSame([
             ['id' => 're_fertig', 'amount' => 500],
-            ['id' => 're_unterwegs', 'amount' => 200],
         ], $remote->refunds);
+    }
+
+    #[Test]
+    public function a_refund_that_fails_after_processing_was_never_booked(): void
+    {
+        // Erst processing (Webhook), dann failed (Webhook). Gebucht wird
+        // keines von beiden, Zugang und Umsatz bleiben.
+        if (! class_exists(MockMollieClient::class)) {
+            $this->markTestSkipped('mollie/mollie-api-php v2 has no mock client');
+        }
+
+        $liste = fn (string $status) => MockResponse::ok([
+            'count' => 1,
+            '_embedded' => ['refunds' => [self::refund('re_wackel', '19.00', $status)]],
+            '_links' => ['self' => ['href' => 'x', 'type' => 'application/hal+json'], 'previous' => null, 'next' => null],
+        ]);
+        $zahlung = MockResponse::ok(self::payment(['amountRefunded' => ['value' => '19.00', 'currency' => 'EUR']]));
+
+        $this->assertSame([], $this->mollie(fn () => [
+            GetPaymentRequest::class => $zahlung,
+            GetPaginatedPaymentRefundsRequest::class => $liste('processing'),
+        ])->fetch('tr_erstattet')->refunds);
+
+        $this->assertSame([], $this->mollie(fn () => [
+            GetPaymentRequest::class => $zahlung,
+            GetPaginatedPaymentRefundsRequest::class => $liste('failed'),
+        ])->fetch('tr_erstattet')->refunds);
+    }
+
+    #[Test]
+    public function two_refunds_in_one_delivery_and_only_the_second_makes_it_full(): void
+    {
+        $payment = $this->fulfilled();
+        Event::fake([PaymentRefunded::class]);
+
+        $this->gateway->markRefunded($payment->provider_id, [
+            ['id' => 're_teil', 'amount' => 100],
+            ['id' => 're_rest', 'amount' => $payment->amount_cent - 100],
+        ]);
+
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->assertSame($payment->amount_cent, (int) $payment->fresh()->refunded_cent);
+        Event::assertDispatchedTimes(PaymentRefunded::class, 2);
+        Event::assertDispatched(PaymentRefunded::class, fn (PaymentRefunded $e) => $e->amountCent === 100 && $e->isFull === false);
+        Event::assertDispatched(PaymentRefunded::class, fn (PaymentRefunded $e) => $e->amountCent === $payment->amount_cent - 100 && $e->isFull === true);
     }
 
     #[Test]

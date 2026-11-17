@@ -437,9 +437,12 @@ class MollieGateway implements ListsSubscriptions, MandateGateway, ReadsCardExpi
      * `amountRefunded` auf der Zahlung etwas sagt: ein Aufruf mehr bei jeder
      * gewoehnlichen Zustellung waere Last ohne Nutzen.
      *
-     * Gezaehlt werden `processing` und `refunded`. `queued` und `pending`
-     * lassen sich laut Mollie noch stornieren, `failed` und `canceled` gehen
-     * nie hinaus; wer die buchte, zeigte eine Erstattung, die es nie gab.
+     * Gezaehlt wird nur `refunded`, der einzige endgueltige Stand. Eine
+     * Erstattung in `processing` kann laut Mollie noch `failed` werden, und
+     * eine dann schon gebuchte nimmt niemand zurueck: Zugang entzogen, Geld
+     * nie zurueck. `queued` und `pending` lassen sich noch stornieren,
+     * `failed` und `canceled` gehen nie hinaus. Der Preis: gebucht wird erst,
+     * wenn Mollie `refunded` meldet, nicht schon beim Anstoss.
      *
      * Ist Mollie hier nicht zu erreichen, wird das gemeldet und nicht
      * geschluckt: eine leere Liste hiesse „nichts erstattet", der Webhook
@@ -469,7 +472,7 @@ class MollieGateway implements ListsSubscriptions, MandateGateway, ReadsCardExpi
                 $betrag = $refund->amount ?? null;
 
                 if (! is_string($id) || $id === '' || ! is_object($betrag) || ! isset($betrag->value)
-                    || ! in_array($refund->status ?? null, ['processing', 'refunded'], true)) {
+                    || ($refund->status ?? null) !== 'refunded') {
                     continue;
                 }
 

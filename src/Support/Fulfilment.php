@@ -802,7 +802,10 @@ class Fulfilment
         try {
             $remote = app(Gateways::class)->for($payment)->fetch((string) $payment->provider_id);
 
-            $this->bringTheAgreementUpToDate($payment, $remote);
+            // Under the row's brand, as on the webhook path (`fulfilOnce()`): this
+            // runs from a console command with no brand current, and the events
+            // the agreement step fires are heard by brand-aware listeners.
+            Brands::runFor($payment->brand_id, fn () => $this->bringTheAgreementUpToDate($payment, $remote));
         } catch (Throwable $e) {
             Log::error('statamic-payments: catching up the agreement failed again; the marker stays.', [
                 'payment_id' => $payment->getKey(),

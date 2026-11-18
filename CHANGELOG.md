@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Subscription replacement: the credit of a purchase that ends an older agreement is now kept on the payment at the first run, in `meta.replacement_credit` (`cent`, `days`, `from`), and only where there is something to replace. A catch-up after a partial failure (`payments:agreement-catch-up`) reuses that value instead of recalculating it, so the new agreement's first charge and the `SubscriptionReplaced` credit stay the ones of the first run. Payments without a replacement are unchanged. No migration, no new config key.
+
 ## 1.31.2 — 2026-11-17
 
 ### Fixed

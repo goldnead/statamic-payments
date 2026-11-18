@@ -9,6 +9,8 @@ use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Support\Abandonment;
 use Goldnead\StatamicPayments\Support\Checkout;
 use Goldnead\StatamicPayments\Support\Fulfilment;
+use Goldnead\StatamicPayments\Support\InvoiceDocument;
+use Goldnead\StatamicPayments\Support\Invoices;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
@@ -29,6 +31,31 @@ class FulfilmentOnceTest extends TestCase
         $this->gateway->markPaid($payment->provider_id);
 
         return $payment;
+    }
+
+    /**
+     * Was ein Rechnungs-Addon sieht, wenn es nach der Zahlung fragt.
+     *
+     * Das Addon schreibt selbst keine Rechnung, es reicht `Payment` an die
+     * registrierte Quelle weiter (`Invoices::forPayment()`); die Rechnung
+     * nimmt den Namen von dort. Der Test haelt darum fest, welchen Namen die
+     * Quelle zu sehen bekommt.
+     */
+    protected function nameSeenByTheInvoiceSource(Payment $payment): ?string
+    {
+        $seen = ['name' => 'nie gefragt'];
+
+        Invoices::forgetSources();
+        Invoices::extend(function (Payment $asked) use (&$seen): ?InvoiceDocument {
+            $seen['name'] = $asked->name;
+
+            return null;
+        });
+
+        Invoices::forPayment($payment->fresh());
+        Invoices::forgetSources();
+
+        return $seen['name'];
     }
 
     #[Test]
@@ -81,6 +108,60 @@ class FulfilmentOnceTest extends TestCase
         app(Fulfilment::class)->handle($payment->provider_id);
 
         $this->assertSame(str_repeat('ä', 255), $payment->fresh()->name);
+    }
+
+    #[Test]
+    public function session_first_then_an_invoice_without_a_name_keeps_the_name(): void
+    {
+        // Die andere Reihenfolge: die Checkout-Session gewinnt den Claim mit
+        // Namen, danach kommt `invoice.paid` ohne Namen.
+        Event::fake([PaymentPaid::class]);
+        $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com'])?->payment;
+
+        $this->gateway->markPaid($payment->provider_id, name: 'Erika Mustermann');
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->gateway->markPaid($payment->provider_id);
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->assertSame('Erika Mustermann', $payment->fresh()->name);
+        Event::assertDispatchedTimes(PaymentPaid::class, 1);
+        $this->assertSame('Erika Mustermann', $this->nameSeenByTheInvoiceSource($payment));
+    }
+
+    #[Test]
+    public function a_name_that_arrives_with_the_second_delivery_is_still_taken_over(): void
+    {
+        // Abo bei Stripe: `invoice.paid` kann den Claim vor der
+        // Checkout-Session gewinnen. Die Rechnung nennt keinen Namen, die
+        // Session schon, kehrt aber bei `claimed === 0` zurueck.
+        $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com'])?->payment;
+
+        $this->gateway->markPaid($payment->provider_id);
+        app(Fulfilment::class)->handle($payment->provider_id);
+        $this->assertEmpty($payment->fresh()->name);
+
+        Event::fake([PaymentPaid::class]);
+        $this->gateway->markPaid($payment->provider_id, name: 'Erika Mustermann');
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->assertSame('Erika Mustermann', $payment->fresh()->name);
+        Event::assertNotDispatched(PaymentPaid::class);
+        $this->assertSame('Erika Mustermann', $this->nameSeenByTheInvoiceSource($payment));
+    }
+
+    #[Test]
+    public function a_later_delivery_does_not_overwrite_a_name_already_taken_over(): void
+    {
+        $payment = app(Checkout::class)->start('noten-paket', ['email' => 'kaeufer@example.com'])?->payment;
+
+        $this->gateway->markPaid($payment->provider_id, name: 'Erika Mustermann');
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->gateway->markPaid($payment->provider_id, name: 'Karte Anderer');
+        app(Fulfilment::class)->handle($payment->provider_id);
+
+        $this->assertSame('Erika Mustermann', $payment->fresh()->name);
     }
 
     #[Test]

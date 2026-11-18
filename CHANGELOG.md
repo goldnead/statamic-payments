@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Subscription replacement: the credit of a purchase that ends an older agreement is now kept on the payment at the first run, in `meta.replacement_credit` (`cent`, `days`, `from`), and only where there is something to replace. A catch-up after a partial failure (`payments:agreement-catch-up`) reuses that value instead of recalculating it, so the new agreement's first charge and the `SubscriptionReplaced` credit stay the ones of the first run. Payments without a replacement are unchanged. No migration, no new config key.
+
 ### Fixed
 
 - A rejected API key (401 or 403) is no longer read as an unknown payment. `MollieGateway::fetch()` and every Stripe call now throw `ProviderUnavailable` and log an error naming the key setting; the webhook answers 503 and the provider keeps redelivering until the key is fixed. Before, the webhook answered 200 and, after a key rotation, nobody was fulfilled, with a warning as the only trace. For Stripe calls outside the webhook a rejected key now counts as transient in `Transport::isTransient()` (the row stays claimed and the next run asks again). No migration, no new config key.
@@ -9,6 +13,7 @@
 - Fulfilment: a failure after the fulfilment claim but before `PaymentPaid` (a save of the buyer's email, name, country or card, or the abandonment cleanup) now gives the claim back and reaches the caller, so the provider redelivers. Before, the claim stayed staked, every redelivery saw it as taken, and the payment stayed paid without `PaymentPaid` for good. No migration, no new config key.
 - Mollie: refunds are now recorded. Before, nothing read them: `refunded_cent` stayed 0, `PaymentRefunded` never fired, `WithdrawOnRefund` never ran and a fully refunded buyer kept access. Mollie calls the payment's webhook when a refund turns `processing`, `refunded` or `failed`; when `amountRefunded` is above zero the gateway now reads `GET /v2/payments/{id}/refunds` and books every refund in status `refunded` under its own id through `Refunds::record()` (once per id). **A refund is booked only once Mollie reports it `refunded`, not when it is started**: `processing` can still turn `failed`, `queued` and `pending` can still be cancelled, and `failed` and `canceled` are never booked. Refunds are noted after fulfilment, so a full refund seen on the first successful delivery withdraws the access it just granted. New `RemotePayment::$refunds`. No migration, no new config key.
 - Refunds: when a `PaymentRefunded` listener throws (withdrawing access, a mail), `Refunds::record()` now rolls back this refund's booking and claim and rethrows, so the provider redelivers and the refund is booked and announced again. Before, claim and booking stayed, every redelivery saw the refund as known, and the event never fired again: money back, access open. An earlier refund on the same payment is kept. For this to reach the rollback, `EntitlementsBridge::revokeFor()` now rethrows the first failure after logging it and after trying every other grant (it used to swallow it); this also lets `Chargebacks::record()` roll back and retry a failed withdrawal. No migration, no new config key.
+- Stripe subscriptions: when `invoice.paid` wins the fulfilment claim before the checkout session, the buyer's name from the session is now still taken over into an empty `Payment::name`. Before, the second delivery returned at the taken claim and the name was lost for good. A name already set is never overwritten; no second `PaymentPaid`. No migration, no new config key.
 
 ## 1.31.2 — 2026-11-17
 

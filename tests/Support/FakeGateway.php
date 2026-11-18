@@ -430,6 +430,26 @@ class FakeGateway implements ListsSubscriptions, SubscriptionGateway
         );
     }
 
+    /**
+     * Der Anbieter fuehrt Erstattungen an einer Zahlung (Mollie-Form: keine
+     * eigenen Ereignisse, die Liste haengt an der Zahlung).
+     *
+     * @param  list<array{id: string, amount: int}>  $refunds
+     */
+    public function markRefunded(string $providerId, array $refunds): void
+    {
+        $bisher = $this->remote[$providerId] ?? null;
+
+        $this->remote[$providerId] = new RemotePayment(
+            providerId: $providerId,
+            status: $bisher?->status ?? Payment::STATUS_PAID,
+            metadata: $bisher?->metadata ?? ($this->metadata[$providerId] ?? []),
+            email: $bisher?->email,
+            subscriptionId: $bisher?->subscriptionId,
+            refunds: $refunds,
+        );
+    }
+
     /** Der Anbieter meldet einen Zyklus, der zu einer Vereinbarung gehoert und scheiterte. */
     public function markFailedCycle(string $providerId, string $subscriptionId, string $status = Payment::STATUS_FAILED): void
     {

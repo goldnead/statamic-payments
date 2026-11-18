@@ -12,6 +12,7 @@ use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\CheckoutSession;
 use Goldnead\StatamicPayments\Support\Money;
 use Goldnead\StatamicPayments\Support\ProviderUnavailable;
+use Goldnead\StatamicPayments\Support\RejectedKey;
 use Goldnead\StatamicPayments\Support\RemotePayment;
 use Goldnead\StatamicPayments\Support\RemoteSubscription;
 use Illuminate\Support\Carbon;
@@ -392,6 +393,21 @@ class MollieGateway implements ListsSubscriptions, MandateGateway, ReadsCardExpi
                 throw new ProviderUnavailable("statamic-payments: Mollie could not be asked for [{$providerId}]: {$e->getMessage()}", 0, $e);
             }
 
+            // Ein abgelehnter Schluessel (401, 403) sagt nichts ueber die
+            // Zahlung, sondern ueber diese Seite. Als „unbekannt" gelesen
+            // antwortete der Webhook 200, Mollie hoerte auf zu wiederholen,
+            // und nach einer Schluesselrotation wuerde niemand mehr erfuellt.
+            // Also „spaeter nochmal", laut: bis der Schluessel stimmt, hat
+            // Mollie noch 26 Stunden Wiederholungen uebrig.
+            if ($e instanceof ApiException && in_array((int) $e->getCode(), [401, 403], true)) {
+                RejectedKey::report('Mollie', 'MOLLIE_KEY', [
+                    'provider_id' => $providerId,
+                    'status' => (int) $e->getCode(),
+                ]);
+
+                throw new ProviderUnavailable("statamic-payments: Mollie rejected the API key for [{$providerId}] ({$e->getCode()}): {$e->getMessage()}", 0, $e);
+            }
+
             throw $e;
         }
 
@@ -422,7 +438,75 @@ class MollieGateway implements ListsSubscriptions, MandateGateway, ReadsCardExpi
             // gegen `/payments/{id}/chargebacks` bei jeder gewoehnlichen
             // Zustellung, fuer einen Fall, den Mollie praktisch nicht kennt.
             chargebackReference: ($chargedBack ?? 0) > 0 ? (string) $payment->id : null,
+            refunds: $this->refunds($payment),
         );
+    }
+
+    /**
+     * Die Erstattungen dieser Zahlung, die nicht mehr zurueckzuholen sind.
+     *
+     * Mollie meldet eine Erstattung nicht als eigenes Ereignis, sondern ruft
+     * den Webhook der Zahlung auf, wenn sie `processing`, `refunded` oder
+     * `failed` wird (https://docs.mollie.com/docs/refunds). Gelesen wird die
+     * Liste `GET /v2/payments/{id}/refunds`
+     * (https://docs.mollie.com/reference/list-refunds), aber nur, wenn
+     * `amountRefunded` auf der Zahlung etwas sagt: ein Aufruf mehr bei jeder
+     * gewoehnlichen Zustellung waere Last ohne Nutzen.
+     *
+     * Gezaehlt wird nur `refunded`, der einzige endgueltige Stand. Eine
+     * Erstattung in `processing` kann laut Mollie noch `failed` werden, und
+     * eine dann schon gebuchte nimmt niemand zurueck: Zugang entzogen, Geld
+     * nie zurueck. `queued` und `pending` lassen sich noch stornieren,
+     * `failed` und `canceled` gehen nie hinaus. Der Preis: gebucht wird erst,
+     * wenn Mollie `refunded` meldet, nicht schon beim Anstoss.
+     *
+     * Ist Mollie hier nicht zu erreichen, wird das gemeldet und nicht
+     * geschluckt: eine leere Liste hiesse „nichts erstattet", der Webhook
+     * antwortete 200 und Mollie fragte nie wieder.
+     *
+     * @return list<array{id: string, amount: int}>
+     */
+    protected function refunds(mixed $payment): array
+    {
+        $erstattet = $payment->amountRefunded ?? null;
+
+        if (! is_object($erstattet) || ! isset($erstattet->value)
+            || Money::toMinorUnits((string) $erstattet->value, (string) ($erstattet->currency ?? '')) <= 0) {
+            return [];
+        }
+
+        try {
+            // Blaettert selbst durch alle Seiten. Gleiche Signatur in v2.79
+            // (`Endpoints\PaymentRefundEndpoint`) und v3
+            // (`EndpointCollection\PaymentRefundEndpointCollection`).
+            $liste = $this->client->paymentRefunds->iteratorForId((string) $payment->id, null, 250);
+
+            $refunds = [];
+
+            foreach ($liste as $refund) {
+                $id = $refund->id ?? null;
+                $betrag = $refund->amount ?? null;
+
+                if (! is_string($id) || $id === '' || ! is_object($betrag) || ! isset($betrag->value)
+                    || ($refund->status ?? null) !== 'refunded') {
+                    continue;
+                }
+
+                $cent = Money::toMinorUnits((string) $betrag->value, (string) ($betrag->currency ?? ''));
+
+                if ($cent > 0) {
+                    $refunds[] = ['id' => $id, 'amount' => $cent];
+                }
+            }
+
+            return $refunds;
+        } catch (Throwable $e) {
+            if (self::couldNotBeAsked($e)) {
+                throw new ProviderUnavailable("statamic-payments: Mollie could not be asked for the refunds of [{$payment->id}]: {$e->getMessage()}", 0, $e);
+            }
+
+            throw $e;
+        }
     }
 
     /**

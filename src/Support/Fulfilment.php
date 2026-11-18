@@ -137,7 +137,38 @@ class Fulfilment
             return $payment;
         }
 
-        return $this->fulfilOnce($payment, $remote);
+        $payment = $this->fulfilOnce($payment, $remote);
+
+        // Nach der Erfuellung, mit Absicht: eine erstattete Mollie-Zahlung
+        // steht weiter auf `paid`. Kommt die erste erfolgreiche Zustellung
+        // erst nach einer vollen Erstattung, wird so erst gewaehrt und dann
+        // entzogen. Andersherum liefe `WithdrawOnRefund` ins Leere und der
+        // Zugang bliebe offen.
+        $this->noteRefunds($payment, $remote);
+
+        return $payment->fresh() ?? $payment;
+    }
+
+    /**
+     * Erstattungen, wenn der Anbieter welche an der Zahlung fuehrt.
+     *
+     * Mollie meldet sie nicht als eigenes Ereignis, sondern ruft den Webhook
+     * der Zahlung auf; die Liste kommt deshalb mit {@see RemotePayment}.
+     * Stripe hat eigene Ereignisse und liefert hier nichts. Jede Erstattung
+     * unter ihrer eigenen Kennung: {@see Refunds::record()} bucht eine
+     * bekannte kein zweites Mal.
+     */
+    protected function noteRefunds(Payment $payment, RemotePayment $remote): void
+    {
+        if ($remote->refunds === []) {
+            return;
+        }
+
+        $refunds = app(Refunds::class);
+
+        foreach ($remote->refunds as $refund) {
+            $refunds->record($payment, $refund['amount'], $refund['id']);
+        }
     }
 
     /**
@@ -631,6 +662,65 @@ class Fulfilment
             return $payment;
         }
 
+        // Alles zwischen Claim und Ereignis steht unter derselben Freigabe wie
+        // der Dispatch. Wirft ein Schreibzugriff oder die Abbruch-Bereinigung,
+        // bliebe der Claim sonst stehen: jede Wiederholung saehe
+        // `claimed === 0` und schwiege, bezahlt und nie ausgeliefert.
+        try {
+            $payment = $this->recordWhatTheProviderSaid($payment, $remote);
+
+            // Wer doch noch bezahlt, ist nicht mehr abgesprungen. Vor dem Ereignis,
+            // damit ein Listener, der `abandoned_notified_at` liest, die Wahrheit
+            // sieht und nicht die Geschichte.
+            app(Abandonment::class)->settled($payment);
+
+            PaymentPaid::dispatch($payment);
+        } catch (Throwable $e) {
+            // Give the claim back and let the provider try again. The
+            // alternative — keeping it — books the order as fulfilled while
+            // nothing was delivered, and no retry ever comes.
+            try {
+                $this->releaseClaim($payment);
+
+                Log::error('statamic-payments: fulfilment failed after the claim; the claim was released for redelivery.', [
+                    'payment_id' => $payment->getKey(),
+                    'exception' => $e->getMessage(),
+                ]);
+            } catch (Throwable $freigabe) {
+                // Oft dieselbe verlorene Verbindung, an der eben schon etwas
+                // starb. Ohne diesen Fang ginge der urspruengliche Fehler
+                // verloren, und der Claim steht noch: ein Mensch muss ran.
+                Log::critical('statamic-payments: fulfilment failed after the claim and releasing the claim failed too; the payment is marked fulfilled but nothing was delivered. Check it by hand.', [
+                    'payment_id' => $payment->getKey(),
+                    'original' => $e->getMessage(),
+                    'release' => $freigabe->getMessage(),
+                ]);
+            }
+
+            // Immer der urspruengliche Fehler, nie der Ersatz.
+            throw $e;
+        }
+
+        $this->followTheAgreement($payment, $remote);
+
+        return $payment->fresh() ?? $payment;
+    }
+
+    /**
+     * Was der Anbieter zu dieser Zahlung belegt, in die freien Spalten.
+     *
+     * Laeuft nach dem Claim und vor `PaymentPaid`, innerhalb der Freigabe in
+     * `fulfilOnce()`: wirft hier etwas, wird der Claim zurueckgegeben.
+     */
+    protected function releaseClaim(Payment $payment): void
+    {
+        Payment::query()
+            ->whereKey($payment->getKey())
+            ->update(['fulfilled_at' => null, 'updated_at' => now()]);
+    }
+
+    protected function recordWhatTheProviderSaid(Payment $payment, RemotePayment $remote): Payment
+    {
         if ($remote->email && ! $payment->email) {
             $payment->forceFill(['email' => $remote->email])->save();
             $payment = $payment->fresh() ?? $payment;
@@ -725,32 +815,7 @@ class Fulfilment
             ]);
         }
 
-        // Wer doch noch bezahlt, ist nicht mehr abgesprungen. Vor dem Ereignis,
-        // damit ein Listener, der `abandoned_notified_at` liest, die Wahrheit
-        // sieht und nicht die Geschichte.
-        app(Abandonment::class)->settled($payment);
-
-        try {
-            PaymentPaid::dispatch($payment);
-        } catch (Throwable $e) {
-            // Give the claim back and let the provider try again. The
-            // alternative — keeping it — books the order as fulfilled while
-            // nothing was delivered, and no retry ever comes.
-            Payment::query()
-                ->whereKey($payment->getKey())
-                ->update(['fulfilled_at' => null, 'updated_at' => now()]);
-
-            Log::error('statamic-payments: a listener threw; the fulfilment claim was released for redelivery.', [
-                'payment_id' => $payment->getKey(),
-                'exception' => $e->getMessage(),
-            ]);
-
-            throw $e;
-        }
-
-        $this->followTheAgreement($payment, $remote);
-
-        return $payment->fresh() ?? $payment;
+        return $payment;
     }
 
     /**

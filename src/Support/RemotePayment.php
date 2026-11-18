@@ -122,6 +122,23 @@ final readonly class RemotePayment
          * `billing=minimal` ist er oft die einzige Namensquelle.
          */
         public ?string $name = null,
+        /**
+         * Die Erstattungen dieser Zahlung, die der Anbieter als unterwegs oder
+         * erledigt fuehrt, je mit seiner eigenen Kennung und dem Betrag in
+         * kleinsten Einheiten.
+         *
+         * Nur fuer einen Anbieter, der Erstattungen nicht als eigenes Ereignis
+         * meldet (Mollie: eine Zustandsaenderung an der Zahlung). Stripe hat
+         * eigene Ereignisse und geht nicht hier durch. Jede Kennung ist ein
+         * Anspruch in {@see Refunds::record()}, eine zweite Zustellung bucht
+         * deshalb nichts doppelt.
+         *
+         * Vom Anbieter gelesen, nie vom Aufrufer: wer sie behaupten duerfte,
+         * duerfte fremden Zugang entziehen.
+         *
+         * @var list<array{id: string, amount: int}>
+         */
+        public array $refunds = [],
     ) {}
 
     public function isPaid(): bool

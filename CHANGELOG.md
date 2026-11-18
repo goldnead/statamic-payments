@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fulfilment: a failure after the fulfilment claim but before `PaymentPaid` (a save of the buyer's email, name, country or card, or the abandonment cleanup) now gives the claim back and reaches the caller, so the provider redelivers. Before, the claim stayed staked, every redelivery saw it as taken, and the payment stayed paid without `PaymentPaid` for good. No migration, no new config key.
 - Mollie: refunds are now recorded. Before, nothing read them: `refunded_cent` stayed 0, `PaymentRefunded` never fired, `WithdrawOnRefund` never ran and a fully refunded buyer kept access. Mollie calls the payment's webhook when a refund turns `processing`, `refunded` or `failed`; when `amountRefunded` is above zero the gateway now reads `GET /v2/payments/{id}/refunds` and books every refund in status `refunded` under its own id through `Refunds::record()` (once per id). **A refund is booked only once Mollie reports it `refunded`, not when it is started**: `processing` can still turn `failed`, `queued` and `pending` can still be cancelled, and `failed` and `canceled` are never booked. Refunds are noted after fulfilment, so a full refund seen on the first successful delivery withdraws the access it just granted. New `RemotePayment::$refunds`. No migration, no new config key.
 
 ## 1.31.2 — 2026-11-17

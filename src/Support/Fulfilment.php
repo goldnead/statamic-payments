@@ -659,6 +659,21 @@ class Fulfilment
         if ($claimed === 0) {
             // Someone else already has it. Not an error — the ordinary result
             // of a provider doing its job — so it is silent.
+            //
+            // Nur den Namen noch nachtragen, wenn keiner da ist. Bei einem
+            // Stripe-Abo kann `invoice.paid` den Claim vor der Checkout-Session
+            // gewinnen; die Rechnung nennt keinen Namen, die Session schon.
+            // Ohne diese Zeile ginge er fuer immer verloren. Als bedingtes
+            // UPDATE, damit ein gleichzeitiger Gewinner nichts verliert.
+            if ($remote->name !== null && trim($remote->name) !== '' && trim((string) $payment->name) === '') {
+                Payment::query()
+                    ->whereKey($payment->getKey())
+                    ->where(fn ($q) => $q->whereNull('name')->orWhereRaw('trim(name) = ?', ['']))
+                    ->update(['name' => mb_substr(trim($remote->name), 0, 255), 'updated_at' => now()]);
+
+                $payment = $payment->fresh() ?? $payment;
+            }
+
             return $payment;
         }
 

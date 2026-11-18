@@ -768,29 +768,131 @@ class Fulfilment
      */
     protected function followTheAgreement(Payment $payment, RemotePayment $remote): void
     {
-        $subscriptions = app(Subscriptions::class);
+        try {
+            $this->bringTheAgreementUpToDate($payment, $remote);
+        } catch (Throwable $e) {
+            // Die Ausnahme selbst, nicht nur ihr Text: unter `exception`
+            // schreibt Laravel den Stacktrace mit. Und ein Marker an der Zeile,
+            // denn eine Logzeile allein sagt niemandem, welches Abo nie
+            // nachgezaehlt wurde. `payments:agreement-catch-up` zieht nach.
+            Log::error('statamic-payments: the agreement could not be brought up to date; the payment stands and is marked agreement_pending.', [
+                'payment_id' => $payment->getKey(),
+                'exception' => $e,
+            ]);
+
+            $this->markAgreementPending($payment, $e);
+        }
+    }
+
+    /**
+     * Den Abo-Schritt einer Zahlung nachholen, die `agreement_pending` traegt.
+     *
+     * Fragt den Anbieter erneut, statt sich auf irgendetwas Gespeichertes zu
+     * verlassen: ob die Zahlung ein Zyklus ist, sagt nur er. Liefert nichts aus
+     * und loest kein `PaymentPaid` aus, die Zahlung ist laengst erfuellt. Was
+     * hier laeuft, ist genau der Schritt, der damals gescheitert ist, und der
+     * ist auf beiden Wegen wiederholbar: `recordCycle()` zaehlt per bedingtem
+     * Update hoechstens einmal, `startFromPayment()` gibt ein schon angelegtes
+     * Abo zurueck.
+     *
+     * @return bool true, wenn der Schritt durchlief und der Marker weg ist
+     */
+    public function catchUpAgreement(Payment $payment): bool
+    {
+        try {
+            $remote = app(Gateways::class)->for($payment)->fetch((string) $payment->provider_id);
+
+            $this->bringTheAgreementUpToDate($payment, $remote);
+        } catch (Throwable $e) {
+            Log::error('statamic-payments: catching up the agreement failed again; the marker stays.', [
+                'payment_id' => $payment->getKey(),
+                'exception' => $e,
+            ]);
+
+            $this->markAgreementPending($payment, $e);
+
+            return false;
+        }
 
         try {
-            // A payment the provider made on its own: a cycle of a running
-            // agreement. The id comes from the provider, never from the caller.
-            if ($remote->subscriptionId) {
-                $subscriptions->recordCycle($payment, $remote->subscriptionId, $remote->metadata);
+            $zeile = Payment::query()->whereKey($payment->getKey())->first();
 
+            if ($zeile) {
+                $meta = $zeile->meta ?? [];
+                unset($meta['agreement_pending']);
+                $zeile->forceFill(['meta' => $meta])->saveQuietly();
+            }
+        } catch (Throwable $e) {
+            // Der Schritt ist durch, nur der Marker steht noch. Der naechste
+            // Lauf wiederholt den Schritt (wiederholbar, siehe oben) und
+            // raeumt dann auf; dieser Lauf darf daran nicht abbrechen.
+            Log::error('statamic-payments: the agreement was caught up but its marker could not be removed.', [
+                'payment_id' => $payment->getKey(),
+                'exception' => $e,
+            ]);
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /** Der Abo-Schritt selbst. Wirft; die Aufrufer entscheiden, was das heisst. */
+    protected function bringTheAgreementUpToDate(Payment $payment, RemotePayment $remote): void
+    {
+        $subscriptions = app(Subscriptions::class);
+
+        // A payment the provider made on its own: a cycle of a running
+        // agreement. The id comes from the provider, never from the caller.
+        if ($remote->subscriptionId) {
+            $subscriptions->recordCycle($payment, $remote->subscriptionId, $remote->metadata);
+
+            return;
+        }
+
+        // A first payment that carried the intention to start one. Only now
+        // is there a mandate to build it on.
+        // A product may end another agreement of the same buyer
+        // (`replaces`). What is left of the old period moves the new
+        // agreement's first charge back, so it is worked out first.
+        $replacements = app(SubscriptionReplacements::class);
+        $new = $subscriptions->startFromPayment($payment, $replacements->creditDays($payment));
+        $replacements->apply($payment, $new);
+    }
+
+    /**
+     * Den Reparatur-Marker setzen oder fortschreiben.
+     *
+     * `since` bleibt beim ersten Scheitern stehen, `attempts` zaehlt mit. Wirft
+     * selbst nie: wer hier scheitert, scheitert an derselben Datenbank, an der
+     * der Abo-Schritt gerade gestorben ist, und das darf die stehende Zahlung
+     * nicht mitreissen. Dann bleibt es bei der Logzeile oben, laut.
+     */
+    protected function markAgreementPending(Payment $payment, Throwable $e): void
+    {
+        try {
+            $zeile = Payment::query()->whereKey($payment->getKey())->first();
+
+            if (! $zeile) {
                 return;
             }
 
-            // A first payment that carried the intention to start one. Only now
-            // is there a mandate to build it on.
-            // A product may end another agreement of the same buyer
-            // (`replaces`). What is left of the old period moves the new
-            // agreement's first charge back, so it is worked out first.
-            $replacements = app(SubscriptionReplacements::class);
-            $new = $subscriptions->startFromPayment($payment, $replacements->creditDays($payment));
-            $replacements->apply($payment, $new);
-        } catch (Throwable $e) {
-            Log::error('statamic-payments: the agreement could not be brought up to date; the payment stands.', [
+            $meta = $zeile->meta ?? [];
+            $vorher = is_array($meta['agreement_pending'] ?? null) ? $meta['agreement_pending'] : [];
+
+            $meta['agreement_pending'] = [
+                'since' => $vorher['since'] ?? now()->toIso8601String(),
+                'last_attempt_at' => now()->toIso8601String(),
+                'attempts' => (int) ($vorher['attempts'] ?? 0) + 1,
+                'error' => mb_substr($e->getMessage(), 0, 500),
+                'exception' => $e::class,
+            ];
+
+            $zeile->forceFill(['meta' => $meta])->saveQuietly();
+        } catch (Throwable $markerFehler) {
+            Log::critical('statamic-payments: the agreement_pending marker could not be written; this payment needs a manual look.', [
                 'payment_id' => $payment->getKey(),
-                'exception' => $e->getMessage(),
+                'exception' => $markerFehler,
             ]);
         }
     }

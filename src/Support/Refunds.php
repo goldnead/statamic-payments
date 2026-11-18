@@ -7,6 +7,8 @@ use Goldnead\StatamicPayments\Models\Payment;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Recording that money went back.
@@ -82,13 +84,87 @@ class Refunds
 
         $frisch = $payment->fresh() ?? $payment;
 
-        PaymentRefunded::dispatch(
-            $frisch,
-            $betrag,
-            $frisch->refunded_cent >= $frisch->amount_cent,
-        );
+        try {
+            PaymentRefunded::dispatch(
+                $frisch,
+                $betrag,
+                $frisch->refunded_cent >= $frisch->amount_cent,
+            );
+        } catch (Throwable $e) {
+            // Wirft ein Listener (Zugang entziehen, Mail), stuenden Anspruch und
+            // Buchung sonst fest: die naechste Zustellung faende die Kennung
+            // belegt, gaebe `false` zurueck, und das Ereignis kaeme nie wieder.
+            // Geld zurueck, Zugang offen, ohne eine Zeile irgendwo. Also
+            // zuruecknehmen und werfen, wie `Chargebacks::record()` und
+            // `Fulfilment` an den Zwillingsstellen: der Anbieter stellt erneut
+            // zu und die Erstattung wird dann vollstaendig gebucht.
+            $this->rollBack($payment, $betrag, $reference, $e);
+
+            throw $e;
+        }
 
         return true;
+    }
+
+    /**
+     * Eine Buchung zuruecknehmen, deren Ereignis gestorben ist.
+     *
+     * Nur den eigenen Betrag und den eigenen Anspruch: eine fruehere Erstattung
+     * derselben Zahlung bleibt stehen. `refunded_at` wird nur geleert, wenn
+     * danach nichts mehr erstattet ist; sonst bleibt der Zeitstempel, die
+     * erneute Zustellung setzt ihn ohnehin neu.
+     */
+    protected function rollBack(Payment $payment, int $betrag, ?string $reference, Throwable $e): void
+    {
+        try {
+            DB::transaction(function () use ($payment, $betrag, $reference): void {
+                Payment::query()
+                    ->whereKey($payment->getKey())
+                    ->where('refunded_cent', '>=', $betrag)
+                    ->update([
+                        'refunded_cent' => DB::raw('refunded_cent - '.$betrag),
+                        'updated_at' => Carbon::now(),
+                    ]);
+
+                Payment::query()
+                    ->whereKey($payment->getKey())
+                    ->where('refunded_cent', 0)
+                    ->update(['refunded_at' => null]);
+
+                if ($reference !== null) {
+                    DB::table('payment_refunds')
+                        ->where('payment_id', $payment->getKey())
+                        ->where('reference', mb_substr($reference, 0, 191))
+                        ->delete();
+
+                    $zeile = Payment::query()->whereKey($payment->getKey())->first();
+
+                    if ($zeile) {
+                        $meta = $this->withReferences($zeile);
+                        $meta['refunds'] = array_values(array_filter(
+                            $meta['refunds'],
+                            static fn ($ref): bool => $ref !== $reference,
+                        ));
+                        $zeile->forceFill(['meta' => $meta])->saveQuietly();
+                    }
+                }
+            });
+
+            Log::error('statamic-payments: a refund was recorded but its event threw; the booking was rolled back so a later delivery books it again.', [
+                'payment_id' => $payment->getKey(),
+                'reference' => $reference,
+                'exception' => $e->getMessage(),
+            ]);
+        } catch (Throwable $rueckname) {
+            // Oft dieselbe verlorene Verbindung, an der der Listener starb.
+            // Ohne diesen Fang ginge der urspruengliche Fehler verloren.
+            Log::critical('statamic-payments: a refund event threw and rolling the booking back failed too; the access may still be open. Check this payment by hand.', [
+                'payment_id' => $payment->getKey(),
+                'reference' => $reference,
+                'original' => $e->getMessage(),
+                'rollback' => $rueckname->getMessage(),
+            ]);
+        }
     }
 
     /**

@@ -306,6 +306,55 @@ class ChargebackTest extends TestCase
     }
 
     #[Test]
+    public function a_withdrawal_that_throws_rolls_the_chargeback_back_and_rethrows(): void
+    {
+        // Festhalten des aktuellen Vertrags, keine Aenderung daran: wirft
+        // `revokeFor()` im Rueckbuchungspfad, nimmt `Chargebacks::record()`
+        // den Zustand zurueck und wirft den Fehler weiter, damit der Anbieter
+        // erneut zustellt. Die Anspruchszeile bleibt, die Wiederzustellung
+        // holt Zustand und Ereignis nach. Das ist bewusst so und deckt sich
+        // mit `a_listener_that_throws_does_not_swallow_the_withdrawal_for_ever`.
+        // Ob der Rueckbuchungspfad stattdessen weiterlaufen soll, ist eine
+        // offene Entscheidung und hier nicht getroffen.
+        $payment = $this->paidPayment('mollie', 'tr_bridge_wirft');
+
+        $bridge = new class extends EntitlementsBridge
+        {
+            public bool $wirft = true;
+
+            public array $revoked = [];
+
+            public function revokeFor(Payment $payment, bool $isFull, string $reason = 'Zahlung erstattet'): void
+            {
+                if ($this->wirft) {
+                    throw new \RuntimeException('entitlements-Datenbank weg');
+                }
+
+                $this->revoked[] = ['payment' => $payment->getKey(), 'reason' => $reason];
+            }
+        };
+
+        $this->app->instance(EntitlementsBridge::class, $bridge);
+
+        try {
+            app(Chargebacks::class)->record($payment, 'chb_bridge_wirft', 1900);
+            $this->fail('the throw has to reach the caller, so the provider redelivers');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('entitlements-Datenbank weg', $e->getMessage());
+        }
+
+        $this->assertNull($payment->fresh()->charged_back_at, 'the state must be rolled back');
+        $this->assertDatabaseHas('payment_chargebacks', ['reference' => 'chb_bridge_wirft']);
+
+        // Die Wiederzustellung, sobald die Datenbank wieder da ist.
+        $bridge->wirft = false;
+
+        $this->assertTrue(app(Chargebacks::class)->record($payment->fresh(), 'chb_bridge_wirft', 1900));
+        $this->assertNotNull($payment->fresh()->charged_back_at);
+        $this->assertSame(['payment' => $payment->getKey(), 'reason' => 'Rückbuchung'], $bridge->revoked[0] ?? null);
+    }
+
+    #[Test]
     public function a_dispute_on_a_subscription_renewal_finds_its_row(): void
     {
         // The population this release is about, and the branch that was written

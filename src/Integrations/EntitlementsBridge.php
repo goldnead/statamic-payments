@@ -493,6 +493,14 @@ class EntitlementsBridge
         // Nur was diese Zahlung (oder ihr Abo) vergeben hat. Siehe ownedBy().
         $refs = $this->refsForPayment($payment);
 
+        // Der erste Fehler, nach dem Loggen weitergeworfen, aber erst nach
+        // allen Zugaengen: einer, der nicht ging, haelt die anderen nicht auf.
+        // Geschluckt hiesse es, `Refunds::record()` und `Chargebacks::record()`
+        // nehmen nie zurueck, und keine weitere Zustellung entzoege den
+        // Zugang. Ein erneuter Lauf ist harmlos: `revoke()` in entitlements
+        // nimmt nur, was noch nicht entzogen ist.
+        $erster = null;
+
         foreach ($handles as $handle) {
             // Ein Buendel gibt mehrere Zugaenge her, und eine Erstattung nimmt
             // alle zurueck. Einen davon stehen zu lassen waere die Haelfte
@@ -519,8 +527,14 @@ class EntitlementsBridge
                         'grants' => $slug,
                         'exception' => $e->getMessage(),
                     ]);
+
+                    $erster ??= $e;
                 }
             }
+        }
+
+        if ($erster !== null) {
+            throw $erster;
         }
     }
 

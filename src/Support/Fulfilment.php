@@ -137,7 +137,38 @@ class Fulfilment
             return $payment;
         }
 
-        return $this->fulfilOnce($payment, $remote);
+        $payment = $this->fulfilOnce($payment, $remote);
+
+        // Nach der Erfuellung, mit Absicht: eine erstattete Mollie-Zahlung
+        // steht weiter auf `paid`. Kommt die erste erfolgreiche Zustellung
+        // erst nach einer vollen Erstattung, wird so erst gewaehrt und dann
+        // entzogen. Andersherum liefe `WithdrawOnRefund` ins Leere und der
+        // Zugang bliebe offen.
+        $this->noteRefunds($payment, $remote);
+
+        return $payment->fresh() ?? $payment;
+    }
+
+    /**
+     * Erstattungen, wenn der Anbieter welche an der Zahlung fuehrt.
+     *
+     * Mollie meldet sie nicht als eigenes Ereignis, sondern ruft den Webhook
+     * der Zahlung auf; die Liste kommt deshalb mit {@see RemotePayment}.
+     * Stripe hat eigene Ereignisse und liefert hier nichts. Jede Erstattung
+     * unter ihrer eigenen Kennung: {@see Refunds::record()} bucht eine
+     * bekannte kein zweites Mal.
+     */
+    protected function noteRefunds(Payment $payment, RemotePayment $remote): void
+    {
+        if ($remote->refunds === []) {
+            return;
+        }
+
+        $refunds = app(Refunds::class);
+
+        foreach ($remote->refunds as $refund) {
+            $refunds->record($payment, $refund['amount'], $refund['id']);
+        }
     }
 
     /**

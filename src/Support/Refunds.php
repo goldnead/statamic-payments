@@ -54,11 +54,22 @@ class Refunds
         // Eine Zeilensperre reicht dafuer nicht: `lockForUpdate()` erzeugt auf
         // SQLite gar keine Sperrklausel. Ein Unique-Index ist kein Hinweis,
         // sondern eine Bedingung, und die setzt jede Datenbank gleich durch.
-        if ($reference !== null && ! $this->claim($payment, $amountCent, $reference)) {
+        //
+        // Anspruch und Buchung in EINER Transaktion: stirbt die Buchung, faellt
+        // der Anspruch mit, und die erneute Zustellung bucht. Getrennt stand
+        // nach einem Absturz dazwischen der Anspruch fest, die Buchung fehlte,
+        // und jede weitere Meldung derselben Erstattung prallte am Anspruch ab.
+        $betrag = DB::transaction(function () use ($payment, $amountCent, $reference): ?int {
+            if ($reference !== null && ! $this->claim($payment, $amountCent, $reference)) {
+                return null;
+            }
+
+            return $this->book($payment, $amountCent);
+        });
+
+        if ($betrag === null) {
             return false;
         }
-
-        $betrag = $this->book($payment, $amountCent);
 
         if ($betrag <= 0) {
             // Der Anspruch bleibt stehen. Er sagt wahrheitsgemaess, dass diese
@@ -95,12 +106,17 @@ class Refunds
         }
 
         try {
-            DB::table('payment_refunds')->insert([
-                'payment_id' => $payment->getKey(),
-                'reference' => mb_substr($reference, 0, 191),
-                'amount_cent' => $amountCent,
-                'created_at' => Carbon::now(),
-            ]);
+            // Eigener Savepoint: der Aufrufer haelt eine Transaktion offen, und
+            // auf Postgres macht eine verletzte Unique-Bedingung sonst die ganze
+            // Transaktion unbrauchbar. So wird nur dieser Versuch zurueckgerollt.
+            DB::transaction(function () use ($payment, $amountCent, $reference): void {
+                DB::table('payment_refunds')->insert([
+                    'payment_id' => $payment->getKey(),
+                    'reference' => mb_substr($reference, 0, 191),
+                    'amount_cent' => $amountCent,
+                    'created_at' => Carbon::now(),
+                ]);
+            });
 
             return true;
         } catch (UniqueConstraintViolationException) {

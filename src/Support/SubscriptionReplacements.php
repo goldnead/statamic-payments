@@ -79,7 +79,52 @@ class SubscriptionReplacements
      */
     public function creditDays(Payment $payment): int
     {
-        return $this->credit($payment)[1];
+        return $this->creditFor($payment)['days'];
+    }
+
+    /**
+     * Die Gutschrift dieser Zahlung, beim ersten Mal berechnet und an der
+     * Zahlung festgehalten (`meta.replacement_credit`).
+     *
+     * Ein zweiter Lauf (Nachzug nach einem Fehler mitten in `apply()`) darf sie
+     * nicht neu rechnen: dann sind die schon beendeten Abos aus `replacedBy()`
+     * verschwunden, und heraus kaeme nur der Rest der uebrigen, obwohl das
+     * neue Abo laengst um die volle Gutschrift verschoben angelegt wurde.
+     *
+     * @return array{cent: int, days: int, from: list<int>}
+     */
+    protected function creditFor(Payment $payment): array
+    {
+        $zeile = $payment->exists ? (Payment::query()->whereKey($payment->getKey())->first() ?? $payment) : $payment;
+        $gespeichert = data_get($zeile->meta, 'replacement_credit');
+
+        if (is_array($gespeichert)) {
+            return [
+                'cent' => (int) ($gespeichert['cent'] ?? 0),
+                'days' => (int) ($gespeichert['days'] ?? 0),
+                'from' => array_values(array_map('intval', (array) ($gespeichert['from'] ?? []))),
+            ];
+        }
+
+        [$cent, $days] = $this->credit($payment);
+        $wert = [
+            'cent' => $cent,
+            'days' => $days,
+            'from' => $this->replacedBy($payment)->map(fn (Subscription $s): int => (int) $s->getKey())->values()->all(),
+        ];
+
+        // Nur wo es etwas zu ersetzen gibt: jede andere Zahlung bleibt, wie sie war.
+        if ($wert['from'] !== [] && $payment->exists) {
+            $meta = array_merge($zeile->meta ?? [], ['replacement_credit' => $wert]);
+            $zeile->forceFill(['meta' => $meta])->saveQuietly();
+
+            // Auch das Objekt des Aufrufers, damit ein spaeteres Speichern
+            // daran den festgehaltenen Wert nicht mit altem Stand ueberschreibt.
+            $payment->forceFill(['meta' => $meta]);
+            $payment->syncOriginalAttribute('meta');
+        }
+
+        return $wert;
     }
 
     /**
@@ -95,7 +140,9 @@ class SubscriptionReplacements
             return 0;
         }
 
-        [$creditCent, $creditDays] = $replacement !== null ? $this->credit($payment) : [0, 0];
+        $festgehalten = $replacement !== null ? $this->creditFor($payment) : ['cent' => 0, 'days' => 0, 'from' => []];
+        $creditCent = $festgehalten['cent'];
+        $creditDays = $festgehalten['days'];
         $ended = 0;
 
         foreach ($replaced as $subscription) {
@@ -133,7 +180,10 @@ class SubscriptionReplacements
         if ($replacement !== null && $creditDays > 0) {
             $replacement = $replacement->fresh() ?? $replacement;
             $replacement->forceFill(['meta' => array_merge($replacement->meta ?? [], [
-                'credit' => ['cent' => $creditCent, 'days' => $creditDays, 'from' => $replaced->map(fn (Subscription $s) => $s->getKey())->values()->all()],
+                'credit' => ['cent' => $creditCent, 'days' => $creditDays, 'from' => array_values(array_unique(array_merge(
+                    $festgehalten['from'],
+                    $replaced->map(fn (Subscription $s): int => (int) $s->getKey())->values()->all(),
+                )))],
             ])])->save();
         }
 

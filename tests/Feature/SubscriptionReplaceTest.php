@@ -149,6 +149,68 @@ class SubscriptionReplaceTest extends TestCase
         $this->assertSame([], $this->gateway->cancelled);
     }
 
+    /**
+     * Teilerfolg, dann Nachzug: die Gutschrift bleibt die vom ersten Lauf.
+     *
+     * Zwei alte Abos, A wird beendet, beim Beenden von B stirbt der Lauf. Der
+     * Nachzug (`payments:agreement-catch-up`) sieht nur noch B als laufend.
+     * Rechnete er die Gutschrift neu, kaeme nur Bs Rest heraus, und Meta
+     * `credit` und `SubscriptionReplaced` fuer B truegen die halbe Summe, obwohl
+     * das neue Abo laengst mit der vollen verschoben angelegt wurde.
+     */
+    #[Test]
+    public function a_catch_up_after_a_partial_replacement_keeps_the_credit_of_the_first_run(): void
+    {
+        $a = $this->altesAbo();
+
+        $this->gateway->subscriptions['sub_b'] = ['customer' => 'cst_b', 'status' => 'active'];
+        $b = Subscription::create([
+            'provider' => 'fake', 'provider_id' => 'sub_b', 'customer_reference' => 'cst_b',
+            'product' => 'monatsabo', 'amount_cent' => 1900, 'currency' => 'EUR',
+            'interval' => '1 month', 'times_charged' => 1, 'status' => Subscription::STATUS_ACTIVE,
+            'next_payment_at' => Carbon::parse('2026-10-05 00:00'),
+            'email' => 'k@example.com',
+        ]);
+        Payment::create([
+            'provider' => 'fake', 'provider_id' => 'tr_b', 'product' => 'monatsabo',
+            'amount_cent' => 1900, 'currency' => 'EUR', 'status' => Payment::STATUS_PAID,
+            'paid_at' => Carbon::parse('2026-09-05 00:00'), 'subscription_id' => $b->getKey(),
+            'email' => 'k@example.com',
+        ]);
+
+        // Der Lauf stirbt, sobald B als ersetzt markiert werden soll.
+        $stirb = true;
+        Subscription::saving(function (Subscription $s) use (&$stirb, $b): void {
+            if ($stirb && $s->getKey() === $b->getKey() && isset($s->meta['replaced_by_payment'])) {
+                throw new \RuntimeException('Datenbank weg beim zweiten Abo');
+            }
+        });
+
+        $kauf = $this->kaufe('jahresabo');
+
+        $this->assertSame(Subscription::STATUS_CANCELLED, $a->fresh()->status);
+        $this->assertSame(Subscription::STATUS_ACTIVE, $b->fresh()->status);
+        $this->assertArrayHasKey('agreement_pending', $kauf->meta);
+
+        // 734 + 734 Cent Rest, 28 Tage. Damit wurde das neue Abo angelegt.
+        $this->assertSame('2027-10-21', $this->gateway->lastSubscriptionPayload['startDate']);
+
+        $stirb = false;
+        Event::fake([SubscriptionReplaced::class]);
+
+        $this->artisan('payments:agreement-catch-up')->assertSuccessful();
+
+        $this->assertSame(Subscription::STATUS_CANCELLED, $b->fresh()->status);
+        $this->assertArrayNotHasKey('agreement_pending', $kauf->fresh()->meta ?? []);
+
+        $neu = Subscription::query()->where('product', 'jahresabo')->sole();
+        $this->assertSame(['cent' => 1468, 'days' => 28, 'from' => [$a->getKey(), $b->getKey()]], $neu->meta['credit']);
+
+        Event::assertDispatched(SubscriptionReplaced::class, fn ($e) => $e->replaced->is($b)
+            && $e->creditCent === 1468
+            && $e->creditDays === 28);
+    }
+
     #[Test]
     public function a_product_that_replaces_nothing_ends_nothing(): void
     {

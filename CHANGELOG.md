@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Subscription replacement: the credit of a purchase that ends an older agreement is now kept on the payment at the first run, in `meta.replacement_credit` (`cent`, `days`, `from`), and only where there is something to replace. A catch-up after a partial failure (`payments:agreement-catch-up`) reuses that value instead of recalculating it, so the new agreement's first charge and the `SubscriptionReplaced` credit stay the ones of the first run. Payments without a replacement are unchanged. No migration, no new config key.
+
 ### Fixed
 
 - A rejected API key (401 or 403) is no longer read as an unknown payment. `MollieGateway::fetch()` and every Stripe call now throw `ProviderUnavailable` and log an error naming the key setting; the webhook answers 503 and the provider keeps redelivering until the key is fixed. Before, the webhook answered 200 and, after a key rotation, nobody was fulfilled, with a warning as the only trace. For Stripe calls outside the webhook a rejected key now counts as transient in `Transport::isTransient()` (the row stays claimed and the next run asks again). No migration, no new config key.

@@ -6,6 +6,7 @@ use Goldnead\StatamicPayments\Events\PaymentRefunded;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Support\Refunds;
 use Goldnead\StatamicPayments\Tests\TestCase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\Test;
 
@@ -139,6 +140,46 @@ class RefundsTest extends TestCase
         // ganze Liste der Belastung mitbringt, ein zweites Mal.
         $this->assertFalse($dienst->record($veraltet, 5000, 're_1'));
         $this->assertSame(9000, $zahlung->fresh()->refunded_cent);
+    }
+
+    /**
+     * Anspruch und Buchung gehen gemeinsam durch oder gar nicht.
+     *
+     * Frueher lief der Anspruch (die Zeile in `payment_refunds`) in einer
+     * eigenen Anweisung vor der Buchung. Starb der Prozess oder warf die
+     * Datenbank dazwischen, stand der Anspruch fest und die Buchung fehlte:
+     * die erneute Zustellung fand die Kennung belegt, gab `false` zurueck, und
+     * die Erstattung tauchte nirgends auf.
+     */
+    #[Test]
+    public function a_failed_booking_gives_the_claim_back_so_the_redelivery_books_it(): void
+    {
+        Event::fake([PaymentRefunded::class]);
+
+        $zahlung = $this->zahlung();
+
+        $stirbt = new class extends Refunds
+        {
+            protected function book(Payment $payment, int $amountCent): int
+            {
+                throw new \RuntimeException('Datenbank weg zwischen Anspruch und Buchung');
+            }
+        };
+
+        try {
+            $stirbt->record($zahlung, 3000, 're_1');
+            $this->fail('Die Buchung haette werfen muessen.');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('Datenbank weg zwischen Anspruch und Buchung', $e->getMessage());
+        }
+
+        $this->assertSame(0, DB::table('payment_refunds')->count());
+        $this->assertSame(0, $zahlung->fresh()->refunded_cent);
+
+        // Die Zustellung kommt wieder und wird diesmal gebucht.
+        $this->assertTrue(app(Refunds::class)->record($zahlung->fresh(), 3000, 're_1'));
+        $this->assertSame(3000, $zahlung->fresh()->refunded_cent);
+        Event::assertDispatchedTimes(PaymentRefunded::class, 1);
     }
 
     #[Test]

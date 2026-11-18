@@ -12,6 +12,7 @@ use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\CheckoutSession;
 use Goldnead\StatamicPayments\Support\Money;
 use Goldnead\StatamicPayments\Support\ProviderUnavailable;
+use Goldnead\StatamicPayments\Support\RejectedKey;
 use Goldnead\StatamicPayments\Support\RemotePayment;
 use Goldnead\StatamicPayments\Support\RemoteSubscription;
 use Illuminate\Support\Carbon;
@@ -390,6 +391,21 @@ class MollieGateway implements ListsSubscriptions, MandateGateway, ReadsCardExpi
             // (https://docs.mollie.com/reference/webhooks) — is told to stop.
             if (self::couldNotBeAsked($e)) {
                 throw new ProviderUnavailable("statamic-payments: Mollie could not be asked for [{$providerId}]: {$e->getMessage()}", 0, $e);
+            }
+
+            // Ein abgelehnter Schluessel (401, 403) sagt nichts ueber die
+            // Zahlung, sondern ueber diese Seite. Als „unbekannt" gelesen
+            // antwortete der Webhook 200, Mollie hoerte auf zu wiederholen,
+            // und nach einer Schluesselrotation wuerde niemand mehr erfuellt.
+            // Also „spaeter nochmal", laut: bis der Schluessel stimmt, hat
+            // Mollie noch 26 Stunden Wiederholungen uebrig.
+            if ($e instanceof ApiException && in_array((int) $e->getCode(), [401, 403], true)) {
+                RejectedKey::report('Mollie', 'MOLLIE_KEY', [
+                    'provider_id' => $providerId,
+                    'status' => (int) $e->getCode(),
+                ]);
+
+                throw new ProviderUnavailable("statamic-payments: Mollie rejected the API key for [{$providerId}] ({$e->getCode()}): {$e->getMessage()}", 0, $e);
             }
 
             throw $e;

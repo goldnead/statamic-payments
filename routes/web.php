@@ -15,12 +15,9 @@ use Goldnead\StatamicPayments\Http\Controllers\ThanksController;
 use Goldnead\StatamicPayments\Http\Controllers\WebhookController;
 use Goldnead\StatamicPayments\Http\Middleware\SetBrandFromPortalSession;
 use Goldnead\StatamicPayments\Portal\TrackingParameters;
-use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
-use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Routing\Middleware\ValidateSignature;
-use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -242,13 +239,8 @@ Route::prefix(config('statamic-payments.portal.prefix', '!/statamic-payments/kon
 |
 */
 
-foreach (['withdrawal', 'cancellation'] as $flow) {
-    RateLimiter::for('statamic-payments.'.$flow, function (Request $request) use ($flow) {
-        [$max, $decay] = array_map('intval', explode(',', (string) config('statamic-payments.'.$flow.'.throttle', '6,10')) + [1 => 1]);
-
-        return Limit::perMinutes(max(1, $decay), max(1, $max))->by($flow.'|'.(string) $request->ip());
-    });
-}
+// The limiters themselves are defined in the ServiceProvider's boot(): this
+// file is skipped when the host runs `route:cache`.
 
 Route::prefix(config('statamic-payments.withdrawal.prefix', '!/statamic-payments/widerruf'))
     ->middleware(['web'])

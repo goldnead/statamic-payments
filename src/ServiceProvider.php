@@ -28,7 +28,10 @@ use Goldnead\StatamicPayments\Integrations\WebhookManager\WebhookManagerBridge;
 use Goldnead\StatamicPayments\Support\Gateways;
 use Goldnead\StatamicPayments\Support\Invoices;
 use Goldnead\StatamicPayments\Support\Settings;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 use Mollie\Api\MollieApiClient;
 use Statamic\Actions\Action;
 use Statamic\Facades\CP\Nav;
@@ -135,6 +138,16 @@ class ServiceProvider extends AddonServiceProvider
         // before a sibling's bootAddon(). Queued here, while the app is still
         // booting, the callback runs after every provider has had its turn.
         $this->registerWebhookManagerBridge();
+
+        // Here and not in routes/web.php: that file is not loaded when the host
+        // caches its routes, and `throttle:<name>` then throws for a missing limiter.
+        foreach (['withdrawal', 'cancellation'] as $flow) {
+            RateLimiter::for('statamic-payments.'.$flow, function (Request $request) use ($flow) {
+                [$max, $decay] = array_map('intval', explode(',', (string) config('statamic-payments.'.$flow.'.throttle', '6,10')) + [1 => 1]);
+
+                return Limit::perMinutes(max(1, $decay), max(1, $max))->by($flow.'|'.(string) $request->ip());
+            });
+        }
     }
 
     /**

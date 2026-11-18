@@ -7,6 +7,8 @@ use Goldnead\StatamicPayments\Events\PaymentPaid;
 use Goldnead\StatamicPayments\Models\Payment;
 use Goldnead\StatamicPayments\Support\Checkout;
 use Goldnead\StatamicPayments\Support\Fulfilment;
+use Goldnead\StatamicPayments\Support\InvoiceDocument;
+use Goldnead\StatamicPayments\Support\Invoices;
 use Goldnead\StatamicPayments\Tests\TestCase;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\Test;
@@ -26,6 +28,31 @@ class FulfilmentOnceTest extends TestCase
         $this->gateway->markPaid($payment->provider_id);
 
         return $payment;
+    }
+
+    /**
+     * Was ein Rechnungs-Addon sieht, wenn es nach der Zahlung fragt.
+     *
+     * Das Addon schreibt selbst keine Rechnung, es reicht `Payment` an die
+     * registrierte Quelle weiter (`Invoices::forPayment()`); die Rechnung
+     * nimmt den Namen von dort. Der Test haelt darum fest, welchen Namen die
+     * Quelle zu sehen bekommt.
+     */
+    protected function nameSeenByTheInvoiceSource(Payment $payment): ?string
+    {
+        $seen = ['name' => 'nie gefragt'];
+
+        Invoices::forgetSources();
+        Invoices::extend(function (Payment $asked) use (&$seen): ?InvoiceDocument {
+            $seen['name'] = $asked->name;
+
+            return null;
+        });
+
+        Invoices::forPayment($payment->fresh());
+        Invoices::forgetSources();
+
+        return $seen['name'];
     }
 
     #[Test]
@@ -96,6 +123,7 @@ class FulfilmentOnceTest extends TestCase
 
         $this->assertSame('Erika Mustermann', $payment->fresh()->name);
         Event::assertDispatchedTimes(PaymentPaid::class, 1);
+        $this->assertSame('Erika Mustermann', $this->nameSeenByTheInvoiceSource($payment));
     }
 
     #[Test]
@@ -116,6 +144,7 @@ class FulfilmentOnceTest extends TestCase
 
         $this->assertSame('Erika Mustermann', $payment->fresh()->name);
         Event::assertNotDispatched(PaymentPaid::class);
+        $this->assertSame('Erika Mustermann', $this->nameSeenByTheInvoiceSource($payment));
     }
 
     #[Test]

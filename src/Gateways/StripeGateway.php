@@ -12,6 +12,7 @@ use Goldnead\StatamicPayments\Models\Subscription;
 use Goldnead\StatamicPayments\Support\CheckoutSession;
 use Goldnead\StatamicPayments\Support\Money;
 use Goldnead\StatamicPayments\Support\ProviderUnavailable;
+use Goldnead\StatamicPayments\Support\RejectedKey;
 use Goldnead\StatamicPayments\Support\RemotePayment;
 use Goldnead\StatamicPayments\Support\RemoteSubscription;
 use Illuminate\Http\Client\ConnectionException;
@@ -1151,6 +1152,22 @@ class StripeGateway implements ListsSubscriptions, PausesSubscriptions, ReadsCar
             // treated it as one would burn its only delivery during an outage.
             if ($status >= 500 || $status === 429) {
                 throw new ProviderUnavailable("statamic-payments: Stripe could not answer [{$call}] ({$status}): {$message}");
+            }
+
+            // Ein abgelehnter Schluessel (401, 403) ist ebenfalls keine Antwort
+            // ueber die Sache, sondern ueber diese Seite. Als Ablehnung gelesen
+            // macht `Fulfilment::fetch()` daraus „unbekannt", der Webhook sagt
+            // 200, und nach einer Schluesselrotation wird niemand mehr
+            // erfuellt. Fuer `Transport::isTransient()` heisst das: die Zeile
+            // bleibt beansprucht und der naechste Durchlauf fragt nach, was
+            // laut dort nur Warten kostet.
+            if ($status === 401 || $status === 403) {
+                RejectedKey::report('Stripe', 'STRIPE_KEY', [
+                    'call' => $call,
+                    'status' => $status,
+                ]);
+
+                throw new ProviderUnavailable("statamic-payments: Stripe rejected the API key for [{$call}] ({$status}): {$message}");
             }
 
             throw new RuntimeException("statamic-payments: Stripe refused [{$call}] with {$status}: {$message}");
